@@ -1,0 +1,23 @@
+ 1. Which specific EnvironmentObject is
+  missing? The crash could be
+  ProfileViewModel OR another
+  @EnvironmentObject dependency
+  
+  I was opening ProfileViews when it crashed
+  
+  2. Is Container.shared causing side
+  effects during preview generation? (You
+   confirmed we should create separate
+  MockContainer)
+  
+  not sure, double check
+  
+  3. Are there hidden @EnvironmentObject
+  dependencies in sub-components?
+  
+  not sure
+  
+  4. Is the issue with SwiftUI's Group{}
+  preview structure itself?
+  
+  not sure

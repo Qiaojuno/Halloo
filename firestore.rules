@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function isValidUser() {
+      return isAuthenticated() && 
+             request.auth.uid != null && 
+             request.auth.uid.size() > 0;
+    }
+    
+    // Users collection - users can only access their own document
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && isOwner(userId);
+      allow create: if isAuthenticated() && isOwner(userId) &&
+                    resource == null; // Only allow creation if document doesn't exist
+    }
+    
+    // Profiles collection - users can only access profiles they created
+    match /profiles/{profileId} {
+      allow read, write: if isAuthenticated() && 
+                        isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && 
+                   isOwner(request.resource.data.userId) &&
+                   request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && 
+                   isOwner(resource.data.userId);
+    }
+    
+    // Tasks collection - users can only access tasks they created
+    match /tasks/{taskId} {
+      allow read, write: if isAuthenticated() && 
+                        isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && 
+                   isOwner(request.resource.data.userId) &&
+                   request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && 
+                   isOwner(resource.data.userId);
+    }
+    
+    // Responses collection - users can only access responses they own
+    match /responses/{responseId} {
+      allow read, write: if isAuthenticated() && 
+                        isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && 
+                   isOwner(request.resource.data.userId) &&
+                   request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && 
+                   isOwner(resource.data.userId);
+    }
+    
+    // Analytics collection (if needed for cached analytics data)
+    match /analytics/{userId} {
+      allow read, write: if isAuthenticated() && isOwner(userId);
+    }
+    
+    // Admin collection (for future admin features)
+    match /admin/{document=**} {
+      allow read, write: if false; // No access for now
+    }
+    
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

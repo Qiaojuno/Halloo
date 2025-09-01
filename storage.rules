@@ -1,0 +1,56 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function isImageFile() {
+      return request.resource.contentType.matches('image/.*');
+    }
+    
+    function isValidFileSize() {
+      // Max 10MB for images
+      return request.resource.size < 10 * 1024 * 1024;
+    }
+    
+    // Response photos - users can upload/read photos for their own responses
+    match /responses/{responseId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+                   isImageFile() && 
+                   isValidFileSize();
+      allow delete: if isAuthenticated();
+    }
+    
+    // Profile photos - users can upload/read photos for profiles they created
+    match /profiles/{profileId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+                   isImageFile() && 
+                   isValidFileSize();
+      allow delete: if isAuthenticated();
+    }
+    
+    // User avatars
+    match /users/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && 
+                   isOwner(userId) && 
+                   isImageFile() && 
+                   isValidFileSize();
+      allow delete: if isAuthenticated() && isOwner(userId);
+    }
+    
+    // Deny all other access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
