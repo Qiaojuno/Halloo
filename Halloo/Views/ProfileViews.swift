@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import Combine
 
 // MARK: - Profile Onboarding Flow (6-Step Process)
@@ -23,23 +24,7 @@ struct ProfileOnboardingFlow: View {
         NavigationView {
             GeometryReader { geometry in
                 VStack(spacing: 0) {
-                    // Progress Header with Navigation
-                    ProfileOnboardingHeader(
-                        step: profileViewModel.profileOnboardingStep,
-                        onBack: {
-                            if profileViewModel.profileOnboardingStep.canGoBack {
-                                profileViewModel.previousOnboardingStep()
-                            } else {
-                                // Cancel entire flow from first step
-                                profileViewModel.cancelProfileOnboarding()
-                            }
-                        },
-                        onClose: {
-                            profileViewModel.cancelProfileOnboarding()
-                        }
-                    )
-                    
-                    // Step Content
+                    // Step Content - each step handles its own navigation
                     stepContentView(geometry: geometry)
                 }
                 .background(Color(hex: "f9f9f9"))
@@ -50,6 +35,12 @@ struct ProfileOnboardingFlow: View {
             // Reset onboarding state if view disappears unexpectedly
             if profileViewModel.showingProfileOnboarding {
                 profileViewModel.cancelProfileOnboarding()
+            }
+        }
+        .onChange(of: profileViewModel.shouldDismissOnboarding) { _, shouldDismiss in
+            if shouldDismiss {
+                profileViewModel.shouldDismissOnboarding = false // Reset flag
+                presentationMode.wrappedValue.dismiss()
             }
         }
     }
@@ -85,40 +76,9 @@ struct ProfileOnboardingHeader: View {
     let onClose: () -> Void
     
     var body: some View {
-        HStack {
-            // Back Navigation Button
-            if step.canGoBack {
-                Button(action: onBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(.black)
-                }
-            } else {
-                // Close button for first step
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.black)
-                }
-            }
-            
-            Spacer()
-            
-            // Progress Indicator Dots
-            HStack(spacing: 8) {
-                ForEach(0..<6, id: \.self) { index in
-                    Circle()
-                        .fill(index < Int(step.progress * 6) ? Color.blue : Color.gray.opacity(0.3))
-                        .frame(width: 8, height: 8)
-                }
-            }
-            
-            Spacer()
-            
-            // Next Button (placeholder - will be handled by individual step views)
-            Color.clear
-                .frame(width: 44, height: 44)
-        }
+        // Header spacing only - navigation handled by individual steps
+        Color.clear
+            .frame(height: 44)
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .background(Color(hex: "f9f9f9"))
@@ -135,33 +95,92 @@ struct ProfileOnboardingHeader: View {
 /// - Optional photo upload (placeholder for future implementation)
 struct Step1_NewProfileForm: View {
     @EnvironmentObject var profileViewModel: ProfileViewModel
+    @State private var showingImagePicker = false
+    @State private var showingImageOptions = false
+    @State private var imageSourceType: UIImagePickerController.SourceType = .photoLibrary
+    @State private var isKeyboardVisible = false
+    @State private var showingValidationAlert = false
+    @State private var showingCameraPermissionAlert = false
     
     var body: some View {
-        GeometryReader { geometry in
-            VStack(spacing: 0) {
-                VStack(spacing: 24) {
-                    // Step Title and Subtitle
-                    VStack(spacing: 8) {
-                        Text(ProfileOnboardingStep.newProfileForm.displayName)
-                            .font(.system(size: 28, weight: .bold))
-                            .tracking(-1)
+        VStack(spacing: 0) {
+            // Top Navigation Bar
+            HStack {
+                Button(action: {
+                    print("🔙 BACK: Back button tapped in New Profile step")
+                    profileViewModel.previousOnboardingStep()
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Back")
+                            .font(.system(size: 16, weight: .light))
+                    }
+                }
+                .foregroundColor(.gray)
+                
+                Spacer()
+                
+                // Remi Logo (centered between functional buttons)
+                Text("Remi")
+                    .font(AppFonts.poppinsMedium(size: 18))
+                    .tracking(-1.9)
+                    .foregroundColor(.black)
+                
+                Spacer()
+                
+                Button(action: {
+                    profileViewModel.nextOnboardingStep()
+                }) {
+                    HStack(spacing: 8) {
+                        Text("Next")
+                            .font(.system(size: 16, weight: .light))
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                }
+                .foregroundColor(.gray)
+                .disabled(!profileViewModel.isValidForm)
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 8)
+            
+            ScrollView {
+                VStack(spacing: 67) {
+                    // Main Title and Subtitle
+                    VStack(spacing: 4) {
+                        Text("New Profile")
+                            .font(.system(size: 34, weight: .medium))
+                            .kerning(-1.0)
                             .foregroundColor(.black)
                         
-                        Text(ProfileOnboardingStep.newProfileForm.subtitle)
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundColor(.secondary)
-                            .tracking(-0.5)
+                        Text("Who are you setting this up for?")
+                            .font(.system(size: 14, weight: .light))
+                            .kerning(-0.3)
+                            .foregroundColor(.gray)
                     }
-                    .padding(.top, 30)
+                    .padding(.top, 67)
                     
-                    // Profile Form Fields
-                    VStack(spacing: 20) {
-                        // Name Input with Photo Upload Button
-                        HStack(spacing: 16) {
-                            VStack(spacing: 8) {
-                                TextField("Name", text: $profileViewModel.profileName)
-                                    .font(.system(size: 16, weight: .regular))
-                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    // Form Fields in White Card
+                    VStack(spacing: 0) {
+                        // Name Field with add photo button wrapped in HStack
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Name")
+                                    .font(.system(size: 16, weight: .light))
+                                    .foregroundColor(.black)
+                                
+                                ZStack(alignment: .leading) {
+                                    if profileViewModel.profileName.isEmpty {
+                                        Text("eg. Debra Brown")
+                                            .font(.system(size: 16, weight: .light))
+                                            .foregroundColor(.gray.opacity(0.8))
+                                    }
+                                    TextField("", text: $profileViewModel.profileName)
+                                        .font(.system(size: 16, weight: .light))
+                                        .foregroundColor(.black)
+                                        .accentColor(.blue)
+                                }
                                 
                                 if let nameError = profileViewModel.nameError {
                                     Text(nameError)
@@ -170,37 +189,69 @@ struct Step1_NewProfileForm: View {
                                 }
                             }
                             
-                            // Photo Upload Button (Circular with + icon)
+                            Spacer()
+                            
                             Button(action: {
-                                // TODO: Implement photo upload functionality
-                                profileViewModel.hasSelectedPhoto.toggle()
+                                showingImageOptions = true
                             }) {
                                 ZStack {
                                     Circle()
-                                        .fill(Color.gray.opacity(0.2))
-                                        .frame(width: 60, height: 60)
+                                        .fill(
+                                            LinearGradient(
+                                                gradient: Gradient(colors: [
+                                                    Color(hex: "C7E9FF"), // Left side
+                                                    Color(hex: "28ADFF")  // Right side
+                                                ]),
+                                                startPoint: .leading,
+                                                endPoint: .trailing
+                                            )
+                                        )
+                                        .frame(width: 51, height: 51)
                                     
-                                    if profileViewModel.hasSelectedPhoto {
-                                        Image(systemName: "person.crop.circle.fill")
-                                            .font(.system(size: 40))
-                                            .foregroundColor(.blue)
+                                    if let photoData = profileViewModel.selectedPhotoData,
+                                       let uiImage = UIImage(data: photoData) {
+                                        // Display selected photo
+                                        Image(uiImage: uiImage)
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: 51, height: 51)
+                                            .clipShape(Circle())
                                     } else {
+                                        // Display plus icon
                                         Image(systemName: "plus")
-                                            .font(.system(size: 24, weight: .medium))
+                                            .font(.system(size: 16, weight: .medium))
                                             .foregroundColor(.black)
                                     }
                                 }
                             }
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .background(Color.white)
                         
-                        // Relationship Input
-                        VStack(spacing: 8) {
-                            Picker("Relationship", selection: $profileViewModel.relationship) {
-                                ForEach(profileViewModel.relationshipOptions, id: \.self) { option in
-                                    Text(option).tag(option)
+                        // Divider Line
+                        Divider()
+                            .background(Color.gray.opacity(0.2))
+                            .padding(.leading, 20)
+                            .padding(.trailing, 85)
+                        
+                        // Relationship Field
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Relationship to You")
+                                .font(.system(size: 16, weight: .light))
+                                .foregroundColor(.black)
+                            
+                            ZStack(alignment: .leading) {
+                                if profileViewModel.relationship.isEmpty {
+                                    Text("eg. Dad")
+                                        .font(.system(size: 16, weight: .light))
+                                        .foregroundColor(.gray.opacity(0.8))
                                 }
+                                TextField("", text: $profileViewModel.relationship)
+                                    .font(.system(size: 16, weight: .light))
+                                    .foregroundColor(.black)
+                                    .accentColor(.blue)
                             }
-                            .pickerStyle(SegmentedPickerStyle())
                             
                             if let relationshipError = profileViewModel.relationshipError {
                                 Text(relationshipError)
@@ -208,13 +259,44 @@ struct Step1_NewProfileForm: View {
                                     .foregroundColor(.red)
                             }
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .background(Color.white)
                         
-                        // Phone Number Input
-                        VStack(spacing: 8) {
-                            TextField("Phone Number", text: $profileViewModel.phoneNumber)
-                                .font(.system(size: 16, weight: .regular))
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .keyboardType(.phonePad)
+                        // Divider Line
+                        Divider()
+                            .background(Color.gray.opacity(0.2))
+                            .padding(.leading, 20)
+                            .padding(.trailing, 20)
+                        
+                        // Phone Number Field
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Phone Number")
+                                .font(.system(size: 16, weight: .light))
+                                .foregroundColor(.black)
+                            
+                            ZStack(alignment: .leading) {
+                                if profileViewModel.phoneNumber == "+1 " {
+                                    Text("+1 123 456 7890")
+                                        .font(.system(size: 16, weight: .light))
+                                        .foregroundColor(.gray.opacity(0.8))
+                                }
+                                TextField("", text: $profileViewModel.phoneNumber)
+                                    .font(.system(size: 16, weight: .light))
+                                    .foregroundColor(.black)
+                                    .accentColor(.blue)
+                                    .keyboardType(.phonePad)
+                                    .onChange(of: profileViewModel.phoneNumber) { _, newValue in
+                                        // Ensure +1 prefix is always there
+                                        if !newValue.hasPrefix("+1 ") {
+                                            profileViewModel.phoneNumber = "+1 "
+                                        }
+                                        // Auto-dismiss keyboard when phone number is complete (14 characters: "+1 123 456 7890")
+                                        if newValue.count >= 14 {
+                                            hideKeyboard()
+                                        }
+                                    }
+                            }
                             
                             if let phoneError = profileViewModel.phoneError {
                                 Text(phoneError)
@@ -222,33 +304,199 @@ struct Step1_NewProfileForm: View {
                                     .foregroundColor(.red)
                             }
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                        .background(Color.white)
                     }
-                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.white)
+                    .cornerRadius(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+                    .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
                     
-                    Spacer()
-                    
-                    // Next Button
+                    Spacer(minLength: 100) // Space for bottom button
+                }
+                .padding(.horizontal, 32)
+            }
+            
+            // Bottom Action Button - Hidden when keyboard is visible
+            if !isKeyboardVisible {
+                VStack {
                     Button(action: {
-                        profileViewModel.nextOnboardingStep()
+                        if profileViewModel.isValidForm {
+                            profileViewModel.nextOnboardingStep()
+                        } else {
+                            showingValidationAlert = true
+                        }
                     }) {
                         Text("Next")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(profileViewModel.isValidForm ? Color.blue : Color.gray)
-                            .cornerRadius(12)
+                            .frame(maxWidth: .infinity, minHeight: 47)
+                            .background(profileViewModel.isValidForm ? Color(hex: "28ADFF") : Color(hex: "BFE6FF"))
+                            .cornerRadius(15)
                     }
-                    .disabled(!profileViewModel.isValidForm)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 30)
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 10) // Close to bottom of screen
                 }
-                .padding(.horizontal, 12)
-                .background(Color.white)
-                .cornerRadius(10)
-                .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
             }
-            .padding(.horizontal, geometry.size.width * 0.04)
+        }
+        .background(
+            // App background with gradient overlay
+            ZStack(alignment: .bottom) {
+                Color(hex: "f9f9f9")
+                
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.clear, // Top (fully transparent)
+                        Color(hex: "B3B3B3")     // Bottom
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 451)
+                .offset(y: 225) // Move half the height down so half is below screen
+            }
+            .ignoresSafeArea()
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            hideKeyboard()
+        }
+        .onAppear {
+            setupKeyboardObservers()
+        }
+        .onDisappear {
+            removeKeyboardObservers()
+            if profileViewModel.profileOnboardingStep == .profileComplete {
+                // Clear form errors when successfully advancing
+                profileViewModel.nameError = nil
+                profileViewModel.phoneError = nil
+                profileViewModel.relationshipError = nil
+            }
+        }
+        .actionSheet(isPresented: $showingImageOptions) {
+            ActionSheet(
+                title: Text("Select Photo"),
+                message: Text("Choose how you'd like to add a photo"),
+                buttons: cameraButtons()
+            )
+        }
+        .sheet(isPresented: $showingImagePicker) {
+            ImagePicker(
+                sourceType: imageSourceType,
+                onImagePicked: { imageData in
+                    profileViewModel.selectedPhotoData = imageData
+                    profileViewModel.hasSelectedPhoto = true
+                }
+            )
+        }
+        .alert("Missing Information", isPresented: $showingValidationAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            let missing = profileViewModel.missingRequirements
+            if missing.count == 1 {
+                Text("Please add: \(missing.first!)")
+            } else {
+                Text("Please complete: \(missing.joined(separator: ", "))")
+            }
+        }
+        .alert("Camera Access Required", isPresented: $showingCameraPermissionAlert) {
+            Button("Settings", role: .none) {
+                if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(settingsUrl)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Please enable camera access in Settings to take photos for profiles.")
+        }
+    }
+    
+    // MARK: - Keyboard Observer Methods
+    private func setupKeyboardObservers() {
+        NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillShowNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            withAnimation(.easeInOut(duration: 0.3)) {
+                isKeyboardVisible = true
+            }
+        }
+        
+        NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            withAnimation(.easeInOut(duration: 0.3)) {
+                isKeyboardVisible = false
+            }
+        }
+    }
+    
+    private func removeKeyboardObservers() {
+        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIResponder.keyboardWillHideNotification, object: nil)
+    }
+    
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+    
+    private func cameraButtons() -> [ActionSheet.Button] {
+        var buttons: [ActionSheet.Button] = []
+        
+        // Check if camera is available
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            buttons.append(.default(Text("Camera")) {
+                print("📷 Camera selected")
+                checkCameraPermission()
+            })
+        }
+        
+        // Photo Library is almost always available
+        buttons.append(.default(Text("Photo Library")) {
+            print("📸 Photo Library selected")
+            imageSourceType = .photoLibrary
+            showingImagePicker = true
+        })
+        
+        buttons.append(.cancel())
+        return buttons
+    }
+    
+    private func checkCameraPermission() {
+        let cameraAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        
+        switch cameraAuthorizationStatus {
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        print("📷 Camera permission granted")
+                        self.imageSourceType = .camera
+                        self.showingImagePicker = true
+                    } else {
+                        print("📷 Camera permission denied")
+                        self.showingCameraPermissionAlert = true
+                    }
+                }
+            }
+        case .authorized:
+            print("📷 Camera already authorized")
+            imageSourceType = .camera
+            showingImagePicker = true
+        case .restricted, .denied:
+            print("📷 Camera access restricted or denied")
+            showingCameraPermissionAlert = true
+        @unknown default:
+            print("📷 Unknown camera authorization status")
+            showingCameraPermissionAlert = true
         }
     }
 }
@@ -266,134 +514,185 @@ struct Step2_ProfileComplete: View {
     @EnvironmentObject var profileViewModel: ProfileViewModel
     
     var body: some View {
-        GeometryReader { geometry in
-            VStack(spacing: 0) {
-                VStack(spacing: 24) {
+        VStack(spacing: 0) {
+            // Top Navigation Bar (consistent with Step 1)
+            HStack {
+                Button(action: {
+                    profileViewModel.previousOnboardingStep()
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Back")
+                            .font(.system(size: 16, weight: .light))
+                    }
+                }
+                .foregroundColor(.gray)
+                
+                Spacer()
+                
+                // Remi Logo (centered between functional buttons)
+                Text("Remi")
+                    .font(AppFonts.poppinsMedium(size: 18))
+                    .tracking(-1.9)
+                    .foregroundColor(.black)
+                
+                Spacer()
+                
+                Button(action: {
+                    profileViewModel.nextOnboardingStep()
+                }) {
+                    HStack(spacing: 8) {
+                        Text("Next")
+                            .font(.system(size: 16, weight: .light))
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                }
+                .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 32)
+            .padding(.top, 8)
+            
+            ScrollView {
+                VStack(spacing: 67) {
                     // Step Title and Subtitle (with profile name)
-                    VStack(spacing: 8) {
-                        Text(ProfileOnboardingStep.profileComplete.displayName)
-                            .font(.system(size: 28, weight: .bold))
-                            .tracking(-1)
+                    VStack(spacing: 4) {
+                        Text("Profile Complete")
+                            .font(.system(size: 34, weight: .medium))
+                            .kerning(-1.0)
                             .foregroundColor(.black)
                         
-                        Text("Let's add your first habit for \(profileViewModel.profileName) now :)")
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundColor(.secondary)
-                            .tracking(-0.5)
+                        Text("Let's add your first habit for \(profileViewModel.profileName.isEmpty ? "Dad" : profileViewModel.profileName) now :)")
+                            .font(.system(size: 14, weight: .light))
+                            .kerning(-0.3)
+                            .foregroundColor(.gray)
                     }
-                    .padding(.top, 30)
+                    .padding(.top, 67)
                     
                     // Profile Summary Card
-                    VStack(spacing: 20) {
-                        // Member Indicator
+                    VStack(spacing: 0) {
+                        // Member Indicator Header
                         HStack {
-                            HStack(spacing: 8) {
-                                Text("Member #\(profileViewModel.memberNumber)")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.secondary)
-                                
-                                // Progress dots showing member position
-                                HStack(spacing: 4) {
-                                    ForEach(1...4, id: \.self) { index in
-                                        Circle()
-                                            .fill(index <= profileViewModel.memberNumber ? Color.blue : Color.gray.opacity(0.3))
-                                            .frame(width: 6, height: 6)
-                                    }
-                                }
-                            }
+                            Text("Member #\(profileViewModel.memberNumber)")
+                                .font(.system(size: 14, weight: .light))
+                                .foregroundColor(.gray)
+                            
                             Spacer()
-                        }
-                        .padding(.horizontal, 16)
-                        
-                        // Profile Photo (Large circular)
-                        ZStack {
-                            Circle()
-                                .fill(profileColorForMember(profileViewModel.memberNumber).opacity(0.6))
-                                .frame(width: 100, height: 100)
                             
-                            if profileViewModel.hasSelectedPhoto {
-                                // TODO: Display actual selected photo
-                                Image(systemName: "person.crop.circle.fill")
-                                    .font(.system(size: 80))
-                                    .foregroundColor(.white)
-                            } else {
-                                // Default emoji based on member number and relationship
-                                Text(defaultEmojiForProfile(
-                                    memberNumber: profileViewModel.memberNumber,
-                                    relationship: profileViewModel.relationship
-                                ))
-                                .font(.system(size: 50))
+                            // Single progress dot
+                            Circle()
+                                .fill(Color(hex: "B9E3FF"))
+                                .frame(width: 6, height: 6)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 16)
+                        .padding(.bottom, 20)
+                        
+                        // Profile Row with Photo and Info
+                        HStack(spacing: 16) {
+                            // Profile Photo (circular)
+                            ZStack {
+                                Circle()
+                                    .fill(profileColorForMember(profileViewModel.memberNumber).opacity(0.2))
+                                    .frame(width: 80, height: 80)
+                                
+                                if let photoData = profileViewModel.selectedPhotoData,
+                                   let uiImage = UIImage(data: photoData) {
+                                    // Display actual selected photo
+                                    Image(uiImage: uiImage)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(width: 80, height: 80)
+                                        .clipShape(Circle())
+                                } else if profileViewModel.hasSelectedPhoto {
+                                    // Fallback icon if photo data is missing
+                                    Image(systemName: "person.crop.circle.fill")
+                                        .font(.system(size: 60))
+                                        .foregroundColor(profileColorForMember(profileViewModel.memberNumber))
+                                }
+                                // Clean look: just background color when no photo selected
                             }
                             
-                            // Colored border
-                            Circle()
-                                .stroke(profileColorForMember(profileViewModel.memberNumber), lineWidth: 3)
-                                .frame(width: 100, height: 100)
-                        }
-                        
-                        // Profile Name
-                        Text(profileViewModel.profileName)
-                            .font(.system(size: 24, weight: .bold))
-                            .tracking(-1)
-                            .foregroundColor(.black)
-                        
-                        // Stats Row
-                        HStack(spacing: 30) {
-                            VStack(spacing: 4) {
+                            Spacer()
+                            
+                            // Name and Status (right-aligned)
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Text(profileViewModel.profileName.isEmpty ? "Debra Brown" : profileViewModel.profileName)
+                                    .font(.system(size: 24, weight: .medium))
+                                    .foregroundColor(.black)
+                                
                                 Text("Habits Tracked: 0")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(.black)
-                            }
-                            
-                            VStack(spacing: 4) {
-                                Text("Join Date")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                Text(formatJoinDate(Date()))
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(.black)
+                                    .font(.system(size: 16, weight: .light))
+                                    .foregroundColor(.gray)
                             }
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 16)
                         
-                        // Relationship Label
-                        Text(profileViewModel.relationship)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(20)
+                        // Bottom Info Row
+                        HStack {
+                            Text(formatJoinDate(Date()))
+                                .font(.system(size: 14, weight: .light))
+                                .foregroundColor(.gray)
+                            
+                            Spacer()
+                            
+                            Text(profileViewModel.relationship.isEmpty ? "Dad" : profileViewModel.relationship)
+                                .font(.system(size: 14, weight: .light))
+                                .foregroundColor(.gray)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 16)
                     }
-                    .padding(.vertical, 20)
+                    .frame(maxWidth: .infinity)
                     .background(Color.white)
-                    .cornerRadius(12)
-                    .shadow(color: Color.gray.opacity(0.1), radius: 2, x: 0, y: 1)
-                    .padding(.horizontal, 12)
+                    .cornerRadius(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+                    .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
                     
-                    Spacer()
-                    
-                    // Onboard Button
-                    Button(action: {
-                        profileViewModel.nextOnboardingStep()
-                    }) {
-                        Text("Onboard Your Member")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.blue)
-                            .cornerRadius(12)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 30)
+                    Spacer(minLength: 100) // Space for bottom button
                 }
-                .padding(.horizontal, 12)
-                .background(Color.white)
-                .cornerRadius(10)
-                .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
+                .padding(.horizontal, 32)
             }
-            .padding(.horizontal, geometry.size.width * 0.04)
+            
+            // Bottom Action Button
+            VStack {
+                Button(action: {
+                    profileViewModel.nextOnboardingStep()
+                }) {
+                    Text("Onboard Your Member")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, minHeight: 47)
+                        .background(Color(hex: "28ADFF"))
+                        .cornerRadius(15)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 10) // Close to bottom of screen
+            }
         }
+        .background(
+            // App background with gradient overlay (same as Step 1)
+            ZStack(alignment: .bottom) {
+                Color(hex: "f9f9f9")
+                
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.clear, // Top (fully transparent)
+                        Color(hex: "B3B3B3")     // Bottom
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 451)
+                .offset(y: 225) // Move half the height down so half is below screen
+            }
+            .ignoresSafeArea()
+        )
     }
     
     /// Formats date in MM.DD.YYYY format for join date display
@@ -439,190 +738,146 @@ struct Step3_SMSIntroduction: View {
     @State private var smsSendingFailed = false
     
     var body: some View {
-        GeometryReader { geometry in
-            VStack(spacing: 0) {
-                VStack(spacing: 24) {
+        VStack(spacing: 0) {
+            // Top Navigation Bar (consistent with Step 1 & 2)
+            HStack {
+                Button(action: {
+                    profileViewModel.previousOnboardingStep()
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Back")
+                            .font(.system(size: 16, weight: .light))
+                    }
+                }
+                .foregroundColor(.gray)
+                
+                Spacer()
+                
+                // Remi Logo (centered between functional buttons)
+                Text("Remi")
+                    .font(AppFonts.poppinsMedium(size: 18))
+                    .tracking(-1.9)
+                    .foregroundColor(.black)
+                
+                Spacer()
+                
+                Button(action: {
+                    profileViewModel.nextOnboardingStep()
+                }) {
+                    HStack(spacing: 8) {
+                        Text("Next")
+                            .font(.system(size: 16, weight: .light))
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                }
+                .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 32)
+            .padding(.top, 8)
+            
+            ScrollView {
+                VStack(spacing: 67) {
                     // Step Title and Subtitle
-                    VStack(spacing: 8) {
-                        Text(ProfileOnboardingStep.smsIntroduction.displayName)
-                            .font(.system(size: 28, weight: .bold))
-                            .tracking(-1)
+                    VStack(spacing: 4) {
+                        Text("Onboard Your Member")
+                            .font(.system(size: 34, weight: .medium))
+                            .kerning(-1.0)
                             .foregroundColor(.black)
                         
-                        Text(ProfileOnboardingStep.smsIntroduction.subtitle)
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundColor(.secondary)
-                            .tracking(-0.5)
+                        Text("Send them an SMS and see if they receive it!")
+                            .font(.system(size: 14, weight: .light))
+                            .kerning(-0.3)
+                            .foregroundColor(.gray)
                     }
-                    .padding(.top, 30)
+                    .padding(.top, 67)
                     
-                    // Phone Mockup with SMS Preview
-                    VStack(spacing: 20) {
-                        // Tilted Phone Illustration
-                        ZStack {
-                            // Phone Frame
-                            RoundedRectangle(cornerRadius: 25)
-                                .fill(Color.black)
-                                .frame(width: 200, height: 350)
-                                .rotationEffect(.degrees(-5))
-                            
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(Color.white)
-                                .frame(width: 180, height: 330)
-                                .rotationEffect(.degrees(-5))
-                            
-                            // SMS Interface Mockup
-                            VStack(spacing: 12) {
-                                // Header
-                                HStack {
-                                    Text("Messages")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(.black)
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.top, 20)
-                                
-                                // Contact
-                                HStack {
-                                    Circle()
-                                        .fill(Color.blue.opacity(0.6))
-                                        .frame(width: 32, height: 32)
-                                        .overlay(
-                                            Text("H")
-                                                .font(.system(size: 16, weight: .semibold))
-                                                .foregroundColor(.white)
-                                        )
-                                    
-                                    Text(profileViewModel.profileName)
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.black)
-                                    
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 16)
-                                
-                                // Message Preview
-                                VStack(alignment: .trailing, spacing: 8) {
-                                    HStack {
-                                        Spacer()
-                                        VStack(alignment: .trailing, spacing: 4) {
-                                            Text("Hello \(profileViewModel.profileName)! Your family member wants to send you helpful daily reminders...")
-                                                .font(.system(size: 10, weight: .regular))
-                                                .foregroundColor(.white)
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 6)
-                                                .background(Color.blue)
-                                                .cornerRadius(8)
-                                                .multilineTextAlignment(.trailing)
-                                            
-                                            Text("Reply YES or STOP")
-                                                .font(.system(size: 8, weight: .regular))
-                                                .foregroundColor(.gray)
-                                        }
-                                    }
-                                    .padding(.horizontal, 16)
-                                }
+                    // Simple White Card with SMS Message (consistent with Steps 1 & 2)
+                    VStack(spacing: 0) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            // REMI message bubble (received - left aligned)
+                            HStack {
+                                Text("👋 Hi! This is REMI, a caring app that sends gentle check-ins to help you stay healthy. Reply YES to get started!")
+                                    .font(.system(size: 16, weight: .light))
+                                    .foregroundColor(.black)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.gray.opacity(0.15))
+                                    .cornerRadius(18)
+                                    .frame(maxWidth: 270, alignment: .leading)
                                 
                                 Spacer()
                             }
-                            .frame(width: 180, height: 330)
-                            .rotationEffect(.degrees(-5))
-                        }
-                        .padding(.vertical, 20)
-                        
-                        // Message Preview Text
-                        VStack(spacing: 8) {
-                            Text("Preview of message to be sent:")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(.secondary)
                             
-                            Text("Hello \(profileViewModel.profileName)! Your family member wants to send you helpful daily reminders via text message. Reply YES to confirm and start receiving reminders, or STOP to decline. - Hallo Family Care")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundColor(.black)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                                .background(Color.gray.opacity(0.1))
-                                .cornerRadius(8)
-                                .multilineTextAlignment(.center)
+                            // Extra spacing below message
+                            Spacer()
+                                .frame(height: 20)
                         }
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 24)
                     }
+                    .frame(maxWidth: .infinity)
+                    .background(Color.white)
+                    .cornerRadius(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+                    .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
                     
-                    Spacer()
-                    
-                    // SMS Sending Buttons
-                    VStack(spacing: 12) {
-                        // Send Hello Button
-                        Button(action: {
-                            sendSMSToProfile()
-                        }) {
-                            HStack(spacing: 8) {
-                                if profileViewModel.isLoading {
-                                    ProgressView()
-                                        .scaleEffect(0.8)
-                                        .foregroundColor(.white)
-                                } else {
-                                    Text("Send Hello")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundColor(.white)
-                                    
-                                    Text("👋")
-                                        .font(.system(size: 16))
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.blue)
-                            .cornerRadius(12)
-                        }
-                        .disabled(profileViewModel.isLoading)
-                        
-                        // Resend Button (shown only when SMS sending failed)
-                        if smsSendingFailed {
-                            Button(action: {
-                                smsSendingFailed = false
-                                sendSMSToProfile()
-                            }) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 14, weight: .medium))
-                                    
-                                    Text("Resend SMS")
-                                        .font(.system(size: 16, weight: .semibold))
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .foregroundColor(.blue)
-                                .background(Color.white)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.blue, lineWidth: 2)
-                                )
-                                .cornerRadius(12)
-                            }
-                            .disabled(profileViewModel.isLoading)
-                        }
-                        
-                        // Error Message
-                        if let errorMessage = profileViewModel.errorMessage, smsSendingFailed {
-                            Text("Failed to send SMS: \(errorMessage)")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundColor(.red)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 8)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 30)
+                    Spacer(minLength: 100) // Space for bottom button
                 }
-                .padding(.horizontal, 12)
-                .background(Color.white)
-                .cornerRadius(10)
-                .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
+                .padding(.horizontal, 32)
             }
-            .padding(.horizontal, geometry.size.width * 0.04)
+                    
+            // Bottom Action Button
+            VStack {
+                Button(action: {
+                    sendSMSToProfile()
+                }) {
+                    HStack(spacing: 4) {
+                        if profileViewModel.isLoading {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .foregroundColor(.white)
+                        } else {
+                            Text("Send Hello")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                            
+                            Text("👋")
+                                .font(.system(size: 16))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 47)
+                    .background(Color(hex: "28ADFF"))
+                    .cornerRadius(15)
+                }
+                .disabled(profileViewModel.isLoading)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 10) // Close to bottom of screen
+            }
         }
+        .background(
+            // App background with gradient overlay (same as Step 1 & 2)
+            ZStack(alignment: .bottom) {
+                Color(hex: "f9f9f9")
+                
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.clear, // Top (fully transparent)
+                        Color(hex: "B3B3B3")     // Bottom
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 451)
+                .offset(y: 225) // Move half the height down so half is below screen
+            }
+            .ignoresSafeArea()
+        )
     }
     
     /// Handles SMS sending with error detection and failure state management
@@ -655,72 +910,208 @@ struct Step3_SMSIntroduction: View {
 /// - Continue button (disabled until confirmation)
 struct Step4_ConfirmationWait: View {
     @EnvironmentObject var profileViewModel: ProfileViewModel
-    @State private var showingResponse = false
-    @State private var responseReceived = false
-    @State private var actualResponseText = "OK"
+    @State private var smsConfirmed = false
+    @State private var resendCountdown = 0
+    @State private var timer: Timer?
     
     var body: some View {
-        Step4ContentView(
-            profileViewModel: profileViewModel,
-            showingResponse: $showingResponse,
-            responseReceived: $responseReceived,
-            actualResponseText: $actualResponseText
+        VStack(spacing: 0) {
+            // Top Navigation Bar (consistent with Step 3)
+            HStack {
+                Button(action: {
+                    profileViewModel.previousOnboardingStep()
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Back")
+                            .font(.system(size: 16, weight: .light))
+                    }
+                }
+                .foregroundColor(.gray)
+                
+                Spacer()
+                
+                // Remi Logo (centered between functional buttons)
+                Text("Remi")
+                    .font(AppFonts.poppinsMedium(size: 18))
+                    .tracking(-1.9)
+                    .foregroundColor(.black)
+                
+                Spacer()
+                
+                Button(action: {
+                    profileViewModel.nextOnboardingStep()
+                }) {
+                    HStack(spacing: 8) {
+                        Text("Next")
+                            .font(.system(size: 16, weight: .light))
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                }
+                .foregroundColor(.gray)
+            }
+            .padding(.horizontal, 32)
+            .padding(.top, 8)
+            
+            ScrollView {
+                VStack(spacing: 67) {
+                    // Step Title and Subtitle
+                    VStack(spacing: 4) {
+                        Text(smsConfirmed ? "Onboarding Complete" : "Waiting for Confirmation")
+                            .font(.system(size: 34, weight: .medium))
+                            .kerning(-1.0)
+                            .foregroundColor(.black)
+                            .multilineTextAlignment(.center)
+                        
+                        Text(smsConfirmed ? "Let's Create Their First Habit :)" : "Ask them to reply the text with OK!!")
+                            .font(.system(size: 14, weight: .light))
+                            .kerning(-0.3)
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.top, 67)
+                    
+                    // Simple White Card with SMS Message (same as Step 3)
+                    VStack(spacing: 0) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            // REMI message bubble (received - left aligned)
+                            HStack {
+                                Text("👋 Hi! This is REMI, a caring app that sends gentle check-ins to help you stay healthy. Reply YES to get started!")
+                                    .font(.system(size: 16, weight: .light))
+                                    .foregroundColor(.black)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.gray.opacity(0.15))
+                                    .cornerRadius(18)
+                                    .frame(maxWidth: 270, alignment: .leading)
+                                
+                                Spacer()
+                            }
+                            
+                            // Reply message bubble (sent - right aligned)
+                            HStack {
+                                Spacer()
+                                
+                                Text("OK")
+                                    .font(.system(size: 16, weight: .light))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color(hex: "28ADFF"))
+                                    .cornerRadius(18)
+                            }
+                            
+                            // Extra spacing below message
+                            Spacer()
+                                .frame(height: 20)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 24)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .background(Color.white)
+                    .cornerRadius(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+                    .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
+                    
+                    Spacer(minLength: 100) // Space for bottom button
+                }
+                .padding(.horizontal, 32)
+            }
+            
+            // Bottom button area
+            VStack(spacing: 0) {
+                // Button for next step - disabled until SMS confirmation
+                Button(action: {
+                    if smsConfirmed {
+                        profileViewModel.nextOnboardingStep()
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Text("Continue")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(smsConfirmed ? Color(hex: "28ADFF") : Color(hex: "BFE6FF"))
+                    .cornerRadius(15)
+                }
+                .disabled(!smsConfirmed)
+                .padding(.horizontal, 24)
+                
+                // Resend link - only show when SMS not confirmed
+                if !smsConfirmed {
+                    HStack {
+                        Text("Didn't receive the message?")
+                            .font(.system(size: 14, weight: .light))
+                            .foregroundColor(.gray)
+                        
+                        Button(resendCountdown > 0 ? "Resend (\(resendCountdown)s)" : "Resend") {
+                            // Resend SMS functionality
+                            if resendCountdown == 0 {
+                                profileViewModel.sendOnboardingSMS()
+                                startResendCountdown()
+                            }
+                        }
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(resendCountdown > 0 ? .gray : Color(hex: "28ADFF"))
+                        .disabled(resendCountdown > 0)
+                    }
+                    .padding(.top, 12)
+                }
+                
+                Spacer()
+                    .frame(height: 10)
+            }
+        }
+        .background(
+            // App background with gradient overlay (same as Step 1, 2 & 3)
+            ZStack(alignment: .bottom) {
+                Color(hex: "f9f9f9")
+                
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.clear, // Top (fully transparent)
+                        Color(hex: "B3B3B3")     // Bottom
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 451)
+                .offset(y: 225) // Move half the height down so half is below screen
+            }
+            .ignoresSafeArea()
         )
         .onAppear {
-            initializeStep()
-        }
-        .onReceive(
-            profileViewModel.dataSyncPublisher.smsResponses
-                .filter { response in
-                    guard let profile = profileViewModel.onboardingProfile,
-                          response.profileId == profile.id,
-                          response.isConfirmationResponse else {
-                        return false
-                    }
-                    return true
+            // Simulate SMS confirmation after 2 seconds for demo
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                withAnimation(.easeInOut(duration: 1.0)) {
+                    smsConfirmed = true
                 }
-        ) { response in
-            handleRealTimeResponse(response)
-        }
-    }
-    
-    private func initializeStep() {
-        withAnimation {
-            showingResponse = true
-        }
-        checkForExistingResponse()
-    }
-    
-    private func handleRealTimeResponse(_ response: SMSResponse) {
-        withAnimation(.easeInOut(duration: 0.5)) {
-            responseReceived = true
-            showingResponse = true
-            actualResponseText = response.textResponse ?? (response.isPositiveConfirmation ? "YES" : "STOP")
-        }
-    }
-    
-    /// Checks if SMS confirmation response has already been received
-    /// 
-    /// Handles cases where user navigates back to Step 4 after response
-    /// or when response was received while on different step.
-    private func checkForExistingResponse() {
-        guard let profile = profileViewModel.onboardingProfile,
-              let status = profileViewModel.confirmationStatus[profile.id] else {
-            return
-        }
-        
-        if status == .confirmed {
-            withAnimation {
-                responseReceived = true
-                showingResponse = true
-                // Use confirmed status message or default to "YES"
-                actualResponseText = profileViewModel.confirmationMessages[profile.id]?.contains("Confirmed") == true ? "YES" : "OK"
             }
-        } else if status == .declined {
-            withAnimation {
-                responseReceived = true
-                showingResponse = true
-                actualResponseText = "STOP"
+        }
+        .onDisappear {
+            // Clean up timer when view disappears
+            timer?.invalidate()
+            timer = nil
+        }
+    }
+    
+    private func startResendCountdown() {
+        resendCountdown = 60
+        timer?.invalidate()
+        
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            if resendCountdown > 0 {
+                resendCountdown -= 1
+            } else {
+                timer?.invalidate()
+                timer = nil
             }
         }
     }
@@ -745,7 +1136,7 @@ struct Step4ContentView: View {
                             .foregroundColor(.black)
                         
                         Text(ProfileOnboardingStep.confirmationWait.subtitle)
-                            .font(.system(size: 16, weight: .regular))
+                            .font(.system(size: 16, weight: .light))
                             .foregroundColor(.secondary)
                             .tracking(-0.5)
                     }
@@ -1050,7 +1441,7 @@ struct Step5_OnboardingSuccess: View {
                             .foregroundColor(.black)
                         
                         Text(ProfileOnboardingStep.onboardingSuccess.subtitle)
-                            .font(.system(size: 16, weight: .regular))
+                            .font(.system(size: 16, weight: .light))
                             .foregroundColor(.secondary)
                             .tracking(-0.5)
                     }
@@ -1084,7 +1475,7 @@ struct Step5_OnboardingSuccess: View {
                             .foregroundColor(.black)
                         
                         Text("\(profileViewModel.profileName) is now ready to receive helpful daily reminders")
-                            .font(.system(size: 16, weight: .regular))
+                            .font(.system(size: 16, weight: .light))
                             .multilineTextAlignment(.center)
                             .foregroundColor(.secondary)
                             .tracking(-0.5)
@@ -1179,163 +1570,164 @@ struct Step5_OnboardingSuccess: View {
 /// - Option to finish and go to dashboard
 struct Step6_FirstHabit: View {
     @EnvironmentObject var profileViewModel: ProfileViewModel
-    @Environment(\.presentationMode) var presentationMode
     @Environment(\.container) private var container
     @State private var showingTaskCreation = false
     
     var body: some View {
-        GeometryReader { geometry in
-            VStack(spacing: 0) {
-                VStack(spacing: 24) {
-                    // Step Title and Subtitle
-                    VStack(spacing: 8) {
-                        Text(ProfileOnboardingStep.firstHabit.displayName)
-                            .font(.system(size: 28, weight: .bold))
-                            .tracking(-1)
-                            .foregroundColor(.black)
-                        
-                        Text(ProfileOnboardingStep.firstHabit.subtitle)
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundColor(.secondary)
-                            .tracking(-0.5)
+        VStack(spacing: 0) {
+            // Top Navigation Bar with Remi Logo
+            HStack {
+                Button(action: {
+                    profileViewModel.previousOnboardingStep()
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Back")
+                            .font(.system(size: 16, weight: .light))
                     }
-                    .padding(.top, 30)
-                    
-                    // Dashboard Preview
-                    VStack(spacing: 16) {
-                        HStack {
-                            Text("Your Dashboard")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.secondary)
-                            Spacer()
-                        }
-                        
-                        // Mini Dashboard Preview
-                        VStack(spacing: 12) {
-                            // Profile Section Preview
-                            HStack(spacing: 12) {
-                                // Profile circles
-                                ForEach(0..<min(profileViewModel.profiles.count, 4), id: \.self) { index in
-                                    if index < profileViewModel.profiles.count {
-                                        let profile = profileViewModel.profiles[index]
-                                        VStack(spacing: 4) {
-                                            ZStack {
-                                                Circle()
-                                                    .fill(profileColorForIndex(index).opacity(0.2))
-                                                    .frame(width: 44, height: 44)
-                                                
-                                                Text(defaultEmojiForIndex(index))
-                                                    .font(.system(size: 20))
-                                                
-                                                Circle()
-                                                    .stroke(profileColorForIndex(index), lineWidth: 2)
-                                                    .frame(width: 44, height: 44)
-                                            }
-                                            
-                                            Text(profile.name)
-                                                .font(.system(size: 10, weight: .medium))
-                                                .lineLimit(1)
-                                        }
-                                    }
-                                }
-                                
-                                Spacer()
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            
-                            Divider()
-                            
-                            // Empty Habits Section
-                            VStack(spacing: 8) {
-                                Image(systemName: "calendar.badge.plus")
-                                    .font(.system(size: 32))
-                                    .foregroundColor(.gray.opacity(0.5))
-                                
-                                Text("No habits created yet")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                
-                                Text("Create your first habit for \(profileViewModel.profileName)")
-                                    .font(.system(size: 12, weight: .regular))
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.vertical, 20)
-                        }
-                        .background(Color.gray.opacity(0.05))
-                        .cornerRadius(12)
-                    }
-                    .padding(.horizontal, 12)
-                    
-                    // Habit Creation Benefits
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("What are habits?")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.black)
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .top, spacing: 8) {
-                                Text("•")
-                                Text("Daily reminders sent via SMS to \(profileViewModel.profileName)")
-                                    .font(.system(size: 14, weight: .regular))
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            HStack(alignment: .top, spacing: 8) {
-                                Text("•")
-                                Text("Track medication, exercise, social activities")
-                                    .font(.system(size: 14, weight: .regular))
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            HStack(alignment: .top, spacing: 8) {
-                                Text("•")
-                                Text("Get photo confirmations when tasks are completed")
-                                    .font(.system(size: 14, weight: .regular))
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                    .padding(16)
-                    .background(Color.blue.opacity(0.05))
-                    .cornerRadius(12)
-                    .padding(.horizontal, 12)
-                    
-                    Spacer()
-                    
-                    // Action Buttons
-                    VStack(spacing: 12) {
-                        Button(action: {
-                            // Show task creation with newly created profile preselected
-                            showingTaskCreation = true
-                        }) {
-                            Text("Create First Habit")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(Color.blue)
-                                .cornerRadius(12)
-                        }
-                        
-                        Button(action: {
-                            profileViewModel.completeProfileOnboarding()
-                        }) {
-                            Text("Skip for Now")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 30)
                 }
-                .padding(.horizontal, 12)
-                .background(Color.white)
-                .cornerRadius(10)
-                .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
+                .foregroundColor(.gray)
+                
+                Spacer()
+                
+                // Remi Logo (centered)
+                Text("Remi")
+                    .font(AppFonts.poppinsMedium(size: 18))
+                    .tracking(-1.9)
+                    .foregroundColor(.black)
+                
+                Spacer()
+                
+                // Empty space to balance the layout (no done button)
+                Color.clear
+                    .frame(width: 60, height: 20)
             }
-            .padding(.horizontal, geometry.size.width * 0.04)
+            .padding(.horizontal, 32)
+            .padding(.top, 8)
+            
+            ScrollView {
+                VStack(spacing: 67) {
+                    // Step Title and Subtitle
+                    VStack(spacing: 4) {
+                        Text("Create a New Habit")
+                            .font(.system(size: 34, weight: .medium))
+                            .kerning(-1.0)
+                            .foregroundColor(.black)
+                            .multilineTextAlignment(.center)
+                        
+                        Text("Let's Create Their First Task :)")
+                            .font(.system(size: 14, weight: .light))
+                            .kerning(-0.3)
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.top, 67)
+                    
+                    // Simple White Card (consistent with other steps)
+                    VStack(spacing: 0) {
+                        VStack(alignment: .center, spacing: 24) {
+                            // Habit creation icon
+                            Image(systemName: "calendar.badge.plus")
+                                .font(.system(size: 48))
+                                .foregroundColor(Color(hex: "28ADFF"))
+                            
+                            // Description text
+                            Text("Habits are daily reminders sent via SMS to help your family member stay healthy and connected.")
+                                .font(.system(size: 16, weight: .light))
+                                .foregroundColor(.black)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(nil)
+                            
+                            // Benefits list
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("•")
+                                        .foregroundColor(Color(hex: "28ADFF"))
+                                    Text("Medication reminders")
+                                        .font(.system(size: 14, weight: .light))
+                                        .foregroundColor(.gray)
+                                }
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("•")
+                                        .foregroundColor(Color(hex: "28ADFF"))
+                                    Text("Exercise and wellness check-ins")
+                                        .font(.system(size: 14, weight: .light))
+                                        .foregroundColor(.gray)
+                                }
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("•")
+                                        .foregroundColor(Color(hex: "28ADFF"))
+                                    Text("Social activities and family time")
+                                        .font(.system(size: 14, weight: .light))
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 32)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .background(Color.white)
+                    .cornerRadius(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+                    .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
+                    
+                    Spacer(minLength: 100) // Space for bottom button
+                }
+                .padding(.horizontal, 32)
+            }
+            
+            // Bottom button area (consistent with other steps)
+            VStack(spacing: 0) {
+                Button(action: {
+                    // Show task creation with newly created profile preselected
+                    showingTaskCreation = true
+                }) {
+                    HStack(spacing: 4) {
+                        Text("Create First Habit")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Color(hex: "28ADFF"))
+                    .cornerRadius(15)
+                }
+                .padding(.horizontal, 24)
+                
+                // Skip option
+                Button(action: {
+                    profileViewModel.completeProfileOnboarding()
+                }) {
+                    Text("Skip for Now")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.gray)
+                }
+                .padding(.top, 12)
+                .padding(.bottom, 10)
+            }
         }
+        .background(
+            // App background with gradient overlay (same as other steps)
+            ZStack(alignment: .bottom) {
+                Color(hex: "f9f9f9")
+                
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.clear, // Top (fully transparent)
+                        Color(hex: "B3B3B3")     // Bottom
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 451)
+                .offset(y: 225) // Move half the height down so half is below screen
+            }
+            .ignoresSafeArea()
+        )
         .sheet(isPresented: $showingTaskCreation) {
             TaskCreationView(preselectedProfileId: profileViewModel.onboardingProfile?.id)
                 .environmentObject(container.makeTaskViewModel())
@@ -1449,6 +1841,7 @@ struct ProfileCard: View {
 
 // MARK: - Main CreateProfileView (now triggers onboarding flow)
 /// Updated CreateProfileView that launches the comprehensive 6-step onboarding flow
+///
 /// 
 /// This replaces the previous basic profile creation with the sophisticated
 /// onboarding experience specified in requirements.
@@ -1513,33 +1906,38 @@ struct CreateProfileView: View {
 struct ProfileViews_Previews: PreviewProvider {
     static var previews: some View {
         Group {
-            // MINIMAL TEST - Step 1 only to isolate issue
+            // MINIMAL TEST - Step 1 only to isolate issue  
             Step1_NewProfileForm()
-                .environmentObject(MockProfileViewModel())
-                .environment(\.container, Container.shared)
+                .environmentObject(Container.makeForTesting().makeProfileViewModelForCanvas())
+                .environment(\.container, Container.makeForTesting())
                 .previewDisplayName("🧪 STEP 1 TEST")
             
-            // STEP BY STEP TESTING - Uncomment to test specific steps
-            /*
-            CreateProfileView()
-                .environmentObject(MockProfileViewModel())
-                .environment(\.container, Container.shared)
-                .previewDisplayName("📱 New Create Profile (Onboarding Trigger)")
-            
-            ProfileOnboardingFlow()
-                .environmentObject(MockProfileViewModel())
-                .environment(\.container, Container.shared)
-                .previewDisplayName("📱 Complete Onboarding Flow")
-            
+            // STEP 2 TEST - Profile Complete
             Step2_ProfileComplete()
-                .environmentObject(MockProfileViewModel())
-                .environment(\.container, Container.shared)
-                .previewDisplayName("📱 Step 2: Profile Complete")
+                .environmentObject(Container.makeForTesting().makeProfileViewModelForCanvas())
+                .environment(\.container, Container.makeForTesting())
+                .previewDisplayName("🧪 STEP 2 TEST - Profile Complete")
             
+            // STEP 3 TEST - SMS Introduction
             Step3_SMSIntroduction()
-                .environmentObject(MockProfileViewModel())
-                .environment(\.container, Container.shared)
-                .previewDisplayName("📱 Step 3: SMS Introduction")
+                .environmentObject(Container.makeForTesting().makeProfileViewModelForCanvas())
+                .environment(\.container, Container.makeForTesting())
+                .previewDisplayName("🧪 STEP 3 TEST - SMS Introduction")
+            
+            // STEP 4 TEST - Waiting for Confirmation
+            Step4_ConfirmationWait()
+                .environmentObject(Container.makeForTesting().makeProfileViewModelForCanvas())
+                .environment(\.container, Container.makeForTesting())
+                .previewDisplayName("🧪 STEP 4 TEST - Waiting for Confirmation")
+            
+            // STEP 6 TEST - Create a New Habit
+            Step6_FirstHabit()
+                .environmentObject(Container.makeForTesting().makeProfileViewModelForCanvas())
+                .environment(\.container, Container.makeForTesting())
+                .previewDisplayName("🧪 STEP 6 TEST - Create a New Habit")
+            
+            // STEP BY STEP TESTING - Additional steps (uncomment as needed)
+            /*
             
             Step4_ConfirmationWait()
                 .environmentObject(MockProfileViewModel())
@@ -1550,13 +1948,25 @@ struct ProfileViews_Previews: PreviewProvider {
                 .environmentObject(MockProfileViewModel())
                 .environment(\.container, Container.shared)
                 .previewDisplayName("📱 Step 5: Onboarding Success")
-            */
             
-            // ISOLATE STEP 6 - The suspected problematic step
             Step6_FirstHabit()
-                .environmentObject(MockProfileViewModel())
-                .environment(\.container, Container.shared)
-                .previewDisplayName("🧪 STEP 6 TEST - ISOLATED")
+                .environmentObject(Container.makeForTesting().makeProfileViewModelForCanvas())
+                .environment(\.container, Container.makeForTesting())
+                .previewDisplayName("📱 Step 6: First Habit")
+            
+            // Test the TaskCreationView integration from Step 6
+            NavigationView {
+                VStack {
+                    Text("Step 6 → Task Creation Flow Test")
+                        .font(.title2)
+                        .padding()
+                    
+                    TaskCreationView(preselectedProfileId: "onboarding-profile-test")
+                        .environmentObject(Container.makeForTesting().makeTaskViewModel())
+                }
+            }
+            .previewDisplayName("🔄 Step 6 → Task Creation Flow")
+            */
         }
     }
 }
@@ -1627,13 +2037,18 @@ class MockDataSyncCoordinator: ObservableObject {
     var smsResponses: AnyPublisher<SMSResponse, Never> {
         Just(SMSResponse(
             id: "mock-response",
+            taskId: nil,
             profileId: "mock-profile-id", 
             userId: "mock-user-id",
             textResponse: "OK",
+            photoData: nil,
+            isCompleted: true,
             receivedAt: Date(),
             responseType: .text,
             isConfirmationResponse: true,
-            isPositiveConfirmation: true
+            isPositiveConfirmation: true,
+            responseScore: nil,
+            processingNotes: nil
         ))
         .eraseToAnyPublisher()
     }
@@ -1683,6 +2098,80 @@ extension EnvironmentValues {
     var mockContainer: MockContainer {
         get { self[MockContainerKey.self] }
         set { self[MockContainerKey.self] = newValue }
+    }
+}
+
+// MARK: - Custom Shape for Selective Corner Rounding
+struct RoundedCornerShape: Shape {
+    let corners: UIRectCorner
+    let radius: CGFloat
+    
+    func path(in rect: CGRect) -> Path {
+        let path = UIBezierPath(
+            roundedRect: rect,
+            byRoundingCorners: corners,
+            cornerRadii: CGSize(width: radius, height: radius)
+        )
+        return Path(path.cgPath)
+    }
+}
+
+// MARK: - Image Picker Component
+struct ImagePicker: UIViewControllerRepresentable {
+    let sourceType: UIImagePickerController.SourceType
+    let onImagePicked: (Data) -> Void
+    @Environment(\.presentationMode) private var presentationMode
+    
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = sourceType
+        picker.delegate = context.coordinator
+        
+        // Camera-specific setup
+        if sourceType == .camera {
+            picker.cameraCaptureMode = .photo
+            picker.allowsEditing = false
+            print("📷 Setting up camera picker")
+        } else {
+            print("📸 Setting up photo library picker")
+        }
+        
+        return picker
+    }
+    
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: ImagePicker
+        
+        init(_ parent: ImagePicker) {
+            self.parent = parent
+        }
+        
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+            print("📷 Image picker finished picking media")
+            if let image = info[.originalImage] as? UIImage {
+                print("📷 Image found with size: \(image.size)")
+                if let imageData = image.jpegData(compressionQuality: 0.8) {
+                    print("📷 Image converted to data: \(imageData.count) bytes")
+                    parent.onImagePicked(imageData)
+                } else {
+                    print("❌ Failed to convert image to JPEG data")
+                }
+            } else {
+                print("❌ No image found in picker info")
+            }
+            parent.presentationMode.wrappedValue.dismiss()
+        }
+        
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            print("📷 Image picker cancelled")
+            parent.presentationMode.wrappedValue.dismiss()
+        }
     }
 }
 #endif

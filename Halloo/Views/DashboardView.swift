@@ -31,6 +31,10 @@ struct DashboardView: View {
     /// Fixes ViewModel instance isolation by using same instance for profile creation
     @EnvironmentObject private var profileViewModel: ProfileViewModel
     
+    // MARK: - Navigation State
+    /// Tab selection binding from parent ContentView for floating pill navigation
+    @Binding var selectedTab: Int
+    
     // MARK: - UI State Management
     /// Tracks which elderly profile is currently selected (0-3 max)
     /// IMPORTANT: This drives task filtering - only selected profile's tasks show
@@ -45,6 +49,15 @@ struct DashboardView: View {
     /// Alternative to ProfileCreationView sheet for smoother UX
     @State private var showingDirectOnboarding = false
     
+    /// Controls GalleryDetailView presentation for completed task viewing
+    @State private var selectedTaskForGalleryDetail: GalleryHistoryEvent?
+    
+    /// Tracks all gallery events for today's completed tasks for navigation
+    @State private var todaysGalleryEvents: [GalleryHistoryEvent] = []
+    
+    /// Current index in the gallery events array
+    @State private var currentGalleryIndex: Int = 0
+    
     var body: some View {
         /*
          * RESPONSIVE LAYOUT STRUCTURE:
@@ -52,15 +65,14 @@ struct DashboardView: View {
          * Uses 5% screen padding and proportional sizing for different devices
          */
         GeometryReader { geometry in
-            VStack(spacing: 0) {
-                
+            ZStack {
                 /*
                  * MAIN SCROLLABLE CONTENT AREA:
                  * Contains all dashboard sections in vertical flow
                  * Background: Light gray (#f9f9f9) for card contrast
                  */
                 ScrollView {
-                    VStack(spacing: 0) { // Removed .leading alignment for centered content
+                    VStack(spacing: 10) { // Reduced spacing between cards by half
                         
                         // 🏠 HEADER: App branding + account access
                         headerSection
@@ -76,6 +88,7 @@ struct DashboardView: View {
                         // ⏰ UPCOMING: Today's pending tasks for selected profile only
                         // Shows tasks that still need to be completed today
                         upcomingSection
+                            .padding(.top, -10) // Reduce spacing to Create Custom Habit to zero
                         
                         // ✅ COMPLETED: Today's finished tasks with "view" buttons
                         // Allows viewing completion evidence (photos/SMS responses)
@@ -89,15 +102,29 @@ struct DashboardView: View {
                 .background(Color(hex: "f9f9f9")) // Light gray app background
                 
                 /*
-                 * 🧭 CUSTOM BOTTOM NAVIGATION:
-                 * Pill-shaped design with exact Figma dimensions (94×43.19px)
-                 * Positioned 10px from right, 20px from bottom
-                 * Home tab active (black), Gallery tab inactive (gray)
+                 * 🧭 FLOATING BOTTOM ELEMENTS:
+                 * Both navigation pill and create habit button on same level
+                 * Button centered, pill on right - no conflict
                  */
-                bottomTabNavigation
+                VStack {
+                    Spacer()
+                    
+                    ZStack {
+                        // Create Custom Habit Button - centered, aligned to nav pill bottom edge
+                        HStack {
+                            Spacer()
+                            createHabitButton
+                            Spacer()
+                        }
+                        .padding(.bottom, -28) // Very close to bottom edge - button well below nav pill
+                        
+                        // Navigation pill - bottom right
+                        bottomTabNavigation
+                    }
+                }
             }
         }
-        .ignoresSafeArea(.container, edges: .bottom) // Full-screen layout
+// Removed .ignoresSafeArea to match GalleryView and prevent black bar
         .onAppear {
             /*
              * DATA LOADING & PROFILE SELECTION:
@@ -111,7 +138,7 @@ struct DashboardView: View {
          * IMPORTANT: Preselects currently selected elderly profile for convenience
          * Injects TaskViewModel via container for proper dependency management
          */
-        .sheet(isPresented: $showingTaskCreation) {
+        .fullScreenCover(isPresented: $showingTaskCreation) {
             TaskCreationView(preselectedProfileId: selectedProfile?.id)
                 .environmentObject(container.makeTaskViewModel())
         }
@@ -123,6 +150,109 @@ struct DashboardView: View {
         .fullScreenCover(isPresented: $showingDirectOnboarding) {
             ProfileOnboardingFlow()
                 .environmentObject(profileViewModel) // Shared instance maintains state
+        }
+        /*
+         * 📱 GALLERY DETAIL VIEW:
+         * Full-screen detailed view of completed task gallery events
+         * Presents GalleryDetailView when "view" button tapped on completed task
+         */
+        .fullScreenCover(item: $selectedTaskForGalleryDetail, onDismiss: {
+            // Reset when dismissed
+            todaysGalleryEvents = []
+            currentGalleryIndex = 0
+        }) { galleryEvent in
+            GalleryDetailView(
+                event: galleryEvent,
+                selectedTab: $selectedTab,
+                onPrevious: currentGalleryIndex > 0 ? {
+                    navigateToPreviousTask()
+                } : nil,
+                onNext: currentGalleryIndex < todaysGalleryEvents.count - 1 ? {
+                    navigateToNextTask()
+                } : nil
+            )
+            .transaction { transaction in
+                transaction.disablesAnimations = true
+            }
+        }
+    }
+    
+    // MARK: - Helper Methods
+    private func navigateToPreviousTask() {
+        guard currentGalleryIndex > 0 else { return }
+        currentGalleryIndex -= 1
+        
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            selectedTaskForGalleryDetail = todaysGalleryEvents[currentGalleryIndex]
+        }
+    }
+    
+    private func navigateToNextTask() {
+        guard currentGalleryIndex < todaysGalleryEvents.count - 1 else { return }
+        currentGalleryIndex += 1
+        
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            selectedTaskForGalleryDetail = todaysGalleryEvents[currentGalleryIndex]
+        }
+    }
+    
+    private func loadTodaysGalleryEvents() async {
+        do {
+            let authService = container.resolve(AuthenticationServiceProtocol.self)
+            guard let userId = authService.currentUser?.uid else { return }
+            
+            let databaseService = container.resolve(DatabaseServiceProtocol.self)
+            let allEvents = try await databaseService.getGalleryHistoryEvents(for: userId)
+            
+            // Get task IDs from today's completed tasks
+            let todaysTaskIds = viewModel.todaysCompletedTasks.map { $0.task.id }
+            
+            // Filter gallery events to only include today's completed tasks
+            let todaysEvents = allEvents.filter { event in
+                switch event.eventData {
+                case .taskResponse(let data):
+                    return todaysTaskIds.contains(data.taskId ?? "")
+                case .profileCreated(_):
+                    return false
+                }
+            }
+            
+            // Sort by creation date (oldest to newest) to maintain order
+            await MainActor.run {
+                todaysGalleryEvents = todaysEvents.sorted { $0.createdAt < $1.createdAt }
+            }
+        } catch {
+            print("Error loading today's gallery events: \(error)")
+        }
+    }
+    
+    private func findGalleryEventForTask(_ task: Task) async -> GalleryHistoryEvent? {
+        do {
+            let authService = container.resolve(AuthenticationServiceProtocol.self)
+            guard let userId = authService.currentUser?.uid else {
+                return nil
+            }
+            
+            // Get gallery events from database
+            let databaseService = container.resolve(DatabaseServiceProtocol.self)
+            let galleryEvents = try await databaseService.getGalleryHistoryEvents(for: userId)
+            
+            // Find the gallery event that corresponds to this task
+            return galleryEvents.first { event in
+                switch event.eventData {
+                case .taskResponse(let data):
+                    return data.taskId == task.id
+                case .profileCreated(_):
+                    return false
+                }
+            }
+        } catch {
+            print("Error finding gallery event for task: \(error)")
+            return nil
         }
     }
     
@@ -155,24 +285,23 @@ struct DashboardView: View {
      * - Emoji placeholders: 6 diverse grandparent emojis for missing photos
      */
     private var profilesSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            
-            /*
-             * SECTION HEADER: "PROFILES:" label
-             * Matches other section headers for consistency
-             * Gray color to de-emphasize (profiles themselves are the focus)
-             */
-            Text("PROFILES:")
-                .tracking(-1)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 12)
-            
-            /*
-             * PROFILE DISPLAY: Fixed 4-profile layout (NO scrolling)
-             * This prevents UI confusion and enforces business rule of max 4 profiles
-             */
-            HStack(spacing: 20) {
+        // White Card with Profiles - title inside card
+        VStack(alignment: .leading, spacing: 12) {
+                /*
+                 * SECTION HEADER: "PROFILES:" label
+                 * Matches other section headers for consistency
+                 * Gray color to de-emphasize (profiles themselves are the focus)
+                 */
+                Text("PROFILES:")
+                    .font(.system(size: 15, weight: .bold))
+                    .tracking(-1)
+                    .foregroundColor(Color(hex: "9f9f9f"))
+                
+                /*
+                 * PROFILE DISPLAY: Fixed 4-profile layout (NO scrolling)
+                 * This prevents UI confusion and enforces business rule of max 4 profiles
+                 */
+                HStack(spacing: 12) {
                 
                 /*
                  * PROFILE IMAGES: Elderly family member circles
@@ -213,12 +342,8 @@ struct DashboardView: View {
                     }) {
                         ZStack {
                             Circle()
-                                .fill(Color.white)
+                                .fill(Color(hex: "e0e0e0"))
                                 .frame(width: 45, height: 45)
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color(hex: "e0e0e0"), lineWidth: 2)
-                                )
                             
                             Image(systemName: "plus")
                                 .font(.title2)
@@ -228,24 +353,22 @@ struct DashboardView: View {
                     }
                 }
                 
-                Spacer() // Left-aligns all profiles (no center alignment)
+                    Spacer() // Left-aligns all profiles (no center alignment)
+                }
             }
-            .padding(.horizontal, 12) // Matches header alignment
-        }
-        .padding(.bottom, 40) // Spacing before next section
+            .padding(.horizontal, 12)
+            .padding(.vertical, 16)
+        .background(Color.white)
+        .cornerRadius(10)
+        .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
     }
     
-    // MARK: - ✨ Create Custom Habit Section
+    // MARK: - ✨ Streaks Section (Future)
     /**
-     * HABIT CREATION CALL-TO-ACTION: Visual prompt for task creation
+     * STREAKS DISPLAY: Will show habit completion streaks
      * 
-     * PURPOSE: Encourages families to create new care tasks for elderly members
-     * Combines delightful illustrations with functional button for engagement
-     * 
-     * BUSINESS LOGIC:
-     * - Opens TaskCreationView with currently selected profile preselected
-     * - This saves families from having to select the profile again
-     * - White card design draws attention and provides clear action area
+     * PURPOSE: Visual encouragement for consistent habit completion
+     * Currently placeholder with illustrations, will be populated with streak data
      * 
      * ILLUSTRATIONS:
      * - Birds: Centered, convey freedom and care
@@ -253,101 +376,56 @@ struct DashboardView: View {
      * - Assets: "Bird1", "Bird2", "Mascot" (case-sensitive names)
      */
     private var createHabitSection: some View {
-        VStack(spacing: 0) {
-            /*
-             * WHITE CARD CONTAINER: Prominent visual emphasis
-             * Contrasts with gray background to draw attention
-             * Rounded corners (12px) for modern, friendly appearance
-             */
-            VStack(spacing: 20) {
+        GeometryReader { geometry in
+            ZStack {
+                // White card background (no title - will be streaks card)
+                Color.white
+                    .frame(maxWidth: .infinity) // Dynamic width
+                    .frame(height: geometry.size.width * 0.314) // Proportional to 118px height
+                    .cornerRadius(10)
+                    .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
                 
-                /*
-                 * HEADER: Section title + action button
-                 * Title uses same style as other sections for consistency
-                 * Button is right-aligned for intuitive "add" interaction
-                 */
+                // Overlay illustrations on top
                 HStack {
-                    Text("CREATE A CUSTOM HABIT")
-                        .tracking(-1)
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.secondary)
-                    
-                    Spacer() // Pushes button to right edge
-                    
-                    /*
-                     * CREATE HABIT BUTTON: Opens TaskCreationView
-                     * IMPORTANT: Preselects currently selected elderly profile
-                     * This improves UX by reducing steps for families
-                     */
-                    Button(action: {
-                        showingTaskCreation = true // Triggers sheet with profile preselection
-                    }) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white)
-                                .frame(width: 32, height: 32)
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color.gray.opacity(0.5), lineWidth: 1)  // Brighter add button
-                                )
+                    // Streak display (left side)
+                    if let selectedProfile = selectedProfile, selectedProfile.currentStreak > 0 {
+                        HStack(spacing: 8) {
+                            Image(systemName: "flame.fill")
+                                .frame(width: 38, height: 51)
+                                .font(.system(size: 38))
+                                .foregroundColor(Color.orange)
                             
-                            Image(systemName: "plus")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(Color(hex: "5f5f5f"))
+                            Text("\(selectedProfile.currentStreak)")
+                                .font(AppFonts.poppinsMedium(size: 48))
+                                .foregroundColor(.black)
+                            
+                            Text("days\nin a row")
+                                .font(AppFonts.poppins(size: 14))
+                                .foregroundColor(.black)
+                                .multilineTextAlignment(.leading)
                         }
+                        .padding(.leading, 20)
                     }
-                }
-                
-                /*
-                 * ILLUSTRATION LAYOUT: Birds center, Mascot right
-                 * Creates visual interest and app personality
-                 * Spacers ensure proper positioning across different screen sizes
-                 */
-                HStack {
-                    Spacer() // Centers birds
                     
-                    /*
-                     * FLYING BIRDS: Two birds side by side
-                     * Conveys themes of freedom, care, and gentle monitoring
-                     * Mirrored and rotated for visual variety
-                     */
-                    HStack(spacing: 12) {
-                        Image("Bird1")
+                    Spacer()
+                    
+                    // Mascot (moved further right)
+                    ZStack {
+                        Image("Mascot")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 45.5, height: 36.4) // 1.3x bigger (35*1.3, 28*1.3)
-                            .offset(y: -21) // Offset left bird higher than right
+                            .frame(height: geometry.size.width * 0.43) // Taller than card
                         
-                        Image("Bird1")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 45.5, height: 36.4) // 1.3x bigger
-                            .scaleEffect(x: -1, y: 1) // Mirror horizontally
-                            .rotationEffect(.degrees(15)) // Rotate 15° clockwise
                     }
-                    
-                    Spacer() // Balances layout
-                    
-                    /*
-                     * MASCOT CHARACTER: App personality on right side
-                     * Gentleman with top hat and briefcase represents reliable care
-                     * Right alignment follows reading pattern and button placement above
-                     */
-                    Image("Mascot")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 120) // Prominent size for visual impact
-                        .padding(.trailing, 20) // Prevents edge touch
+                    .offset(x: -10, y: geometry.size.width * 0.08) // Moved further right (was -50, now -10)
+                    .padding(.trailing, 10) // Reduced trailing padding
                 }
-                .padding(.bottom, 10) // Spacing within card
+                .frame(maxWidth: .infinity)
+                .frame(height: geometry.size.width * 0.314)
+                .clipped() // Clip mascot to card boundaries
             }
-            .padding(.horizontal, 12) // Content padding within card
-            .padding(.vertical, 24)
-            .background(Color.white) // Prominent white background
-            .cornerRadius(12) // Modern rounded appearance
-            .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
         }
-        .padding(.bottom, 40) // Section spacing
+        .frame(height: UIScreen.main.bounds.width * 0.314) // Restore height for proper card spacing
     }
     
     // MARK: - ⏰ Upcoming Section
@@ -368,21 +446,17 @@ struct DashboardView: View {
      * - Time format: 12-hour ("9AM", "2PM") for easy reading
      */
     private var upcomingSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            
-            /*
-             * TASK LIST: Profile-filtered, today-only pending tasks
-             * Data source: viewModel.todaysUpcomingTasks (automatically filtered)
-             * White card background for clarity and grouping
-             */
-            VStack(spacing: 0) {
+        /*
+         * TASK LIST: Profile-filtered, today-only pending tasks
+         * Data source: viewModel.todaysUpcomingTasks (automatically filtered)
+         * White card background for clarity and grouping
+         */
+        VStack(spacing: 0) {
                 // Section title inside card
                 HStack {
                     Text("UPCOMING")
-                        .font(.custom("Inter", size: 15))
-                        .fontWeight(.bold)
+                        .font(.system(size: 15, weight: .bold))
                         .tracking(-1)
-                        .lineSpacing(33 - 15)
                         .foregroundColor(Color(hex: "9f9f9f"))
                         .padding(.horizontal, 12)
                         .padding(.top, 12)
@@ -390,20 +464,40 @@ struct DashboardView: View {
                     Spacer()
                 }
                 
-                // Task rows
-                ForEach(viewModel.todaysUpcomingTasks) { task in
-                    TaskRowView(
-                        task: task.task,
-                        profile: task.profile,
-                        showViewButton: false // No view button for pending tasks
-                    )
+                // Task rows or Complete message
+                if viewModel.todaysUpcomingTasks.isEmpty {
+                    // Show Complete message when no tasks
+                    HStack {
+                        Spacer()
+                        Text("Empty!")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.blue)
+                        Spacer()
+                    }
+                    .padding(.vertical, 20)
+                } else {
+                    ForEach(Array(viewModel.todaysUpcomingTasks.enumerated()), id: \.offset) { index, task in
+                        TaskRowView(
+                            task: task.task,
+                            profile: task.profile,
+                            showViewButton: false, // No view button for pending tasks
+                            onViewButtonTapped: nil
+                        )
+                        .padding(.horizontal, 12)  // Match card title alignment
+                        .padding(.vertical, 12)
+                        .background(Color.white) // Each task has white background
+                        
+                        if index < viewModel.todaysUpcomingTasks.count - 1 {
+                            Divider()
+                                .overlay(Color(hex: "f8f3f3"))
+                                .padding(.horizontal, 24)  // Shorter lines aligned with tasks
+                        }
+                    }
                 }
-            }
-            .background(Color.white) // Card background
-            .cornerRadius(12) // Consistent rounded corners
-            .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
         }
-        .padding(.bottom, 40) // Section spacing
+        .background(Color.white) // Card background
+        .cornerRadius(12) // Consistent rounded corners
+        .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
     }
     
     // MARK: - ✅ Completed Tasks Section
@@ -429,25 +523,21 @@ struct DashboardView: View {
      * - Timestamp and location data (if available)
      */
     private var completedTasksSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            
-            /*
-             * COMPLETED TASK LIST: Profile-filtered, today-only completed tasks
-             * Data source: viewModel.todaysCompletedTasks (automatically filtered)
-             * 
-             * KEY DIFFERENCE FROM UPCOMING:
-             * - showViewButton: true enables reviewing completion evidence
-             * - Families can see photos, SMS responses, timestamps
-             * - Provides peace of mind that care tasks were actually completed
-             */
-            VStack(spacing: 0) {
+        /*
+         * COMPLETED TASK LIST: Profile-filtered, today-only completed tasks
+         * Data source: viewModel.todaysCompletedTasks (automatically filtered)
+         * 
+         * KEY DIFFERENCE FROM UPCOMING:
+         * - showViewButton: true enables reviewing completion evidence
+         * - Families can see photos, SMS responses, timestamps
+         * - Provides peace of mind that care tasks were actually completed
+         */
+        VStack(spacing: 0) {
                 // Section title inside card
                 HStack {
                     Text("COMPLETED TASKS")
-                        .font(.custom("Inter", size: 15))
-                        .fontWeight(.bold)
+                        .font(.system(size: 15, weight: .bold))
                         .tracking(-1)
-                        .lineSpacing(33 - 15)
                         .foregroundColor(Color(hex: "9f9f9f"))
                         .padding(.horizontal, 12)
                         .padding(.top, 12)
@@ -455,104 +545,96 @@ struct DashboardView: View {
                     Spacer()
                 }
                 
-                // Task rows
-                ForEach(viewModel.todaysCompletedTasks) { task in
-                    TaskRowView(
-                        task: task.task,
-                        profile: task.profile,
-                        showViewButton: true // IMPORTANT: Enables viewing completion evidence
-                    )
+                // Task rows or Complete message
+                if viewModel.todaysCompletedTasks.isEmpty {
+                    // Show Complete message when no completed tasks
+                    HStack {
+                        Spacer()
+                        Text("Empty!")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.blue)
+                        Spacer()
+                    }
+                    .padding(.vertical, 20)
+                } else {
+                    ForEach(Array(viewModel.todaysCompletedTasks.enumerated()), id: \.offset) { index, task in
+                        TaskRowView(
+                            task: task.task,
+                            profile: task.profile,
+                            showViewButton: true, // IMPORTANT: Enables viewing completion evidence
+                            onViewButtonTapped: {
+                                let taskToFind = task.task
+                                _Concurrency.Task {
+                                    // Load all today's gallery events if not already loaded
+                                    if todaysGalleryEvents.isEmpty {
+                                        await loadTodaysGalleryEvents()
+                                    }
+                                    
+                                    // Find the specific event for this task
+                                    if let galleryEvent = await findGalleryEventForTask(taskToFind) {
+                                        // Find its index in the array
+                                        if let index = todaysGalleryEvents.firstIndex(where: { $0.id == galleryEvent.id }) {
+                                            await MainActor.run {
+                                                currentGalleryIndex = index
+                                                
+                                                // Disable animation when presenting
+                                                var transaction = Transaction()
+                                                transaction.disablesAnimations = true
+                                                withTransaction(transaction) {
+                                                    selectedTaskForGalleryDetail = galleryEvent
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                        .padding(.horizontal, 12)  // Match card title alignment
+                        .padding(.vertical, 12)
+                        .background(Color.white) // Each task has white background
+                        
+                        if index < viewModel.todaysCompletedTasks.count - 1 {
+                            Divider()
+                                .overlay(Color(hex: "f8f3f3"))
+                                .padding(.horizontal, 24)  // Shorter lines aligned with tasks
+                        }
+                    }
                 }
-            }
-            .background(Color.white) // Card background for grouping
-            .cornerRadius(12) // Consistent rounded appearance
-            .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
         }
+        .background(Color.white) // Card background for grouping
+        .cornerRadius(12) // Consistent rounded appearance
+        .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
         // No bottom padding - this is the last content section
     }
     
     // MARK: - 🧭 Bottom Tab Navigation
-    /**
-     * CUSTOM NAVIGATION DESIGN: Pill-shaped bottom navigation
-     * 
-     * DESIGN RATIONALE:
-     * - Custom design instead of native TabView for exact Figma match
-     * - Pill shape (94×43.19px) positioned precisely (10px right, 20px bottom)
-     * - Only 2 visible tabs (home/gallery) for MVP simplicity
-     * 
-     * BUSINESS LOGIC:
-     * - Home tab: Active state (black) - shows current screen (DashboardView)
-     * - Gallery tab: Inactive state (gray) - links to photo archive
-     * - Navigation logic handled by parent ContentView via TabView
-     * 
-     * VISUAL STATES:
-     * - Active tab: Black icons/text
-     * - Inactive tab: Gray icons/text
-     * - White background with light gray border for definition
-     * 
-     * FUTURE EXPANSION:
-     * - Hidden tabs ready (tags 2-5): Tasks, Profiles, Analytics, Settings
-     * - Can be revealed by changing TabView visibility in ContentView
-     */
     private var bottomTabNavigation: some View {
-        HStack {
-            Spacer() // Pushes navigation pill to right side
-            
-            /*
-             * PILL-SHAPED NAVIGATION CONTAINER:
-             * Exact dimensions from Figma specifications (94×43.19px)
-             * Corner radius is exactly half the height for perfect pill shape
-             */
-            HStack(spacing: 20) {
+        FloatingPillNavigation(selectedTab: $selectedTab)
+    }
+    
+    // MARK: - ✨ Create Habit Button
+    /**
+     * FLOATING CREATE HABIT BUTTON: Bottom center call-to-action
+     * 
+     * PURPOSE: Primary action button for creating new habits
+     * Positioned at bottom center for easy thumb access
+     * Opens TaskCreationView with selected profile preselected
+     * Same size as profile circles for visual consistency
+     */
+    private var createHabitButton: some View {
+        Button(action: {
+            showingTaskCreation = true
+        }) {
+            ZStack {
+                Circle()
+                    .fill(Color.black)
+                    .frame(width: 45, height: 45) // Same size as profile circles
+                    .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2)
                 
-                /*
-                 * HOME TAB: Currently active (black)
-                 * Icon: house.fill (filled to indicate active state)
-                 * Text: "home" in small Inter font
-                 * Color: Black indicates this is the current screen
-                 */
-                VStack(spacing: 4) {
-                    Image(systemName: "house.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(.black) // Active state
-                    
-                    Text("home")
-                        .font(.custom("Inter", size: 10))
-                        .foregroundColor(.black) // Active state
-                }
-                
-                /*
-                 * GALLERY TAB: Inactive (gray)
-                 * Icon: photo.on.rectangle (photo archive representation)
-                 * Text: "gallery" in small Inter font
-                 * Color: Gray indicates this is not the current screen
-                 * Action: Navigation handled by parent ContentView TabView
-                 */
-                VStack(spacing: 4) {
-                    Image(systemName: "photo.on.rectangle")
-                        .font(.system(size: 20))
-                        .foregroundColor(Color(hex: "9f9f9f")) // Inactive state
-                    
-                    Text("gallery")
-                        .font(.custom("Inter", size: 10))
-                        .foregroundColor(Color(hex: "9f9f9f")) // Inactive state
-                }
+                Image(systemName: "plus")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(.white)
             }
-            /*
-             * PILL CONTAINER STYLING:
-             * - Exact width/height from questions.txt requirements
-             * - Corner radius is half height for perfect pill shape
-             * - White background with light border for definition
-             * - Positioned exactly 10px from right, 20px from bottom
-             */
-            .frame(width: 94, height: 43.19) // Exact Figma dimensions
-            .background(Color.white)
-            .overlay(
-                RoundedRectangle(cornerRadius: 21.595) // Half of height = perfect pill
-                    .stroke(Color(hex: "e0e0e0"), lineWidth: 1)
-            )
-            .padding(.trailing, 10) // 10px from right edge (Figma spec)
-            .padding(.bottom, 20)   // 20px from bottom edge (Figma spec)
         }
     }
     
@@ -587,17 +669,9 @@ struct DashboardView: View {
         /*
          * Load dashboard data from ViewModel
          * This triggers network calls to fetch profiles, tasks, etc.
+         * Auto-selection now happens in DashboardViewModel after profiles are loaded
          */
         viewModel.loadDashboardData()
-        
-        /*
-         * AUTO-SELECT FIRST PROFILE: UX improvement
-         * Instead of showing empty task lists, immediately show first profile's tasks
-         * This follows the principle of "sensible defaults" for better user experience
-         */
-        if !viewModel.profiles.isEmpty && selectedProfileIndex == 0 {
-            viewModel.selectProfile(profileId: viewModel.profiles[0].id)
-        }
     }
     
     /**
@@ -626,7 +700,7 @@ struct ProfileImageView: View {
     
     // Fixed colors for profile slots 1,2,3,4
     private let profileColors: [Color] = [
-        Color.blue.opacity(0.6),      // Profile slot 0 - brighter
+        Color(hex: "B9E3FF"),         // Profile slot 0 - default light blue
         Color.red.opacity(0.6),       // Profile slot 1 - brighter
         Color.green.opacity(0.6),     // Profile slot 2 - brighter
         Color.purple.opacity(0.6)     // Profile slot 3 - brighter
@@ -681,6 +755,19 @@ struct TaskRowView: View {
     let task: Task
     let profile: ElderlyProfile?
     let showViewButton: Bool
+    let onViewButtonTapped: (() -> Void)?
+    
+    init(
+        task: Task,
+        profile: ElderlyProfile?,
+        showViewButton: Bool,
+        onViewButtonTapped: (() -> Void)? = nil
+    ) {
+        self.task = task
+        self.profile = profile
+        self.showViewButton = showViewButton
+        self.onViewButtonTapped = onViewButtonTapped
+    }
     
     var body: some View {
         HStack(spacing: 16) {
@@ -693,7 +780,7 @@ struct TaskRowView: View {
                 ZStack {
                     // Use a light version based on profile ID hash
                     let colorIndex = abs((profile?.id ?? "").hashValue) % 4
-                    let profileColor = [Color.blue, Color.red, Color.green, Color.purple][colorIndex]
+                    let profileColor = [Color(hex: "B9E3FF"), Color.red, Color.green, Color.purple][colorIndex]
                     profileColor.opacity(0.2)
                     Text(String(profile?.name.prefix(1) ?? "").uppercased())
                         .font(.custom("Inter", size: 14))
@@ -701,7 +788,7 @@ struct TaskRowView: View {
                         .foregroundColor(.black)
                 }
             }
-            .frame(width: 36, height: 36)
+            .frame(width: 32, height: 32)
             .clipShape(Circle())
             
             // Task Details
@@ -735,22 +822,20 @@ struct TaskRowView: View {
             // View Button (only for completed tasks)
             if showViewButton {
                 Button(action: {
-                    // View action (MVP - does nothing yet)
+                    onViewButtonTapped?()
                 }) {
                     Text("view")
-                        .font(.custom("Inter", size: 14))
+                        .font(.custom("Inter", size: 13))
                         .fontWeight(.medium)
-                        .foregroundColor(.black)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(Color(hex: "e8f3ff"))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(hex: "B9E3FF"))  // Solid blue from preview
                         .cornerRadius(8)
                 }
+                .frame(height: 28)
             }
         }
-        .padding(.horizontal, 20)  // Increased by 4px more for better left spacing
-        .padding(.vertical, 16)
-        .background(Color.white)
     }
     
     private func formatTime(_ date: Date) -> String {
@@ -889,23 +974,14 @@ struct SharedHeaderSection: View {
     var body: some View {
         HStack(alignment: .center) {
             /*
-             * MAIN LOGO: "halloo." brand text
-             * Font: Inter Regular 37.5px with adjusted letter spacing (-3.1px)
-             * Using custom period character for proper circular appearance
+             * MAIN LOGO: "Remi" brand text
+             * Font: Poppins Medium to match ProfileViews, scaled up for header
+             * Letter spacing adjusted for proper appearance at larger size
              */
-            HStack(spacing: -2) { // Negative spacing to overlap slightly
-                Text("halloo ")
-                    .font(.custom("Inter", size: 37.5))
-                    .fontWeight(.regular)
-                    .tracking(-3.1) // Slightly reduced letter spacing for better readability
-                    .lineSpacing(33 - 37.5)
-                    .foregroundColor(.black)
-                
-                Text("•")
-                    .font(.system(size: 24, weight: .regular))
-                    .foregroundColor(.black)
-                    .offset(x: -5, y: 9) // Move closer to text and adjust vertical position
-            }
+            Text("Remi")
+                .font(AppFonts.poppinsMedium(size: 37.5))
+                .tracking(-3.1) // Scaled tracking from ProfileViews (-1.9 to -3.1 for larger size)
+                .foregroundColor(.black)
             
             Spacer() // Pushes profile button to right edge
             
@@ -924,9 +1000,9 @@ struct SharedHeaderSection: View {
             }
         }
         /*
-         * HEADER PADDING: Generous spacing for prominence
-         * Horizontal: 26px for alignment with profile cards below
-         * Vertical: 20px top, 15px bottom for visual separation
+         * HEADER PADDING: Match Dashboard content padding
+         * Horizontal: 26px to match typical Dashboard spacing
+         * Vertical: 20px top, 10px bottom for visual separation
          */
         .padding(.horizontal, 26)
         .padding(.top, 20)
@@ -939,7 +1015,7 @@ struct SharedHeaderSection: View {
 struct PreviewProfilesSection: View {
     // Move static data outside body to avoid Canvas issues
     private let mockProfiles = [
-        ("👴🏻", "Grandpa Joe", Color.blue.opacity(0.6), true),   // Show all outlines
+        ("👴🏻", "Grandpa Joe", Color(hex: "B9E3FF"), true),   // Show all outlines
         ("👵🏽", "Grandma Maria", Color.red.opacity(0.6), true),  // Show all outlines
         ("👴🏿", "Uncle Robert", Color.green.opacity(0.6), true)   // Show all outlines
     ]
@@ -950,9 +1026,9 @@ struct PreviewProfilesSection: View {
             VStack(alignment: .leading, spacing: 12) {
                 // Section Title inside the card
                 Text("PROFILES:")
-                    .tracking(-1)
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(.secondary)
+                    .tracking(-1)
+                    .foregroundColor(Color(hex: "9f9f9f"))
                 
                 // Profile circles
                 HStack(spacing: 12) {
@@ -1003,8 +1079,8 @@ struct PreviewCreateHabitSection: View {
                 // Title at top of card
                 HStack {
                     Text("CREATE A CUSTOM HABIT")
-                        .tracking(-1)
                         .font(.system(size: 15, weight: .bold))
+                        .tracking(-1)
                         .foregroundColor(.secondary)
                     
                     Spacer()
@@ -1066,12 +1142,20 @@ struct PreviewCreateHabitSection: View {
                 Spacer()
                 
                 // Mascot (right side, extends below card but clipped)
-                Image("Mascot")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: screenWidth * 0.43) // Taller than card
-                    .offset(x: -50, y: screenWidth * 0.08) // Move left for button alignment, and down slightly more
-                    .padding(.trailing, 20)
+                ZStack {
+                    Image("Mascot")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: screenWidth * 0.43) // Taller than card
+                    
+                    // Circle on mascot's stomach
+                    Circle()
+                        .fill(Color(hex: "28ADFF"))
+                        .frame(width: 20, height: 20)
+                        .offset(x: -5, y: 15) // Position on stomach area
+                }
+                .offset(x: -50, y: screenWidth * 0.08) // Move left for button alignment, and down slightly more
+                .padding(.trailing, 20)
             }
             .frame(width: screenWidth * 0.92)
             .frame(height: screenWidth * 0.314)
@@ -1084,7 +1168,7 @@ struct PreviewCreateHabitSection: View {
 struct PreviewUpcomingSection: View {
     // Move static data outside body to avoid Canvas issues
     private let mockTasks = [
-        ("👴🏻", "Grandpa Joe", "Take Morning Medication", "9AM"),
+        ("👴🏻", "Grandpa Joe", "example task • Create Now!", "9AM"),
         ("👴🏻", "Grandpa Joe", "Walk in Garden", "2PM"),
         ("👴🏻", "Grandpa Joe", "Call Family", "6PM")
     ]
@@ -1096,8 +1180,8 @@ struct PreviewUpcomingSection: View {
                 // Section Title inside the card
                 HStack {
                     Text("UPCOMING")
-                        .tracking(-1)
                         .font(.system(size: 15, weight: .bold))
+                        .tracking(-1)
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 12)
                         .padding(.top, 12)
@@ -1113,7 +1197,7 @@ struct PreviewUpcomingSection: View {
                             // Consistent color mapping - Grandpa Joe always blue
                             let backgroundColor: Color = {
                                 switch task.1 {
-                                case "Grandpa Joe": return Color.blue
+                                case "Grandpa Joe": return Color(hex: "B9E3FF")
                                 case "Grandma Maria": return Color.red  
                                 case "Uncle Robert": return Color.green
                                 default: return Color.purple
@@ -1173,7 +1257,7 @@ struct PreviewUpcomingSection: View {
 struct PreviewCompletedTasksSection: View {
     // Move static data outside body to avoid Canvas issues
     private let mockCompletedTasks = [
-        ("👴🏻", "Grandpa Joe", "Morning Exercise", "8AM"),
+        ("👴🏻", "Grandpa Joe", "example task • Create Now!", "8AM"),
         ("👴🏻", "Grandpa Joe", "Breakfast", "8:30AM")
     ]
     
@@ -1184,8 +1268,8 @@ struct PreviewCompletedTasksSection: View {
                 // Section Title - moved inside card
                 HStack {
                     Text("COMPLETED TASKS")
-                        .tracking(-1)
                         .font(.system(size: 15, weight: .bold))
+                        .tracking(-1)
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 12)
                         .padding(.top, 12)
@@ -1200,7 +1284,7 @@ struct PreviewCompletedTasksSection: View {
                             // Consistent color mapping - Grandpa Joe always blue
                             let backgroundColor: Color = {
                                 switch task.1 {
-                                case "Grandpa Joe": return Color.blue
+                                case "Grandpa Joe": return Color(hex: "B9E3FF")
                                 case "Grandma Maria": return Color.red  
                                 case "Uncle Robert": return Color.green
                                 default: return Color.purple
@@ -1303,6 +1387,130 @@ struct PreviewBottomNavigation: View {
         )
         .padding(.trailing, 10)
         .padding(.bottom, 20)
+    }
+}
+
+// MARK: - Universal Floating Pill Navigation Component
+/**
+ * UNIVERSAL FLOATING PILL NAVIGATION: Shared navigation component
+ * 
+ * DESIGN RATIONALE:
+ * - Custom design instead of native TabView for exact Figma match
+ * - Pill shape (94×43.19px) positioned precisely (10px right, 20px bottom)
+ * - Only 2 visible tabs (home/gallery) for MVP simplicity
+ * 
+ * BUSINESS LOGIC:
+ * - Home tab: Active state (black) - shows Dashboard screen
+ * - Gallery tab: Inactive state (gray) - shows Gallery screen
+ * - Navigation logic handled by parent ContentView via TabView
+ * 
+ * VISUAL STATES:
+ * - Active tab: Black icons/text
+ * - Inactive tab: Gray icons/text
+ * - White background with light gray border for definition
+ * 
+ * USAGE: Can be used in any view that needs tab navigation
+ */
+struct FloatingPillNavigation: View {
+    @Binding var selectedTab: Int
+    
+    // iPhone 13 base dimensions for scaling (390x844)
+    private let iPhone13Width: CGFloat = 390
+    private let basePillWidth: CGFloat = 94
+    private let basePillHeight: CGFloat = 43
+    
+    // Calculate responsive dimensions based on screen width
+    private var pillWidth: CGFloat {
+        let screenWidth = UIScreen.main.bounds.width
+        return (basePillWidth / iPhone13Width) * screenWidth
+    }
+    
+    private var pillHeight: CGFloat {
+        let screenWidth = UIScreen.main.bounds.width
+        return (basePillHeight / iPhone13Width) * screenWidth
+    }
+    
+    private var iconSize: CGFloat {
+        let screenWidth = UIScreen.main.bounds.width
+        return (20 / iPhone13Width) * screenWidth
+    }
+    
+    private var fontSize: CGFloat {
+        let screenWidth = UIScreen.main.bounds.width
+        return (10 / iPhone13Width) * screenWidth
+    }
+    
+    var body: some View {
+        HStack {
+            Spacer() // Pushes navigation pill to right side
+            
+            /*
+             * PILL-SHAPED NAVIGATION CONTAINER:
+             * Responsive dimensions based on iPhone 13 proportions (43px height on 390px width)
+             * Corner radius is exactly half the height for perfect pill shape
+             */
+            HStack(spacing: pillWidth * 0.2) { // Proportional spacing
+                
+                /*
+                 * HOME TAB: Dynamic active/inactive state
+                 * Icon: house.fill when active, house when inactive
+                 * Text: "home" in small Inter font with negative tracking
+                 * Color: Changes based on selectedTab state
+                 */
+                VStack(spacing: 4) {
+                    Image(systemName: selectedTab == 0 ? "house.fill" : "house")
+                        .font(.system(size: iconSize))
+                        .foregroundColor(selectedTab == 0 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
+                    
+                    Text("home")
+                        .font(.custom("Inter", size: fontSize))
+                        .tracking(-0.5) // Negative letter spacing to condense text
+                        .foregroundColor(selectedTab == 0 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
+                }
+                .onTapGesture {
+                    selectedTab = 0 // Switch to Home tab
+                }
+                
+                /*
+                 * GALLERY TAB: Dynamic active/inactive state
+                 * Icon: photo.on.rectangle (photo archive representation)
+                 * Text: "gallery" in small Inter font with negative tracking
+                 * Color: Changes based on selectedTab state
+                 * Action: Updates selectedTab to switch to Gallery view
+                 */
+                VStack(spacing: 4) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: iconSize))
+                        .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
+                    
+                    Text("gallery")
+                        .font(.custom("Inter", size: fontSize))
+                        .tracking(-0.5) // Negative letter spacing to condense text
+                        .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
+                }
+                .onTapGesture {
+                    selectedTab = 1 // Switch to Gallery tab
+                }
+            }
+            /*
+             * PILL CONTAINER STYLING:
+             * - Responsive sizing based on screen dimensions
+             * - Corner radius is half height for perfect pill shape
+             * - White pill-shaped background with matching stroke
+             * - Positioned exactly 10px from right, 20px from bottom
+             */
+            .frame(width: pillWidth, height: pillHeight) // Responsive dimensions
+            .background(
+                RoundedRectangle(cornerRadius: pillHeight / 2) // Half of height = perfect pill
+                    .fill(Color.white)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: pillHeight / 2) // Same corner radius for stroke
+                    .stroke(Color(hex: "e0e0e0"), lineWidth: 1)
+            )
+            .padding(.trailing, 10) // 10px from right edge (Figma spec)
+            .padding(.bottom, 20)   // 20px from bottom edge (Figma spec)
+        }
     }
 }
 #endif

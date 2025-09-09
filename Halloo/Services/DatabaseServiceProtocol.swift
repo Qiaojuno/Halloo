@@ -155,6 +155,16 @@ protocol DatabaseServiceProtocol {
     /// - Warning: Cascading deletion removes all care coordination history for this elderly person
     func deleteElderlyProfile(_ profileId: String) async throws
     
+    /// Retrieves all confirmed elderly profiles for a specific family user
+    /// 
+    /// Loads only confirmed elderly profiles that have completed SMS verification
+    /// and are ready for task assignments and care coordination.
+    ///
+    /// - Parameter userId: Family user managing the elderly profiles
+    /// - Returns: Array of confirmed elderly profiles
+    /// - Throws: DatabaseError if data retrieval fails
+    func getConfirmedProfiles(for userId: String) async throws -> [ElderlyProfile]
+    
     // MARK: - Elderly Care Task Coordination Operations
     
     /// Creates a new care task with SMS reminder scheduling for elderly family member
@@ -351,6 +361,28 @@ protocol DatabaseServiceProtocol {
     /// - Throws: DatabaseError if deletion fails
     /// - Note: Deletion may impact care completion statistics and analytics
     func deleteSMSResponse(_ responseId: String) async throws
+    
+    // MARK: - Gallery History Event Operations
+    
+    /// Creates a gallery history event for tracking profile creation and task completion milestones
+    /// 
+    /// Records significant events in the family care coordination history, including profile
+    /// confirmations and task completions, for display in the gallery timeline.
+    ///
+    /// - Parameter event: Gallery history event with milestone data and family context
+    /// - Throws: DatabaseError if event creation fails
+    /// - Important: Gallery events provide families with visual timeline of care milestones
+    func createGalleryHistoryEvent(_ event: GalleryHistoryEvent) async throws
+    
+    /// Retrieves all gallery history events for a specific family user
+    /// 
+    /// Loads complete timeline of care milestones including profile creations and
+    /// task completions for family gallery display and coordination history.
+    ///
+    /// - Parameter userId: Family user managing the care coordination
+    /// - Returns: Array of gallery history events sorted by creation date
+    /// - Throws: DatabaseError if data retrieval fails
+    func getGalleryHistoryEvents(for userId: String) async throws -> [GalleryHistoryEvent]
     
     // MARK: - Analytics and Reporting
     func getTaskCompletionStats(for userId: String, from startDate: Date, to endDate: Date) async throws -> TaskCompletionStats

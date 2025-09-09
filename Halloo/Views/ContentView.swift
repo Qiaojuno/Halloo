@@ -7,6 +7,7 @@ struct ContentView: View {
     
     // MARK: - State Management
     @StateObject private var onboardingViewModel: OnboardingViewModel
+    @StateObject private var profileViewModel: ProfileViewModel
     @State private var isLoading = true
     @State private var selectedTab = 0
     
@@ -18,18 +19,51 @@ struct ContentView: View {
             databaseService: MockDatabaseService(),
             errorCoordinator: ErrorCoordinator()
         ))
+        
+        // Initialize ProfileViewModel with mock services for consistency
+        _profileViewModel = StateObject(wrappedValue: ProfileViewModel(
+            databaseService: MockDatabaseService(),
+            smsService: MockSMSService(),
+            authService: MockAuthenticationService(),
+            dataSyncCoordinator: DataSyncCoordinator(
+                databaseService: MockDatabaseService(),
+                notificationCoordinator: NotificationCoordinator(),
+                errorCoordinator: ErrorCoordinator()
+            ),
+            errorCoordinator: ErrorCoordinator()
+        ))
     }
     
     var body: some View {
         Group {
             if isLoading {
                 LoadingView()
+                    .onAppear {
+                        print("🔥 LoadingView appeared - isLoading = true")
+                        // Failsafe: If still loading after 2 seconds, force continue
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            if isLoading {
+                                print("⚠️ Loading timeout - forcing app start")
+                                isLoading = false
+                            }
+                        }
+                    }
             } else {
                 navigationContent
+                    .onAppear {
+                        print("🔥 navigationContent appeared - isLoading = false")
+                    }
             }
         }
         .onAppear {
             initializeViewModels()
+            // DEVELOPMENT: Skip onboarding for faster testing
+            #if DEBUG
+            if !onboardingViewModel.isComplete {
+                print("🚀 DEVELOPMENT MODE: Skipping onboarding flow")
+                onboardingViewModel.skipToEnd()
+            }
+            #endif
         }
         .onChange(of: onboardingViewModel.isComplete) { oldValue, newValue in
             handleOnboardingCompletion(newValue)
@@ -39,39 +73,19 @@ struct ContentView: View {
     // MARK: - Navigation Content
     @ViewBuilder
     private var navigationContent: some View {
+        // RESTORED: Proper app flow with onboarding check
         if !onboardingViewModel.isComplete {
             onboardingFlow
         } else {
             authenticatedContent
         }
+        
+        // DEBUG: Firebase Test Button temporarily removed
     }
     
     @ViewBuilder
     private var authenticatedContent: some View {
-        TabView(selection: $selectedTab) {
-            DashboardView()
-                .environmentObject(container.makeDashboardViewModel())
-                .environmentObject(container.makeProfileViewModel())
-                .tabItem {
-                    Image(systemName: "house.fill")
-                    Text("Home")
-                }
-                .tag(0)
-            
-            Text("Tasks View") // Placeholder
-                .tabItem {
-                    Image(systemName: "list.bullet")
-                    Text("Tasks")  
-                }
-                .tag(1)
-                
-            Text("Profiles View") // Placeholder
-                .tabItem {
-                    Image(systemName: "person.2.fill")
-                    Text("Profiles")
-                }
-                .tag(2)
-        }
+        mainAppFlow
     }
     
     @ViewBuilder
@@ -91,7 +105,7 @@ struct ContentView: View {
             
         case .preferences:
             CreateProfileView()
-                .environmentObject(container.makeProfileViewModel())
+                .environmentObject(profileViewModel)
             
         case .complete:
             OnboardingCompleteView()
@@ -101,40 +115,80 @@ struct ContentView: View {
     
     // MARK: - Main App Flow
     private var mainAppFlow: some View {
-        TabView(selection: $selectedTab) {
-            // Dashboard Tab - Home screen
-            NavigationView {
-                DashboardView()
-                    .environmentObject(container.makeDashboardViewModel())
-            }
-            .navigationViewStyle(StackNavigationViewStyle())
-            .tabItem {
-                Image(systemName: selectedTab == 0 ? "house.fill" : "house")
-                Text("Home")
-            }
-            .tag(0)
+        // Custom navigation without TabView to eliminate black box completely
+        ZStack {
+            Color(hex: "f9f9f9") // Consistent app background
             
-            // Gallery Tab - MVP: Archive of completed habits with photos
-            NavigationView {
-                GalleryView()
+            // Conditional view switching based on selectedTab
+            if selectedTab == 0 {
+                // Dashboard Tab - Home screen
+                DashboardView(selectedTab: $selectedTab)
+                    .environmentObject(container.makeDashboardViewModel())
+                    .environmentObject(profileViewModel)
+            } else {
+                // Gallery Tab - Archive of completed habits with photos
+                GalleryView(selectedTab: $selectedTab)
             }
-            .navigationViewStyle(StackNavigationViewStyle())
-            .tabItem {
-                Image(systemName: selectedTab == 1 ? "photo.on.rectangle" : "photo")
-                Text("Gallery")
-            }
-            .tag(1)
         }
-        .accentColor(.blue)
-        .onAppear {
-            configureTabBarAppearance()
-        }
+        // No longer need onAppear since we're not using TabView
     }
     
     // MARK: - Initialization Methods
     private func initializeViewModels() {
         // ViewModels are initialized through Container dependency injection
+        print("🔥 initializeViewModels called - setting isLoading = false")
+        
+        // Debug: Check which services are being used
+        let authService = container.resolve(AuthenticationServiceProtocol.self)
+        let dbService = container.resolve(DatabaseServiceProtocol.self)
+        
+        print("🔥 Auth Service: \(type(of: authService))")
+        print("🔥 Database Service: \(type(of: dbService))")
+        
         isLoading = false
+        print("🔥 isLoading is now: \(isLoading)")
+    }
+    
+    // TEMPORARY: Safe TaskViewModel creation with detailed debugging
+    private func safeTaskViewModel() -> TaskViewModel? {
+        print("🔥 Attempting to create TaskViewModel...")
+        
+        print("🔥 Step 1: Resolving DatabaseService...")
+        let dbService = container.resolve(DatabaseServiceProtocol.self)
+        print("🔥 Step 1: DatabaseService resolved = \(type(of: dbService))")
+        
+        print("🔥 Step 2: Resolving SMSService...")
+        let smsService = container.resolve(SMSServiceProtocol.self)
+        print("🔥 Step 2: SMSService resolved = \(type(of: smsService))")
+        
+        print("🔥 Step 3: Resolving NotificationService...")
+        let notificationService = container.resolve(NotificationServiceProtocol.self)
+        print("🔥 Step 3: NotificationService resolved = \(type(of: notificationService))")
+        
+        print("🔥 Step 4: Resolving AuthService...")
+        let authService = container.resolve(AuthenticationServiceProtocol.self)
+        print("🔥 Step 4: AuthService resolved = \(type(of: authService))")
+        
+        print("🔥 Step 5: Resolving DataSyncCoordinator...")
+        let dataSyncCoordinator = container.resolve(DataSyncCoordinator.self)
+        print("🔥 Step 5: DataSyncCoordinator resolved = \(type(of: dataSyncCoordinator))")
+        
+        print("🔥 Step 6: Resolving ErrorCoordinator...")
+        let errorCoordinator = container.resolve(ErrorCoordinator.self)
+        print("🔥 Step 6: ErrorCoordinator resolved = \(type(of: errorCoordinator))")
+        
+        print("🔥 Step 7: Creating TaskViewModel with all dependencies...")
+        let viewModel = TaskViewModel(
+            databaseService: dbService,
+            smsService: smsService,
+            notificationService: notificationService,
+            authService: authService,
+            dataSyncCoordinator: dataSyncCoordinator,
+            errorCoordinator: errorCoordinator
+        )
+        print("🔥 Step 7: TaskViewModel created successfully!")
+        
+        return viewModel
     }
     
     // MARK: - Event Handlers
@@ -147,23 +201,51 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - UI Configuration
-    private func configureTabBarAppearance() {
-        // Senior-friendly tab bar configuration
-        let appearance = UITabBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = UIColor.systemBackground
+    // MARK: - Firebase Testing (DEBUG ONLY)
+    #if DEBUG
+    private func testFirebaseIntegration() {
+        print("🧪 FIREBASE INTEGRATION TEST STARTING...")
         
-        // Larger icons and text for seniors
-        UITabBar.appearance().standardAppearance = appearance
-        if #available(iOS 15.0, *) {
-            UITabBar.appearance().scrollEdgeAppearance = appearance
+        // Test 1: Check which services are loaded
+        let authService = container.resolve(AuthenticationServiceProtocol.self)
+        let dbService = container.resolve(DatabaseServiceProtocol.self)
+        
+        print("🔥 Auth Service: \(type(of: authService))")
+        print("🔥 Database Service: \(type(of: dbService))")
+        
+        // Test 2: Try creating a test account
+        DispatchQueue.main.async {
+            _Concurrency.Task {
+                do {
+                    print("🧪 Attempting to create test Firebase account...")
+                    let result = try await authService.createAccount(
+                        email: "test@firebase.remi.com", 
+                        password: "TestPassword123",
+                        fullName: "Firebase Test User"
+                    )
+                    print("✅ Firebase account created! UID: \(result.uid)")
+                    
+                    // Test 3: Try signing out
+                    try await authService.signOut()
+                    print("✅ Firebase sign out successful!")
+                    
+                } catch {
+                    print("❌ Firebase test failed: \(error)")
+                }
+            }
         }
-        
-        // Increase tab bar item font size
-        UITabBarItem.appearance().setTitleTextAttributes([
-            .font: UIFont.systemFont(ofSize: 12, weight: .medium)
-        ], for: .normal)
+    }
+    #endif
+    
+    // MARK: - UI Configuration
+    // TabBar hiding functions no longer needed since we removed TabView completely
+    // Keeping empty functions to avoid breaking any remaining references
+    private func hideTabBarCompletely() {
+        // No longer needed - TabView removed
+    }
+    
+    private func configureTabBarAppearance() {
+        // No longer needed - TabView removed
     }
 }
 

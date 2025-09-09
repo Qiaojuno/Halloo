@@ -18,6 +18,7 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
         case profiles = "profiles"
         case tasks = "tasks"
         case responses = "responses"
+        case galleryEvents = "gallery_events"
         
         var path: String { rawValue }
     }
@@ -147,6 +148,36 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
         
         // Update user's profile count
         try await updateUserProfileCount(userId)
+    }
+    
+    func getConfirmedProfiles(for userId: String) async throws -> [ElderlyProfile] {
+        let query = db.collection(Collection.profiles.path)
+            .whereField("userId", isEqualTo: userId)
+            .whereField("status", isEqualTo: "confirmed")
+            .order(by: "createdAt", descending: true)
+        
+        let snapshot = try await query.getDocuments()
+        return try snapshot.documents.compactMap { doc in
+            try doc.data(as: ElderlyProfile.self)
+        }
+    }
+    
+    // MARK: - Gallery History Event Operations
+    
+    func createGalleryHistoryEvent(_ event: GalleryHistoryEvent) async throws {
+        let eventData = try encodeToFirestore(event)
+        try await db.collection(Collection.galleryEvents.path).document(event.id).setData(eventData)
+    }
+    
+    func getGalleryHistoryEvents(for userId: String) async throws -> [GalleryHistoryEvent] {
+        let query = db.collection(Collection.galleryEvents.path)
+            .whereField("userId", isEqualTo: userId)
+            .order(by: "createdAt", descending: true)
+        
+        let snapshot = try await query.getDocuments()
+        return try snapshot.documents.compactMap { doc in
+            try doc.data(as: GalleryHistoryEvent.self)
+        }
     }
     
     // MARK: - Task Operations

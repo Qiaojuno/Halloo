@@ -5,8 +5,8 @@ import Combine
 class MockAuthenticationService: AuthenticationServiceProtocol {
     
     // MARK: - Properties
-    @Published var isAuthenticated: Bool = false
-    private let authStateSubject = CurrentValueSubject<Bool, Never>(false)
+    @Published var isAuthenticated: Bool = true
+    private let authStateSubject = CurrentValueSubject<Bool, Never>(true)
     
     var currentUser: AuthUser? {
         return isAuthenticated ? AuthUser(

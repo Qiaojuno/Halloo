@@ -1,23 +1,83 @@
- 1. Which specific EnvironmentObject is
-  missing? The crash could be
-  ProfileViewModel OR another
-  @EnvironmentObject dependency
+1. View Name: How about GalleryDetailView or ContentDetailView or
+  GalleryItemDetailView? Which sounds better to you?
   
-  I was opening ProfileViews when it crashed
+  GalleryDetailView sounds good. Later we're going to have to add a simliar system to Dashboard for finished tasks, so we can reuse a similar name like DashboardDetailView or something''
+  2. Navigation Style: Should this be:
+    - Full screen cover (like profile onboarding)?
+    - Navigation push (with back button)?
+    - Modal sheet that can be dismissed?
+    
+    It will be full screen cover, sharing the same top nav bar as GalleryView and DashboardView. There will also the the same pill navigation bar at the bottom
+    
+  3. Back Navigation: How should users return to gallery - back
+  button, swipe down, tap outside content?
+
+using the navigation bar at the bottom
+
+  Content Type Handling Questions:
+
+  4. Photo Content: For photos, should we show:
+    - Full screen photo with zoom/pan capabilities?
+    - Photo + metadata (date, profile name, task info)?
+    - Photo + SMS text response if any?
+    
+    In the figma file, it has Photo, and then below it there's text that says "task confirmed" followed by the Task name in bold and the time finished next to it.
+    
+  5. Text/SMS Content: For text messages, should we show:
+    - Large, readable text version?
+    - SMS conversation style (like Messages app)?
+    - Text + associated task details?
+    - Profile context (who sent it)?
+    
+    I want a SMS conversation style. We will recreate the text bubbles. I want them to look like the bubble.fill SF symbol (rounded rectangle with a right angle triangle on the bottom (left or right depending on receiver or sender))
+    
+  6. Profile Creation Events: For "create new profile" history
+  items, should we show:
+    - Profile details (name, relationship, join date)?
+    - Profile creation timeline/steps?
+    - Profile statistics?
+    
+    do it similar to photo Content. Show a big profile picture in the middle, on the bottom instead of "task confirmed" it's "profile created", then Name of progile in bold and on the right the time created'
+
+  UI Layout Questions:
+
+  7. Header: Should there be a header showing date, profile name, or
+   task title?
+   
+   on top of the picture (or content), there's the date (Like Sept 1, 2025)'
+  8. Action Buttons: Should users be able to:
+    - Share the content?
+    - Delete the item?
+    - Mark as favorite?
+    - Add notes/comments?
+    
+    None of these options yet, definetly in the future tho, for now it's just for archival purposes'
+
+  Data Questions:
+
+  9. Additional Info: Should we fetch more details when opening the
+  detail view, or use existing gallery data?
   
-  2. Is Container.shared causing side
-  effects during preview generation? (You
-   confirmed we should create separate
-  MockContainer)
+  If there is more data we need that's not in gallery, let me know.'
   
-  not sure, double check
+  10. Related Content: Should we show related items (other photos
+  from same day, other responses from same profile)?
   
-  3. Are there hidden @EnvironmentObject
-  dependencies in sub-components?
+  no
+
+  Technical Questions:
+
+  11. Existing Tap Handling: Does GalleryView currently handle taps,
+   or do I need to add onTapGesture?
+   
+   yes, galleryView handles taps. currently, when clicking on the content squares it sends a empty popup. Look into appstructure.txt and ui txt files for context
+   
+  12. State Management: Should this detail view be part of existing
+  ViewModels or need its own?
   
-  not sure
-  
-  4. Is the issue with SwiftUI's Group{}
-  preview structure itself?
-  
-  not sure
+  Check, I believe we haven't added this yet'
+
+  Please clarify these points so I can implement this feature with
+  perfect understanding of your vision!
+
+

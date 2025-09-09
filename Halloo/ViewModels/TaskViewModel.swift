@@ -129,11 +129,12 @@ final class TaskViewModel: ObservableObject {
     /// Custom frequency allows for specific days like "Monday, Wednesday, Friday exercises".
     @Published var frequency: TaskFrequency = .daily
     
-    /// When the SMS reminder should be sent to the elderly parent
+    /// When the SMS reminders should be sent to the elderly parent
     /// 
     /// Automatically adjusted for the elderly profile's timezone.
-    /// Family members set this in their local time, converted for elderly parent.
-    @Published var scheduledTime = Date()
+    /// Family members set these in their local time, converted for elderly parent.
+    /// Multiple times create separate tasks for each reminder.
+    @Published var scheduledTimes: [Date] = []
     
     /// Minutes after scheduled time before marking task as "overdue"
     /// 
@@ -429,11 +430,11 @@ final class TaskViewModel: ObservableObject {
             .store(in: &cancellables)
         
         // Time validation
-        $scheduledTime
+        $scheduledTimes
             .combineLatest($frequency)
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
-            .sink { [weak self] time, frequency in
-                self?.validateScheduledTime(time, frequency: frequency)
+            .sink { [weak self] times, frequency in
+                self?.validateScheduledTimes(times, frequency: frequency)
             }
             .store(in: &cancellables)
         
@@ -589,37 +590,45 @@ final class TaskViewModel: ObservableObject {
                 throw TaskError.maxTasksReached
             }
             
-            // Create task with elderly-optimized defaults
-            let task = Task(
-                id: UUID().uuidString,
-                userId: userId,
-                profileId: profile.id,
-                title: taskTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                description: taskDescription.trimmingCharacters(in: .whitespacesAndNewlines),
-                category: taskCategory,
-                frequency: frequency,
-                scheduledTime: scheduledTime, // Automatically converted to elderly profile's timezone
-                deadlineMinutes: deadlineMinutes, // Category-specific defaults (medication: 10min, social: 2hrs)
-                requiresPhoto: requiresPhoto,
-                requiresText: requiresText,
-                customDays: frequency == .custom ? Array(customDays) : [],
-                startDate: startDate,
-                endDate: endDate,
-                status: isActive ? .active : .paused,
-                notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
-                createdAt: Date(),
-                lastModifiedAt: Date()
-            )
+            // Create separate task for each scheduled time (allows individual tracking)
+            var createdTasks: [Task] = []
             
-            // Persist with family synchronization
-            try await databaseService.createTask(task)
-            
-            // Schedule SMS reminders and family notifications
-            try await scheduleTaskNotifications(for: task)
+            for scheduledTime in scheduledTimes {
+                let task = Task(
+                    id: UUID().uuidString,
+                    userId: userId,
+                    profileId: profile.id,
+                    title: taskTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+                    description: taskDescription.trimmingCharacters(in: .whitespacesAndNewlines),
+                    category: taskCategory,
+                    frequency: frequency,
+                    scheduledTime: scheduledTime, // Automatically converted to elderly profile's timezone
+                    deadlineMinutes: deadlineMinutes, // Category-specific defaults (medication: 10min, social: 2hrs)
+                    requiresPhoto: requiresPhoto,
+                    requiresText: requiresText,
+                    customDays: frequency == .custom ? Array(customDays) : [],
+                    startDate: startDate,
+                    endDate: endDate,
+                    status: isActive ? .active : .paused,
+                    notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+                    createdAt: Date(),
+                    lastModifiedAt: Date()
+                )
+                
+                // Persist with family synchronization
+                try await databaseService.createTask(task)
+                
+                // Schedule SMS reminders and family notifications
+                try await scheduleTaskNotifications(for: task)
+                
+                createdTasks.append(task)
+            }
             
             await MainActor.run {
                 // Update local state for immediate family feedback
-                self.tasks.insert(task, at: 0)
+                for task in createdTasks {
+                    self.tasks.insert(task, at: 0)
+                }
                 self.resetForm()
                 self.showingCreateTask = false
             }
@@ -665,7 +674,7 @@ final class TaskViewModel: ObservableObject {
                 description: taskDescription.trimmingCharacters(in: .whitespacesAndNewlines),
                 category: taskCategory,
                 frequency: frequency,
-                scheduledTime: scheduledTime,
+                scheduledTime: scheduledTimes.first ?? Date(),
                 deadlineMinutes: deadlineMinutes,
                 requiresPhoto: requiresPhoto,
                 requiresText: requiresText,
@@ -684,7 +693,7 @@ final class TaskViewModel: ObservableObject {
             
             // Reschedule notifications if schedule changed
             let scheduleChanged = task.frequency != frequency ||
-                                task.scheduledTime != scheduledTime ||
+                                task.scheduledTime != (scheduledTimes.first ?? Date()) ||
                                 task.customDays != Array(customDays) ||
                                 task.status != updatedTask.status
             
@@ -857,7 +866,11 @@ final class TaskViewModel: ObservableObject {
                 photoData: photo,
                 isCompleted: true,
                 receivedAt: Date(),
-                responseType: photo != nil ? .photo : .text
+                responseType: photo != nil ? .photo : .text,
+                isConfirmationResponse: false,
+                isPositiveConfirmation: false,
+                responseScore: nil,
+                processingNotes: nil
             )
             
             try await databaseService.createSMSResponse(smsResponse)
@@ -945,25 +958,34 @@ final class TaskViewModel: ObservableObject {
         }
     }
     
-    private func validateScheduledTime(_ time: Date, frequency: TaskFrequency) {
+    private func validateScheduledTimes(_ times: [Date], frequency: TaskFrequency) {
+        if times.isEmpty {
+            timeError = "Please select at least one time"
+            return
+        }
+        
         let now = Date()
         let calendar = Calendar.current
         
         if frequency == .daily || frequency == .weekdays {
-            // For recurring tasks, just check if time is reasonable
-            let hour = calendar.component(.hour, from: time)
-            if hour < 6 || hour > 23 {
-                timeError = "Please select a time between 6 AM and 11 PM"
-            } else {
-                timeError = nil
+            // For recurring tasks, just check if times are reasonable
+            for time in times {
+                let hour = calendar.component(.hour, from: time)
+                if hour < 6 || hour > 23 {
+                    timeError = "Please select times between 6 AM and 11 PM"
+                    return
+                }
             }
+            timeError = nil
         } else {
-            // For one-time tasks, check if time is in the future
-            if time <= now {
-                timeError = "Please select a future time"
-            } else {
-                timeError = nil
+            // For one-time tasks, check if times are in the future
+            for time in times {
+                if time <= now {
+                    timeError = "Please select future times"
+                    return
+                }
             }
+            timeError = nil
         }
     }
     
@@ -987,7 +1009,7 @@ final class TaskViewModel: ObservableObject {
         taskDescription = task.description
         taskCategory = task.category
         frequency = task.frequency
-        scheduledTime = task.scheduledTime
+        scheduledTimes = [task.scheduledTime]
         deadlineMinutes = task.deadlineMinutes
         requiresPhoto = task.requiresPhoto
         requiresText = task.requiresText
@@ -1006,7 +1028,7 @@ final class TaskViewModel: ObservableObject {
         taskDescription = ""
         taskCategory = .medication
         frequency = .daily
-        scheduledTime = Date()
+        scheduledTimes = []
         deadlineMinutes = 10
         requiresPhoto = false
         requiresText = true

@@ -159,6 +159,9 @@ final class ProfileViewModel: ObservableObject {
     /// Ensures proper family organization and emergency contact setup.
     @Published var relationshipError: String?
     
+    /// Track if user has started typing in phone field to control validation display
+    @Published var hasStartedTypingPhone = false
+    
     // MARK: - SMS Confirmation Tracking Properties
     
     /// Current SMS confirmation status for each elderly profile
@@ -241,10 +244,41 @@ final class ProfileViewModel: ObservableObject {
     var isValidForm: Bool {
         return !profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
                !phoneNumber.isEmpty &&
+               phoneNumber != "+1 " && // Must be more than just the prefix
                !relationship.isEmpty &&
+               hasSelectedPhoto && // Picture is now required
                nameError == nil &&
                phoneError == nil &&
                relationshipError == nil
+    }
+    
+    /// Returns missing requirements for form validation
+    var missingRequirements: [String] {
+        var missing: [String] = []
+        
+        if profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            missing.append("Name")
+        }
+        if phoneNumber.isEmpty || phoneNumber == "+1 " {
+            missing.append("Phone Number")
+        }
+        if relationship.isEmpty {
+            missing.append("Relationship")
+        }
+        if !hasSelectedPhoto {
+            missing.append("Picture")
+        }
+        if nameError != nil {
+            missing.append("Valid Name")
+        }
+        if phoneError != nil {
+            missing.append("Valid Phone Number")
+        }
+        if relationshipError != nil {
+            missing.append("Valid Relationship")
+        }
+        
+        return missing
     }
     
     /// Profiles that have confirmed SMS consent and can receive task reminders
@@ -315,6 +349,36 @@ final class ProfileViewModel: ObservableObject {
         
         // Load existing profiles with confirmation status
         loadProfiles()
+    }
+    
+    /// Convenience initializer for Canvas previews that skips automatic data loading
+    /// 
+    /// This initializer prevents the stuck loading state in Canvas previews by skipping
+    /// the automatic `loadProfiles()` call during initialization.
+    init(
+        databaseService: DatabaseServiceProtocol,
+        smsService: SMSServiceProtocol,
+        authService: AuthenticationServiceProtocol,
+        dataSyncCoordinator: DataSyncCoordinator,
+        errorCoordinator: ErrorCoordinator,
+        skipAutoLoad: Bool = false
+    ) {
+        self.databaseService = databaseService
+        self.smsService = smsService
+        self.authService = authService
+        self.dataSyncCoordinator = dataSyncCoordinator
+        self.errorCoordinator = errorCoordinator
+        
+        // Configure elderly-appropriate validation
+        setupValidation()
+        
+        // Enable real-time family and SMS synchronization
+        setupDataSync()
+        
+        // Skip automatic loading for Canvas previews
+        if !skipAutoLoad {
+            loadProfiles()
+        }
     }
     
     // MARK: - Setup Methods
@@ -785,36 +849,69 @@ final class ProfileViewModel: ObservableObject {
     No further SMS reminders will be sent to elderly users who decline.
     */
     private func handleConfirmationResponse(_ response: SMSResponse) {
-        guard let profileId = response.profileId,
-              let index = profiles.firstIndex(where: { $0.id == profileId }) else {
+        guard let profileId = response.profileId else {
             return
         }
         
         if response.isPositiveConfirmation {
-            // Update profile to confirmed status - ready for task reminders
-            var updatedProfile = profiles[index]
-            updatedProfile.status = .confirmed
-            updatedProfile.confirmedAt = response.receivedAt
-            profiles[index] = updatedProfile
-            
-            confirmationStatus[profileId] = .confirmed
-            confirmationMessages[profileId] = "Confirmed! Ready to receive reminders."
-            
             // ONBOARDING FLOW: Check if this response is for current onboarding profile
             if let onboardingProfile = onboardingProfile,
                onboardingProfile.id == profileId,
                profileOnboardingStep == .confirmationWait {
-                // Advance onboarding flow to success step automatically
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    self.profileOnboardingStep = .onboardingSuccess
+                // NOW create and save the profile since SMS was confirmed
+                var confirmedProfile = onboardingProfile
+                confirmedProfile.status = .confirmed
+                confirmedProfile.confirmedAt = response.receivedAt
+                
+                // Persist to database for the first time
+                _Concurrency.Task {
+                    do {
+                        try await self.databaseService.createElderlyProfile(confirmedProfile)
+                        
+                        await MainActor.run {
+                            // Add to profiles array for the first time
+                            self.profiles.insert(confirmedProfile, at: 0)
+                            self.confirmationStatus[profileId] = .confirmed
+                            self.confirmationMessages[profileId] = "Confirmed! Ready to receive reminders."
+                            
+                            // Create gallery history event for profile creation
+                            self.createGalleryEventForProfile(confirmedProfile, profileSlot: 0)
+                            
+                            // Advance onboarding flow to success step
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                                self.profileOnboardingStep = .onboardingSuccess
+                            }
+                        }
+                        
+                        // Broadcast profile creation to Dashboard and family members
+                        self.dataSyncCoordinator.broadcastProfileUpdate(confirmedProfile)
+                    } catch {
+                        await MainActor.run {
+                            self.errorMessage = "Failed to save profile: \(error.localizedDescription)"
+                        }
+                    }
                 }
-            }
-            
-            // Persist confirmation status for family synchronization
-            _Concurrency.Task {
-                try? await databaseService.updateElderlyProfile(updatedProfile)
-                // Broadcast profile status update to Dashboard and family members
-                self.dataSyncCoordinator.broadcastProfileUpdate(updatedProfile)
+            } else {
+                // Handle existing profile confirmation (not onboarding)
+                if let index = profiles.firstIndex(where: { $0.id == profileId }) {
+                    var updatedProfile = profiles[index]
+                    updatedProfile.status = .confirmed
+                    updatedProfile.confirmedAt = response.receivedAt
+                    profiles[index] = updatedProfile
+                    
+                    confirmationStatus[profileId] = .confirmed
+                    confirmationMessages[profileId] = "Confirmed! Ready to receive reminders."
+                    
+                    // Create gallery history event for profile creation
+                    createGalleryEventForProfile(updatedProfile, profileSlot: index)
+                    
+                    // Persist confirmation status for family synchronization
+                    _Concurrency.Task {
+                        try? await databaseService.updateElderlyProfile(updatedProfile)
+                        // Broadcast profile status update to Dashboard and family members
+                        self.dataSyncCoordinator.broadcastProfileUpdate(updatedProfile)
+                    }
+                }
             }
         } else {
             // Honor elderly user's decline - no reminders will be sent
@@ -846,8 +943,16 @@ final class ProfileViewModel: ObservableObject {
     }
     
     private func validatePhoneNumber(_ phone: String) {
-        if phone.isEmpty {
+        // Mark that user has started typing if they've gone beyond the default "+1 "
+        if phone.count > 3 {
+            hasStartedTypingPhone = true
+        }
+        
+        // Only show validation errors after user has started typing
+        if !hasStartedTypingPhone {
             phoneError = nil
+        } else if phone == "+1 " || phone.isEmpty {
+            phoneError = nil // Don't show error for empty state
         } else if !phone.isValidPhoneNumber {
             phoneError = "Please enter a valid phone number"
         } else if profiles.contains(where: { $0.phoneNumber == phone.formattedPhoneNumber && $0.id != selectedProfile?.id }) {
@@ -858,13 +963,8 @@ final class ProfileViewModel: ObservableObject {
     }
     
     private func validateRelationship(_ relationship: String) {
-        if relationship.isEmpty {
-            relationshipError = nil
-        } else if !relationshipOptions.contains(relationship) && relationship != "Other Family Member" {
-            relationshipError = "Please select a valid relationship"
-        } else {
-            relationshipError = nil
-        }
+        // Allow any string for relationship - no validation rules
+        relationshipError = nil
     }
     
     // MARK: - Form Management
@@ -879,7 +979,7 @@ final class ProfileViewModel: ObservableObject {
     
     private func resetForm() {
         profileName = ""
-        phoneNumber = ""
+        phoneNumber = "+1 "
         relationship = ""
         isEmergencyContact = false
         timeZone = TimeZone.current
@@ -887,6 +987,7 @@ final class ProfileViewModel: ObservableObject {
         nameError = nil
         phoneError = nil
         relationshipError = nil
+        hasStartedTypingPhone = false
     }
     
     private func updateConfirmationStatuses() {
@@ -939,6 +1040,7 @@ final class ProfileViewModel: ObservableObject {
     /// When true, displays the complete profile onboarding flow instead of basic creation.
     /// Replaces the simple CreateProfileView with sophisticated multi-step process.
     @Published var showingProfileOnboarding = false
+    @Published var shouldDismissOnboarding = false
     
     /// Currently created profile during onboarding flow (before SMS confirmation)
     /// 
@@ -988,10 +1090,12 @@ final class ProfileViewModel: ObservableObject {
     func nextOnboardingStep() {
         switch profileOnboardingStep {
         case .newProfileForm:
-            // Validate form and create profile (without SMS)
-            createProfileForOnboarding()
+            // Just validate form and move to next step - don't create profile yet
+            guard isValidForm else { return }
+            profileOnboardingStep = .profileComplete
         case .profileComplete:
-            profileOnboardingStep = .smsIntroduction
+            // Create temporary profile data for SMS - don't add to database yet
+            createTemporaryProfileForSMS()
         case .smsIntroduction:
             // SMS will be sent when user taps "Send Hello 👋"
             sendOnboardingSMS()
@@ -1034,6 +1138,7 @@ final class ProfileViewModel: ObservableObject {
     /// Cleans up any partially created profile data and resets onboarding state.
     /// If profile was already created, it should be deleted from database.
     func cancelProfileOnboarding() {
+        print("🔙 BACK: Cancelling profile onboarding from step: \(profileOnboardingStep)")
         // Clean up partially created profile if it exists
         if let profile = onboardingProfile {
             deleteProfile(profile)
@@ -1041,6 +1146,8 @@ final class ProfileViewModel: ObservableObject {
         
         resetOnboardingState()
         showingProfileOnboarding = false
+        shouldDismissOnboarding = true // Trigger presentation dismissal
+        print("🔙 BACK: showingProfileOnboarding set to false, dismissal triggered")
     }
     
     /// Completes the profile onboarding flow successfully
@@ -1050,6 +1157,7 @@ final class ProfileViewModel: ObservableObject {
     func completeProfileOnboarding() {
         resetOnboardingState()
         showingProfileOnboarding = false
+        shouldDismissOnboarding = true // Trigger presentation dismissal
         // Parent view should handle navigation to task creation
     }
     
@@ -1057,13 +1165,6 @@ final class ProfileViewModel: ObservableObject {
     /// 
     /// Modified version of createProfile() that delays SMS sending until Step 3.
     /// Profile is created in pendingConfirmation status and stored for SMS sending later.
-    private func createProfileForOnboarding() {
-        guard isValidForm else { return }
-        
-        _Concurrency.Task {
-            await createProfileForOnboardingAsync()
-        }
-    }
     
     /// Sends SMS confirmation during onboarding flow (Step 3)
     /// 
@@ -1075,6 +1176,47 @@ final class ProfileViewModel: ObservableObject {
         _Concurrency.Task {
             await sendOnboardingSMSAsync(for: profile)
         }
+    }
+    
+    /// Creates temporary profile data for SMS sending without database persistence
+    /// 
+    /// Creates profile object for SMS confirmation but doesn't save to database
+    /// or add to profiles array until SMS confirmation is received.
+    private func createTemporaryProfileForSMS() {
+        guard isValidForm else { return }
+        
+        guard let userId = authService.currentUser?.uid else {
+            errorMessage = "Authentication required"
+            return
+        }
+        
+        guard canCreateProfile else {
+            errorMessage = "Maximum profiles reached"
+            return
+        }
+        
+        let formattedPhone = phoneNumber.formattedPhoneNumber
+        
+        // Create profile object but don't persist yet
+        let profile = ElderlyProfile(
+            id: UUID().uuidString,
+            userId: userId,
+            name: profileName.trimmingCharacters(in: .whitespacesAndNewlines),
+            phoneNumber: formattedPhone,
+            relationship: relationship,
+            isEmergencyContact: isEmergencyContact,
+            timeZone: timeZone.identifier,
+            notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            status: .pendingConfirmation,
+            createdAt: Date(),
+            lastActiveAt: Date()
+        )
+        
+        // Store temporarily for SMS and UI display
+        onboardingProfile = profile
+        
+        // Move to SMS introduction step
+        profileOnboardingStep = .smsIntroduction
     }
     
     /// Resets all onboarding-specific state
@@ -1090,72 +1232,15 @@ final class ProfileViewModel: ObservableObject {
     
     // MARK: - Private Onboarding Implementation Methods
     
-    /// Async implementation of profile creation during onboarding
-    /// 
-    /// Creates profile without SMS sending - SMS is delayed until Step 3.
-    /// Profile is saved to database but remains in pendingConfirmation status.
-    private func createProfileForOnboardingAsync() async {
-        isLoading = true
-        errorMessage = nil
-        
-        do {
-            guard let userId = authService.currentUser?.uid else {
-                throw ProfileError.userNotAuthenticated
-            }
-            
-            guard canCreateProfile else {
-                throw ProfileError.maxProfilesReached
-            }
-            
-            let formattedPhone = phoneNumber.formattedPhoneNumber
-            
-            // Create profile without SMS confirmation (delayed until Step 3)
-            let profile = ElderlyProfile(
-                id: UUID().uuidString,
-                userId: userId,
-                name: profileName.trimmingCharacters(in: .whitespacesAndNewlines),
-                phoneNumber: formattedPhone,
-                relationship: relationship,
-                isEmergencyContact: isEmergencyContact,
-                timeZone: timeZone.identifier,
-                notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
-                status: .pendingConfirmation, // Will remain pending until SMS is sent in Step 3
-                createdAt: Date(),
-                lastActiveAt: Date()
-            )
-            
-            // Save to database but don't send SMS yet
-            try await databaseService.createElderlyProfile(profile)
-            
-            // Broadcast profile creation to Dashboard and other family members
-            dataSyncCoordinator.broadcastProfileUpdate(profile)
-            
-            await MainActor.run {
-                // Store profile for onboarding flow
-                self.onboardingProfile = profile
-                self.profiles.insert(profile, at: 0)
-                
-                // Move to next step (Profile Complete Summary)
-                self.profileOnboardingStep = .profileComplete
-            }
-            
-        } catch {
-            await MainActor.run {
-                self.errorMessage = error.localizedDescription
-                self.errorCoordinator.handle(error, context: "Creating profile during onboarding")
-            }
-        }
-        
-        await MainActor.run {
-            self.isLoading = false
-        }
-    }
     
     /// Async implementation of SMS sending during onboarding Step 3
     /// 
     /// Sends the confirmation SMS when user explicitly triggers "Send Hello 👋".
     /// Updates confirmation status and advances to confirmation wait step.
     private func sendOnboardingSMSAsync(for profile: ElderlyProfile) async {
+        isLoading = true
+        errorMessage = nil
+        
         do {
             // Send the confirmation SMS (reuse existing SMS sending logic)
             try await sendConfirmationSMS(for: profile)
@@ -1173,6 +1258,44 @@ final class ProfileViewModel: ObservableObject {
                 self.errorMessage = error.localizedDescription
                 self.confirmationStatus[profile.id] = .failed
                 self.errorCoordinator.handle(error, context: "Sending onboarding SMS")
+            }
+        }
+        
+        await MainActor.run {
+            self.isLoading = false
+        }
+    }
+    
+    // MARK: - Gallery History Event Creation
+    
+    /// Creates a gallery history event when a profile is confirmed
+    /// 
+    /// This method creates a gallery event to track profile creation in the gallery history.
+    /// Called when elderly users confirm their profile via SMS response.
+    /// 
+    /// - Parameter profile: The confirmed elderly profile
+    /// - Parameter profileSlot: The slot index for consistent color assignment
+    private func createGalleryEventForProfile(_ profile: ElderlyProfile, profileSlot: Int) {
+        guard let userId = authService.currentUser?.uid else { return }
+        
+        // Create gallery history event for profile creation
+        let galleryEvent = GalleryHistoryEvent.fromProfileCreation(
+            userId: userId,
+            profile: profile,
+            profileSlot: profileSlot
+        )
+        
+        // Save gallery event to database
+        _Concurrency.Task {
+            do {
+                try await self.databaseService.createGalleryHistoryEvent(galleryEvent)
+                
+                // Broadcast gallery event update to gallery views
+                self.dataSyncCoordinator.broadcastGalleryEventUpdate(galleryEvent)
+                
+            } catch {
+                // Log error but don't interrupt profile confirmation flow
+                self.errorCoordinator.handle(error, context: "Creating gallery history event for profile")
             }
         }
     }

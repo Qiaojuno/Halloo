@@ -1,34 +1,45 @@
 import SwiftUI
 
+// Import the gallery history event model and profile gallery item view
+// These imports ensure the new components are available in GalleryView
+
 struct GalleryView: View {
     // MARK: - Environment & Dependencies
     @Environment(\.container) private var container
     @StateObject private var viewModel: GalleryViewModel
     
+    // MARK: - Navigation State
+    /// Tab selection binding from parent ContentView for floating pill navigation
+    @Binding var selectedTab: Int
+    
     // MARK: - State
     @State private var selectedFilter: GalleryFilter = .all
-    @State private var showingPhotoDetail = false
-    @State private var selectedPhoto: SMSResponse?
+    @State private var selectedEventForDetail: GalleryHistoryEvent?
     @State private var showingFilterDropdown = false
     
     // MARK: - Initialization
-    init() {
+    init(selectedTab: Binding<Int>) {
+        self._selectedTab = selectedTab
         // Initialize with placeholder - will be properly set in onAppear
         _viewModel = StateObject(wrappedValue: GalleryViewModel(
             databaseService: MockDatabaseService(),
-            errorCoordinator: ErrorCoordinator()
+            errorCoordinator: ErrorCoordinator(),
+            authService: MockAuthenticationService()
         ))
     }
     
     var body: some View {
-        NavigationView {
-            VStack(spacing: 16) { // Added spacing between header and card
-                // Header with halloo logo and user profile
-                headerSection
-                
-                // White card container (92% screen width)
-                GeometryReader { geometry in
-                    ScrollView {
+        ZStack {
+            // Match DashboardView structure exactly - no NavigationView wrapper
+            ScrollView {
+                VStack(spacing: 0) { // Match DashboardView spacing: 0 between sections
+                    
+                    // Header with Remi logo and user profile - using universal component
+                    SharedHeaderSection()
+                    
+                    // Gallery card - match spacing ratio with DashboardView profiles
+                    VStack(alignment: .leading, spacing: 16) {
+                        // White card container (92% screen width) 
                         VStack(spacing: 0) {
                             // Gallery card header with title and filter button
                             galleryCardHeader
@@ -38,60 +49,100 @@ struct GalleryView: View {
                             photoGridContent
                                 .background(Color.white)
                         }
-                        .cornerRadius(10, corners: [.topLeft, .topRight]) // Only round top corners
+                        .cornerRadius(10) // Round all corners
                         .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2) // Dark gray shadow
                     }
-                    .padding(.horizontal, geometry.size.width * 0.04) // 92% screen width
+                    
+                    // Bottom padding to prevent content from hiding behind navigation
+                    Spacer(minLength: 100)
                 }
+                .padding(.horizontal, UIScreen.main.bounds.width * 0.04) // Match DashboardView (96% width)
             }
-            .background(Color(hex: "f9f9f9"))
-            .navigationBarHidden(true)
+            .background(Color(hex: "f9f9f9")) // Light gray app background
+            
+            // Floating navigation - true overlay that doesn't affect layout
+            VStack {
+                Spacer()
+                FloatingPillNavigation(selectedTab: $selectedTab)
+            }
         }
         .onAppear {
             initializeViewModel()
+            print("🔥 GalleryView onAppear - Gallery events: \(viewModel.galleryEvents.count)")
         }
-        .sheet(isPresented: $showingPhotoDetail) {
-            if let selectedPhoto = selectedPhoto {
-                PhotoDetailView(response: selectedPhoto)
+        .fullScreenCover(item: $selectedEventForDetail) { event in
+            GalleryDetailView(
+                event: event, 
+                selectedTab: $selectedTab,
+                onPrevious: {
+                    navigateToPrevious(from: event)
+                },
+                onNext: {
+                    navigateToNext(from: event)
+                }
+            )
+            .inject(container: container)
+            .animation(.none, value: selectedEventForDetail) // Remove transition animation
+            .transition(.identity) // No transition effect
+            .onAppear {
+                print("🔥 GalleryDetailView showing for event: \(event.id)")
             }
         }
-        .sheet(isPresented: $showingFilterDropdown) {
-            FilterDropdownView(
-                selectedFilter: $selectedFilter,
-                isPresented: $showingFilterDropdown
-            )
+        .overlay(
+            // Clean dropdown overlay positioned below filter button
+            Group {
+                if showingFilterDropdown {
+                    Color.clear // Truly invisible tap target to close dropdown
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showingFilterDropdown = false
+                            }
+                        }
+                }
+            }
+        )
+        .overlay(alignment: .topTrailing) {
+            // Filter dropdown positioned relative to button
+            if showingFilterDropdown {
+                VStack(spacing: 0) {
+                    // Spacer to position dropdown below the filter button
+                    Spacer()
+                        .frame(height: 140) // Approximate distance from top to filter button
+                    
+                    HStack {
+                        Spacer()
+                        
+                        // Dropdown menu
+                        FilterDropdownMenu(
+                            selectedFilter: $selectedFilter,
+                            isPresented: $showingFilterDropdown
+                        )
+                        .padding(.trailing, 16) // Match button position
+                    }
+                    
+                    Spacer()
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                .animation(.easeInOut(duration: 0.2), value: showingFilterDropdown)
+            }
         }
     }
     
     // MARK: - Header Section
-    private var headerSection: some View {
-        HStack(alignment: .center) {
-            // MAIN LOGO: "halloo." brand text (same as DashboardView)
-            HStack(spacing: -2) { // Negative spacing to overlap slightly
-                Text("halloo ")
-                    .font(.custom("Inter", size: 37.5))
-                    .fontWeight(.regular)
-                    .tracking(-3.1)
-                    .foregroundColor(.black)
-                
-                Text("•")
-                    .font(.system(size: 24, weight: .regular))
-                    .foregroundColor(.black)
-                    .offset(x: -5, y: 9)
-            }
-            
-            Spacer()
-            
-            // User profile icon (caregiver profile)
-            Button(action: {}) {
-                Image(systemName: "person")
-                    .font(.title2)
-                    .foregroundColor(.black)
+    // Removed custom headerSection - now using universal SharedHeaderSection()
+    
+    // MARK: - Helper Functions
+    
+    private func findEvent(withId id: String) -> GalleryHistoryEvent? {
+        // First try to find in grouped events (what's being displayed)
+        for events in groupedEventsByDate.values {
+            if let event = events.first(where: { $0.id == id }) {
+                return event
             }
         }
-        .padding(.horizontal, 26)
-        .padding(.top, 20)
-        .padding(.bottom, 10)
+        
+        // Fallback to viewModel events
+        return viewModel.galleryEvents.first(where: { $0.id == id })
     }
     
     // MARK: - Gallery Card Header Section  
@@ -101,13 +152,15 @@ struct GalleryView: View {
             Text("TASK GALLERY")
                 .tracking(-1)
                 .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.secondary)
+                .foregroundColor(Color(hex: "9f9f9f"))
             
             Spacer()
             
             // Filter button with hamburger icon (right aligned)
             Button(action: {
-                showingFilterDropdown = true
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showingFilterDropdown.toggle()
+                }
             }) {
                 HStack(spacing: 12) { // Increased spacing for longer button
                     Text("Filter")
@@ -138,28 +191,36 @@ struct GalleryView: View {
         .padding(.bottom, 20) // Increased bottom padding for more vertical space
     }
     
-    // MARK: - Photo Grid Content with Date Grouping
+    // MARK: - Gallery Grid Content with Date Grouping (Mixed Content)
     private var photoGridContent: some View {
         LazyVStack(spacing: 16) {
-            ForEach(groupedPhotosByDate.keys.sorted(by: >), id: \.self) { date in
+            ForEach(groupedEventsByDate.keys.sorted(by: >), id: \.self) { date in
                 VStack(alignment: .leading, spacing: 8) {
                     // Date header (iOS Photos style)
                     HStack {
                         Text(formatDateHeader(date))
                             .tracking(-1)
                             .font(.system(size: 15, weight: .regular))  // Removed .bold
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Color(hex: "9f9f9f"))
                         Spacer()
                     }
                     .padding(.horizontal, 12)
                     
-                    // Photo grid for this date
+                    // Mixed gallery grid for this date
                     LazyVGrid(columns: gridColumns, spacing: 4) {
-                        ForEach(groupedPhotosByDate[date] ?? []) { response in
-                            SquarePhotoView(response: response)
+                        ForEach(groupedEventsByDate[date] ?? []) { event in
+                            GalleryItemView(event: event)
                                 .onTapGesture {
-                                    selectedPhoto = response
-                                    showingPhotoDetail = true
+                                    print("🔥 Gallery item tapped! Event ID: \(event.id)")
+                                    print("🔥 Event type: \(event.eventType)")
+                                    
+                                    // Remove animation for seamless transition using transaction
+                                    var transaction = Transaction()
+                                    transaction.disablesAnimations = true
+                                    withTransaction(transaction) {
+                                        selectedEventForDetail = event
+                                    }
+                                    print("🔥 selectedEventForDetail set to: \(event.id)")
                                 }
                         }
                     }
@@ -177,30 +238,32 @@ struct GalleryView: View {
         GridItem(.flexible())
     ]
     
-    private var filteredPhotos: [SMSResponse] {
-        let allPhotos = viewModel.completedResponses
+    private var filteredEvents: [GalleryHistoryEvent] {
+        let allEvents = viewModel.galleryEvents
         
         switch selectedFilter {
         case .all:
-            return allPhotos
+            return allEvents
         case .thisWeek:
             let weekAgo = Calendar.current.date(byAdding: .weekOfYear, value: -1, to: Date()) ?? Date()
-            return allPhotos.filter { $0.receivedAt >= weekAgo }
+            return allEvents.filter { $0.createdAt >= weekAgo }
         case .byProfile:
             // TODO: Implement profile-specific filtering
-            return allPhotos
+            return allEvents
         }
     }
     
-    // Group photos by date (iOS Photos style)
-    private var groupedPhotosByDate: [Date: [SMSResponse]] {
-        let photos = filteredPhotos
+    // Group events by date (iOS Photos style)
+    private var groupedEventsByDate: [Date: [GalleryHistoryEvent]] {
+        let events = filteredEvents
         let calendar = Calendar.current
         
-        return Dictionary(grouping: photos) { response in
-            calendar.startOfDay(for: response.receivedAt)
+        return Dictionary(grouping: events) { event in
+            calendar.startOfDay(for: event.createdAt)
         }
     }
+    
+    // Helper to convert GalleryHistoryEvent back to SMSResponse for existing detail view
     
     // Format date headers (August 1, 2025 style)
     private func formatDateHeader(_ date: Date) -> String {
@@ -214,12 +277,40 @@ struct GalleryView: View {
         // Initialize ViewModel with actual Container services
         viewModel.updateServices(
             databaseService: container.resolve(DatabaseServiceProtocol.self),
-            errorCoordinator: container.resolve(ErrorCoordinator.self)
+            errorCoordinator: container.resolve(ErrorCoordinator.self),
+            authService: container.resolve(AuthenticationServiceProtocol.self)
         )
         
         // Load gallery data
         _Concurrency.Task {
             await viewModel.loadGalleryData()
+        }
+    }
+    
+    // MARK: - Navigation Methods
+    private func navigateToPrevious(from currentEvent: GalleryHistoryEvent) {
+        let sortedEvents = filteredEvents.sorted { $0.createdAt > $1.createdAt }
+        guard let currentIndex = sortedEvents.firstIndex(where: { $0.id == currentEvent.id }),
+              currentIndex > 0 else { return }
+        
+        // Remove animation for seamless navigation using transaction
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            selectedEventForDetail = sortedEvents[currentIndex - 1]
+        }
+    }
+    
+    private func navigateToNext(from currentEvent: GalleryHistoryEvent) {
+        let sortedEvents = filteredEvents.sorted { $0.createdAt > $1.createdAt }
+        guard let currentIndex = sortedEvents.firstIndex(where: { $0.id == currentEvent.id }),
+              currentIndex < sortedEvents.count - 1 else { return }
+        
+        // Remove animation for seamless navigation using transaction
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            selectedEventForDetail = sortedEvents[currentIndex + 1]
         }
     }
 }
@@ -231,215 +322,301 @@ enum GalleryFilter: String, CaseIterable {
     case byProfile = "By Profile"
 }
 
-// MARK: - Filter Dropdown Component
-struct FilterDropdownView: View {
+// MARK: - Clean Filter Dropdown Menu
+struct FilterDropdownMenu: View {
     @Binding var selectedFilter: GalleryFilter
     @Binding var isPresented: Bool
     
     var body: some View {
-        NavigationView {
-            VStack(spacing: 0) {
-                ForEach(GalleryFilter.allCases, id: \.self) { filter in
-                    Button(action: {
+        VStack(spacing: 0) {
+            ForEach(GalleryFilter.allCases, id: \.self) { filter in
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.15)) {
                         selectedFilter = filter
                         isPresented = false
-                    }) {
-                        HStack {
-                            Text(filter.rawValue)
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(.black)
-                            
-                            Spacer()
-                            
-                            if selectedFilter == filter {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.blue)
-                            }
+                    }
+                }) {
+                    HStack {
+                        Text(filter.rawValue)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.black)
+                        
+                        Spacer()
+                        
+                        if selectedFilter == filter {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.blue)
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 16)
                     }
-                    
-                    if filter != GalleryFilter.allCases.last {
-                        Divider()
-                            .padding(.horizontal, 20)
-                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
                 
-                Spacer()
+                if filter != GalleryFilter.allCases.last {
+                    Divider()
+                        .padding(.horizontal, 12)
+                }
             }
-            .navigationTitle("Filter Photos")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationBarBackButtonHidden(true)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        isPresented = false
+        }
+        .background(Color.white)
+        .cornerRadius(8)
+        .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 8, x: 0, y: 2)
+        .frame(width: 120) // Compact width
+    }
+}
+
+// MARK: - Unified Gallery Item View (Handles Both Photos and Profile Creation)
+struct GalleryItemView: View {
+    let event: GalleryHistoryEvent
+    
+    var body: some View {
+        switch event.eventType {
+        case .taskResponse:
+            SquarePhotoView(event: event)
+        case .profileCreated:
+            ProfilePhotoView(event: event) // Show profile pictures like regular photos
+        }
+    }
+}
+
+// MARK: - Square Photo Component (Updated for GalleryHistoryEvent)
+struct SquarePhotoView: View {
+    let event: GalleryHistoryEvent
+    
+    // Profile emojis for consistency (same as ProfileGalleryItemView)
+    private let profileEmojis = [
+        "👴🏻", "👵🏻", "👨🏻", "👩🏻", "👴🏽", "👵🏽", 
+        "👴🏿", "👵🏿", "🧓🏻", "🧓🏽", "🧓🏿"
+    ]
+    
+    var body: some View {
+        ZStack {
+            // Check if this is a text-only response
+            if event.photoData == nil && event.hasTextResponse {
+                textResponsePreview
+            } else {
+                // Photo response (existing logic)
+                if let photoData = event.photoData {
+                    if let uiImage = UIImage(data: photoData) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 112, height: 112)
+                            .clipped()
+                            .cornerRadius(3)
+                    } else {
+                        photoPlaceholder
+                    }
+                } else {
+                    photoPlaceholder
+                }
+                
+                // Profile avatar overlay (bottom-right corner) - only for photos
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        ProfileAvatarOverlay(event: event)
+                            .padding(.trailing, 8)
+                            .padding(.bottom, 8)
                     }
                 }
             }
         }
-        .presentationDetents([.fraction(0.3)])
     }
-}
-
-// MARK: - Square Photo Component (iOS Photos App Style)
-struct SquarePhotoView: View {
-    let response: SMSResponse
     
-    var body: some View {
+    // MARK: - Text Response Preview (Mini Speech Bubbles with Tails)
+    private var textResponsePreview: some View {
         ZStack {
-            // Photo (square aspect ratio)
-            AsyncImage(url: URL(string: response.photoURL ?? "")) { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } placeholder: {
-                Rectangle()
-                    .fill(Color(hex: "f0f0f0"))
-                    .overlay(
-                        Image(systemName: "photo")
-                            .font(.title2)
-                            .foregroundColor(Color(hex: "9f9f9f"))
-                    )
-            }
-            .frame(width: 112, height: 112) // Square format based on Figma dimensions
-            .clipped()
-            .cornerRadius(3) // 3px radius from Figma
+            // Light blue background for consistency
+            Rectangle()
+                .fill(Color(hex: "E5F3FF")) // Light blue
+                .frame(width: 112, height: 112)
+                .cornerRadius(3)
             
-            // Profile avatar overlay (bottom-right corner)
+            VStack(spacing: 12) {
+                // Outgoing message indicator (mini blue bubble with tail)
+                HStack {
+                    Spacer()
+                    MiniBubbleWithTail(isOutgoing: true)
+                        .fill(Color(hex: "007AFF"))
+                        .frame(width: 45, height: 20)
+                }
+                .padding(.horizontal, 12)
+                
+                // Incoming message indicator (mini gray bubble with tail)
+                HStack {
+                    MiniBubbleWithTail(isOutgoing: false)
+                        .fill(Color(hex: "E5E5EA"))
+                        .frame(width: 40, height: 20)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+            }
+            
+            // Profile picture overlay (bottom-right corner) like photo gallery
             VStack {
                 Spacer()
                 HStack {
                     Spacer()
-                    ProfileAvatarOverlay(response: response)
+                    ProfileAvatarOverlay(event: event)
                         .padding(.trailing, 8)
                         .padding(.bottom, 8)
                 }
             }
         }
     }
-}
-
-// MARK: - Profile Avatar Overlay Component
-struct ProfileAvatarOverlay: View {
-    let response: SMSResponse
     
-    var body: some View {
-        ZStack {
-            // Profile color background (no outline as specified)
-            let backgroundColor: Color = {
-                // Determine profile color based on profileId or name
-                switch response.profileId ?? "unknown" {
-                case _ where response.profileId?.contains("grandpa") == true: return Color.blue
-                case _ where response.profileId?.contains("grandma") == true: return Color.red
-                case _ where response.profileId?.contains("uncle") == true: return Color.green
-                default: return Color.purple
-                }
-            }()
-            
-            Circle()
-                .fill(backgroundColor.opacity(0.2)) // Pastel background
-                .frame(width: 22, height: 22) // Figma dimensions
-            
-            // Profile emoji or initial
-            Text("👴🏻") // TODO: This should be dynamic based on profile
-                .font(.system(size: 12))
-        }
-        .cornerRadius(3) // 3px radius from Figma
+    // MARK: - Profile Emoji Generation
+    private var profileEmoji: String {
+        // Generate consistent emoji based on profile slot + profile name hash
+        let profileName = event.profileName
+        let emojiIndex = (event.profileSlot + abs(profileName.hashValue)) % profileEmojis.count
+        return profileEmojis[emojiIndex]
+    }
+    
+    private var photoPlaceholder: some View {
+        Rectangle()
+            .fill(Color(hex: "f0f0f0"))
+            .overlay(
+                Image(systemName: "photo")
+                    .font(.title2)
+                    .foregroundColor(Color(hex: "9f9f9f"))
+            )
+            .frame(width: 112, height: 112)
+            .cornerRadius(3)
     }
 }
 
-// MARK: - Photo Detail View (Placeholder)
-struct PhotoDetailView: View {
-    let response: SMSResponse
-    @Environment(\.presentationMode) var presentationMode
+// MARK: - Profile Photo Component (Matches Detailed View Style)
+struct ProfilePhotoView: View {
+    let event: GalleryHistoryEvent
+    
+    // Same emoji system as other components
+    private let profileEmojis = [
+        "👴🏻", "👵🏻", "👨🏻", "👩🏻", "👴🏽", "👵🏽", 
+        "👴🏿", "👵🏿", "🧓🏻", "🧓🏽", "🧓🏿"
+    ]
     
     var body: some View {
-        NavigationView {
-            VStack {
-                // Full-size photo
-                AsyncImage(url: URL(string: response.photoURL ?? "")) { image in
+        // Show profile picture as full-size photo (like detailed view)
+        Group {
+            if let photoURL = event.photoURL, !photoURL.isEmpty {
+                AsyncImage(url: URL(string: photoURL)) { image in
                     image
                         .resizable()
-                        .aspectRatio(contentMode: .fit)
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 112, height: 112)
+                        .clipped()
                 } placeholder: {
                     Rectangle()
                         .fill(Color(hex: "f0f0f0"))
+                        .frame(width: 112, height: 112)
                         .overlay(
                             ProgressView()
+                                .tint(Color(hex: "9f9f9f"))
                         )
                 }
-                
-                Spacer()
-                
-                // Response details
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(response.taskTitle ?? "Task")
-                        .font(.custom("Inter", size: 18))
-                        .fontWeight(.semibold)
-                    
-                    Text("Completed: \(formatDateTime(response.receivedAt))")
-                        .font(.custom("Inter", size: 14))
-                        .foregroundColor(Color(hex: "9f9f9f"))
-                    
-                    if let textContent = response.textContent, !textContent.isEmpty {
-                        Text("Message: \"\(textContent)\"")
-                            .font(.custom("Inter", size: 14))
-                            .foregroundColor(.black)
-                    }
-                }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 24)
-            }
-            .navigationTitle("Habit Photo")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationBarBackButtonHidden(true)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        // Toggle favorite
-                    }) {
-                        Image(systemName: response.isFavorite ? "heart.fill" : "heart")
-                            .foregroundColor(.red)
-                    }
-                }
+            } else {
+                // Emoji fallback as full-size photo (like detailed view)
+                Rectangle()
+                    .fill(profileColor.opacity(0.2))
+                    .frame(width: 112, height: 112)
+                    .overlay(
+                        Text(profileEmoji)
+                            .font(.system(size: 40)) // Large emoji for gallery thumbnail
+                    )
             }
         }
+        .cornerRadius(3) // Match other gallery items
     }
     
-    private func formatDateTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+    private var profileColor: Color {
+        let colors: [Color] = [
+            Color(hex: "B9E3FF"),         // Blue
+            Color.red.opacity(0.6),       // Red  
+            Color.green.opacity(0.6),     // Green
+            Color.purple.opacity(0.6)     // Purple
+        ]
+        return colors[event.profileSlot % colors.count]
+    }
+    
+    private var profileEmoji: String {
+        let emojiIndex = (event.profileSlot + abs(event.profileName.hashValue)) % profileEmojis.count
+        return profileEmojis[emojiIndex]
     }
 }
 
-// MARK: - Gallery ViewModel (Placeholder)
+// MARK: - Profile Avatar Overlay Component (Updated for GalleryHistoryEvent)
+struct ProfileAvatarOverlay: View {
+    let event: GalleryHistoryEvent
+    
+    // Use the same profile colors from DashboardView
+    private let profileColors: [Color] = [
+        Color(hex: "B9E3FF"),         // Profile slot 0 - default light blue
+        Color.red.opacity(0.6),       // Profile slot 1 - brighter
+        Color.green.opacity(0.6),     // Profile slot 2 - brighter
+        Color.purple.opacity(0.6)     // Profile slot 3 - brighter
+    ]
+    
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(profileBackgroundColor)
+                .frame(width: 22, height: 22) // Figma dimensions
+            
+            // Profile picture or circle placeholder (NO emoji)
+            if let photoURL = event.photoURL {
+                AsyncImage(url: URL(string: photoURL)) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Circle()
+                        .fill(profileBackgroundColor.opacity(0.5))
+                }
+                .frame(width: 18, height: 18)
+                .clipShape(Circle())
+            } else {
+                // Just a plain colored circle - no emoji
+                Circle()
+                    .fill(profileBackgroundColor.opacity(0.7))
+                    .frame(width: 18, height: 18)
+            }
+        }
+        .cornerRadius(3) // 3px radius from Figma
+    }
+    
+    private var profileBackgroundColor: Color {
+        let slot = event.profileSlot
+        let color = profileColors[slot % profileColors.count]
+        return color.opacity(0.3)
+    }
+}
+
+
+// MARK: - Gallery ViewModel
 class GalleryViewModel: ObservableObject {
     @Published var completedResponses: [SMSResponse] = []
+    @Published var galleryEvents: [GalleryHistoryEvent] = []
     @Published var isLoading = false
     @Published var error: Error?
     
     private var databaseService: DatabaseServiceProtocol
     private var errorCoordinator: ErrorCoordinator
+    private var authService: AuthenticationServiceProtocol
     
-    init(databaseService: DatabaseServiceProtocol, errorCoordinator: ErrorCoordinator) {
+    init(databaseService: DatabaseServiceProtocol, errorCoordinator: ErrorCoordinator, authService: AuthenticationServiceProtocol) {
         self.databaseService = databaseService
         self.errorCoordinator = errorCoordinator
+        self.authService = authService
     }
     
-    func updateServices(databaseService: DatabaseServiceProtocol, errorCoordinator: ErrorCoordinator) {
+    func updateServices(databaseService: DatabaseServiceProtocol, errorCoordinator: ErrorCoordinator, authService: AuthenticationServiceProtocol) {
         self.databaseService = databaseService
         self.errorCoordinator = errorCoordinator
+        self.authService = authService
     }
     
     @MainActor
@@ -447,11 +624,21 @@ class GalleryViewModel: ObservableObject {
         isLoading = true
         
         do {
-            // Load completed responses with photos
+            // Get user ID
+            guard let userId = authService.currentUser?.uid else {
+                throw DatabaseError.insufficientPermissions
+            }
+            
+            // Load gallery events directly from database (includes all mock events)
+            let events = try await databaseService.getGalleryHistoryEvents(for: userId)
+            self.galleryEvents = events.sorted { $0.createdAt > $1.createdAt }
+            
+            // Also populate completedResponses for backward compatibility with detail view
             let responses = try await databaseService.getCompletedResponsesWithPhotos()
             self.completedResponses = responses.sorted { $0.receivedAt > $1.receivedAt }
+            
         } catch {
-            errorCoordinator.handle(error, context: "Loading gallery photos")
+            errorCoordinator.handle(error, context: "Loading gallery data")
             self.error = error
         }
         
@@ -560,14 +747,17 @@ struct PreviewGalleryLayout: View {
     ]
     
     var body: some View {
-        NavigationView {
-            VStack(spacing: 16) { // Added spacing between header and card
-                // Header with halloo logo and user profile (same as main view)
-                PreviewHeaderSection()
-                
-                // White card container (92% screen width)
-                GeometryReader { geometry in
-                    ScrollView {
+        VStack(spacing: 0) {
+            // Match DashboardView structure exactly - no NavigationView wrapper
+            ScrollView {
+                VStack(spacing: 0) { // Match DashboardView spacing: 0 between sections
+                    
+                    // Header with Remi logo and user profile - using universal component
+                    SharedHeaderSection()
+                    
+                    // Gallery card - match spacing ratio with DashboardView profiles
+                    VStack(alignment: .leading, spacing: 16) {
+                        // White card container (92% screen width) 
                         VStack(spacing: 0) {
                             // Gallery card header with title and filter button
                             PreviewGalleryCardHeader()
@@ -603,11 +793,13 @@ struct PreviewGalleryLayout: View {
                         .cornerRadius(10, corners: [.topLeft, .topRight]) // Only round top corners
                         .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2) // Dark gray shadow
                     }
-                    .padding(.horizontal, geometry.size.width * 0.04) // 92% screen width
+                    
+                    // Bottom padding to prevent content from hiding behind navigation
+                    Spacer(minLength: 100)
                 }
+                .padding(.horizontal, UIScreen.main.bounds.width * 0.04) // Match DashboardView (96% width)
             }
-            .background(Color(hex: "f9f9f9"))
-            .navigationBarHidden(true)
+            .background(Color(hex: "f9f9f9")) // Light gray app background
         }
     }
 }
@@ -621,37 +813,7 @@ struct MockPhoto: Identifiable {
 }
 
 // MARK: - Preview Components
-struct PreviewHeaderSection: View {
-    var body: some View {
-        HStack(alignment: .center) {
-            // MAIN LOGO: "halloo." brand text
-            HStack(spacing: -2) {
-                Text("halloo ")
-                    .font(.custom("Inter", size: 37.5))
-                    .fontWeight(.regular)
-                    .tracking(-3.1)
-                    .foregroundColor(.black)
-                
-                Text("•")
-                    .font(.system(size: 24, weight: .regular))
-                    .foregroundColor(.black)
-                    .offset(x: -5, y: 9)
-            }
-            
-            Spacer()
-            
-            // User profile icon (caregiver profile)
-            Button(action: {}) {
-                Image(systemName: "person")
-                    .font(.title2)
-                    .foregroundColor(.black)
-            }
-        }
-        .padding(.horizontal, 26)
-        .padding(.top, 20)
-        .padding(.bottom, 10)
-    }
-}
+// Removed PreviewHeaderSection - now using universal SharedHeaderSection()
 
 struct PreviewGalleryCardHeader: View {
     var body: some View {
@@ -660,7 +822,7 @@ struct PreviewGalleryCardHeader: View {
             Text("TASK GALLERY")
                 .tracking(-1)
                 .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.secondary)
+                .foregroundColor(Color(hex: "9f9f9f"))
             
             Spacer()
             
@@ -742,6 +904,42 @@ struct PreviewProfileAvatarOverlay: View {
                 .font(.system(size: 12))
         }
         .cornerRadius(3) // 3px radius from Figma
+    }
+}
+
+// MARK: - Mini Speech Bubble Shape (Gallery Thumbnails)
+struct MiniBubbleWithTail: Shape {
+    let isOutgoing: Bool
+    
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let width = rect.width
+        let height = rect.height
+        let cornerRadius: CGFloat = 8  // Smaller corner radius for mini bubbles
+        let tailSize: CGFloat = 10     // Bigger tail for better visibility
+        let tailInset: CGFloat = 8     // Closer to edge for mini version
+        
+        // Create rounded rectangle body
+        let bubbleRect = CGRect(x: 0, y: 0, width: width, height: height - 3) // Leave space for tail
+        path.addRoundedRect(in: bubbleRect, cornerSize: CGSize(width: cornerRadius, height: cornerRadius))
+        
+        if isOutgoing {
+            // Left-pointing triangle for outgoing (positioned near right edge)
+            let triangleStart = CGPoint(x: width - tailInset, y: height - 3)
+            path.move(to: triangleStart)
+            path.addLine(to: CGPoint(x: width - tailInset - tailSize, y: height - 3))
+            path.addLine(to: CGPoint(x: width - tailInset, y: height))
+            path.closeSubpath()
+        } else {
+            // Right-pointing triangle for incoming (positioned near left edge)
+            let triangleStart = CGPoint(x: tailInset, y: height - 3)
+            path.move(to: triangleStart)
+            path.addLine(to: CGPoint(x: tailInset + tailSize, y: height - 3))
+            path.addLine(to: CGPoint(x: tailInset, y: height))
+            path.closeSubpath()
+        }
+        
+        return path
     }
 }
 #endif

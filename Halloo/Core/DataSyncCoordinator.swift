@@ -129,6 +129,12 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     /// and preference modifications for consistent family coordination.
     private let userUpdatesSubject = PassthroughSubject<User, Never>()
     
+    /// Publishes gallery history events for family timeline coordination
+    /// 
+    /// Broadcasts profile creation milestones and task completion events
+    /// for family gallery synchronization and care history tracking.
+    private let galleryEventUpdatesSubject = PassthroughSubject<GalleryHistoryEvent, Never>()
+    
     /// Publishes synchronization status updates for family coordination transparency
     /// 
     /// Broadcasts sync progress, completion status, and error conditions
@@ -180,6 +186,15 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     /// and data consistency assurance.
     var syncStatusUpdates: AnyPublisher<SyncStatusUpdate, Never> {
         syncStatusSubject.eraseToAnyPublisher()
+    }
+    
+    /// Real-time gallery history events for family timeline coordination
+    /// 
+    /// Enables GalleryViewModel to instantly show profile creation milestones
+    /// and task completion events from other family members for synchronized
+    /// care history and family coordination timeline.
+    var galleryEventUpdates: AnyPublisher<GalleryHistoryEvent, Never> {
+        galleryEventUpdatesSubject.eraseToAnyPublisher()
     }
     
     // MARK: - Family Coordination Service Dependencies
@@ -392,6 +407,11 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     
     func broadcastUserUpdate(_ user: User) {
         userUpdatesSubject.send(user)
+        updatePendingChanges()
+    }
+    
+    func broadcastGalleryEventUpdate(_ event: GalleryHistoryEvent) {
+        galleryEventUpdatesSubject.send(event)
         updatePendingChanges()
     }
     

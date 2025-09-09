@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import Firebase
 
 // MARK: - Dependency Container
 final class Container: ObservableObject {
@@ -15,15 +16,31 @@ final class Container: ObservableObject {
     
     // MARK: - Service Registration
     private func setupServices() {
-        // Core Services - Mock Implementation for UI Development
-        register(AuthenticationServiceProtocol.self) { 
-            MockAuthenticationService() 
+        // Check if Firebase is configured
+        let useFirebaseServices = checkFirebaseConfiguration()
+        
+        // Core Services - Switch between Mock and Firebase based on configuration
+        if useFirebaseServices {
+            print("🔥 Using Firebase services")
+            register(AuthenticationServiceProtocol.self) { 
+                FirebaseAuthenticationService() 
+            }
+            
+            register(DatabaseServiceProtocol.self) {
+                FirebaseDatabaseService()
+            }
+        } else {
+            print("🧪 Using Mock services") 
+            register(AuthenticationServiceProtocol.self) { 
+                MockAuthenticationService() 
+            }
+            
+            register(DatabaseServiceProtocol.self) {
+                MockDatabaseService()
+            }
         }
         
-        register(DatabaseServiceProtocol.self) {
-            MockDatabaseService()
-        }
-        
+        // Services that remain mocked for now
         register(SMSServiceProtocol.self) {
             MockSMSService() // Keep mock for now, implement Twilio later
         }
@@ -33,7 +50,7 @@ final class Container: ObservableObject {
         }
         
         register(AnalyticsServiceProtocol.self) {
-            MockAnalyticsService()
+            MockAnalyticsService() // TODO: Switch to Firebase Analytics
         }
         
         register(SubscriptionServiceProtocol.self) {
@@ -45,16 +62,45 @@ final class Container: ObservableObject {
             NotificationCoordinator()
         }
         
-        register(DataSyncCoordinator.self) { [weak self] in
+        register(DataSyncCoordinator.self) {
+            // FIXED: Direct instantiation to avoid circular dependency blocking UI thread
             DataSyncCoordinator(
-                databaseService: self?.resolve(DatabaseServiceProtocol.self) ?? MockDatabaseService(),
-                notificationCoordinator: self?.resolve(NotificationCoordinator.self) ?? NotificationCoordinator()
+                databaseService: useFirebaseServices ? FirebaseDatabaseService() : MockDatabaseService(),
+                notificationCoordinator: NotificationCoordinator(),
+                errorCoordinator: ErrorCoordinator()
             )
         }
         
         register(ErrorCoordinator.self) {
             ErrorCoordinator()
         }
+    }
+    
+    // MARK: - Firebase Configuration Check
+    private func checkFirebaseConfiguration() -> Bool {
+        // TEMPORARY: Force mock services to debug UI responsiveness issue
+        print("🧪 TEMPORARILY FORCING MOCK SERVICES - Debug UI responsiveness")
+        return false
+        
+        // Check if Firebase has been configured
+        guard FirebaseApp.app() != nil else {
+            print("⚠️ Firebase not configured - using mock services")
+            return false
+        }
+        
+        // In preview/canvas mode, use mock services
+        if ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS") {
+            print("🎨 Running in preview mode - using mock services")
+            return false
+        }
+        
+        // Check for explicit mock mode environment variable
+        if ProcessInfo.processInfo.environment["USE_MOCK_SERVICES"] == "true" {
+            print("🧪 Mock services explicitly requested via environment")
+            return false
+        }
+        
+        return true
     }
     
     // MARK: - Generic Registration
@@ -117,6 +163,18 @@ final class Container: ObservableObject {
             authService: resolve(AuthenticationServiceProtocol.self),
             dataSyncCoordinator: resolve(DataSyncCoordinator.self),
             errorCoordinator: resolve(ErrorCoordinator.self)
+        )
+    }
+    
+    @MainActor
+    func makeProfileViewModelForCanvas() -> ProfileViewModel {
+        ProfileViewModel(
+            databaseService: resolve(DatabaseServiceProtocol.self),
+            smsService: resolve(SMSServiceProtocol.self),
+            authService: resolve(AuthenticationServiceProtocol.self),
+            dataSyncCoordinator: resolve(DataSyncCoordinator.self),
+            errorCoordinator: resolve(ErrorCoordinator.self),
+            skipAutoLoad: true
         )
     }
     
@@ -257,6 +315,18 @@ extension Container {
         
         container.register(SMSServiceProtocol.self) {
             MockSMSService()
+        }
+        
+        container.register(DataSyncCoordinator.self) {
+            DataSyncCoordinator(
+                databaseService: MockDatabaseService(),
+                notificationCoordinator: NotificationCoordinator(),
+                errorCoordinator: ErrorCoordinator()
+            )
+        }
+        
+        container.register(ErrorCoordinator.self) {
+            ErrorCoordinator()
         }
         
         return container

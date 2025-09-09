@@ -470,6 +470,9 @@ final class DashboardViewModel: ObservableObject {
             group.addTask { await self.loadAnalytics() }
         }
         
+        // Check for streak resets after data is loaded
+        await checkStreakResets()
+        
         await MainActor.run {
             // Aggregate data for family care coordination
             self.updateDashboardSummary()
@@ -488,6 +491,11 @@ final class DashboardViewModel: ObservableObject {
             await MainActor.run {
                 self.profiles = loadedProfiles
                 self.pendingConfirmations = loadedProfiles.filter { $0.status == .pendingConfirmation }
+                
+                // Auto-select first profile if none selected (UX improvement)
+                if self.selectedProfileId == nil && !loadedProfiles.isEmpty {
+                    self.selectedProfileId = loadedProfiles[0].id
+                }
             }
             
         } catch {
@@ -675,6 +683,16 @@ final class DashboardViewModel: ObservableObject {
             identifyOverdueTasks()
         }
         
+        // STREAK UPDATE: Check if this is a task completion response
+        if response.isCompleted, 
+           let taskId = response.taskId,
+           let profileId = response.profileId {
+            // Update streak for the profile when task is completed
+            _Concurrency.Task {
+                await updateStreakForProfile(profileId)
+            }
+        }
+        
         // Handle confirmation responses
         if response.isConfirmationResponse,
            let profileId = response.profileId,
@@ -748,7 +766,11 @@ final class DashboardViewModel: ObservableObject {
                 photoData: nil,
                 isCompleted: true,
                 receivedAt: Date(),
-                responseType: .text
+                responseType: .text,
+                isConfirmationResponse: false,
+                isPositiveConfirmation: false,
+                responseScore: nil,
+                processingNotes: nil
             )
             
             // Persist completion with family synchronization
@@ -854,6 +876,89 @@ final class DashboardViewModel: ObservableObject {
     var canGoToNextDay: Bool {
         let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date())!
         return selectedDate < tomorrow
+    }
+    
+    // MARK: - Streak Management
+    
+    /// Updates streak for a profile when tasks are completed
+    /// Called when task completion is detected via SMS response or manual marking
+    func updateStreakForProfile(_ profileId: String) async {
+        guard let profileIndex = profiles.firstIndex(where: { $0.id == profileId }) else { return }
+        var profile = profiles[profileIndex]
+        
+        do {
+            // Get all tasks for this profile from database
+            guard let userId = authService.currentUser?.uid else { return }
+            let allTasks = try await databaseService.getTasks(for: userId)
+            
+            let calendar = Calendar.current
+            
+            // Count tasks scheduled for today for this profile
+            let todaysTasks = allTasks.filter { task in
+                task.profileId == profileId && 
+                calendar.isDate(task.scheduledTime, inSameDayAs: Date())
+            }
+            
+            let completedTasks = todaysTasks.filter { task in
+                task.lastCompletedAt != nil && 
+                calendar.isDate(task.lastCompletedAt!, inSameDayAs: Date())
+            }
+            
+            // Update streak using the profile's method
+            profile.updateStreak(
+                tasksCompletedToday: completedTasks.count,
+                totalTasksToday: todaysTasks.count,
+                completionDate: Date()
+            )
+            
+            await MainActor.run {
+                // Update the profile in our array
+                profiles[profileIndex] = profile
+            }
+            
+            // Persist the change to database
+            try await databaseService.updateElderlyProfile(profile)
+            dataSyncCoordinator.broadcastProfileUpdate(profile)
+            
+        } catch {
+            errorCoordinator.handle(error, context: "Updating streak for profile")
+        }
+    }
+    
+    /// Checks all profiles for streak resets due to missed days
+    func checkStreakResets() async {
+        do {
+            guard let userId = authService.currentUser?.uid else { return }
+            let allTasks = try await databaseService.getTasks(for: userId)
+            
+            let calendar = Calendar.current
+            let yesterday = calendar.date(byAdding: .day, value: -1, to: Date())!
+            
+            for (index, var profile) in profiles.enumerated() {
+                // Count tasks that were scheduled for yesterday
+                let yesterdayTasks = allTasks.filter { task in
+                    task.profileId == profile.id && 
+                    calendar.isDate(task.scheduledTime, inSameDayAs: yesterday)
+                }
+                
+                // Check if streak should be reset
+                let originalStreak = profile.currentStreak
+                profile.checkStreakReset(totalTasksYesterday: yesterdayTasks.count)
+                
+                // Update if changed
+                if profile.currentStreak != originalStreak {
+                    await MainActor.run {
+                        profiles[index] = profile
+                    }
+                    
+                    // Persist the change
+                    try await databaseService.updateElderlyProfile(profile)
+                    dataSyncCoordinator.broadcastProfileUpdate(profile)
+                }
+            }
+        } catch {
+            errorCoordinator.handle(error, context: "Checking streak resets")
+        }
     }
     
     // MARK: - Quick Actions

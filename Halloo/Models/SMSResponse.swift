@@ -16,35 +16,8 @@ struct SMSResponse: Codable, Identifiable, Hashable {
     let responseScore: Double?
     let processingNotes: String?
     
-    init(
-        id: String,
-        taskId: String? = nil,
-        profileId: String? = nil,
-        userId: String,
-        textResponse: String? = nil,
-        photoData: Data? = nil,
-        isCompleted: Bool = false,
-        receivedAt: Date = Date(),
-        responseType: ResponseType = .text,
-        isConfirmationResponse: Bool = false,
-        isPositiveConfirmation: Bool = false,
-        responseScore: Double? = nil,
-        processingNotes: String? = nil
-    ) {
-        self.id = id
-        self.taskId = taskId
-        self.profileId = profileId
-        self.userId = userId
-        self.textResponse = textResponse
-        self.photoData = photoData
-        self.isCompleted = isCompleted
-        self.receivedAt = receivedAt
-        self.responseType = responseType
-        self.isConfirmationResponse = isConfirmationResponse
-        self.isPositiveConfirmation = isPositiveConfirmation
-        self.responseScore = responseScore
-        self.processingNotes = processingNotes
-    }
+    // Note: Custom init removed to allow Codable synthesis
+    // Use static factory methods below instead
 }
 
 // MARK: - SMS Response Extensions
@@ -155,13 +128,18 @@ extension SMSResponse {
     ) -> SMSResponse {
         return SMSResponse(
             id: UUID().uuidString,
+            taskId: nil,
             profileId: profileId,
             userId: userId,
             textResponse: textResponse,
+            photoData: nil,
             isCompleted: isPositive,
+            receivedAt: Date(),
             responseType: .text,
             isConfirmationResponse: true,
-            isPositiveConfirmation: isPositive
+            isPositiveConfirmation: isPositive,
+            responseScore: nil,
+            processingNotes: nil
         )
     }
     
@@ -190,7 +168,12 @@ extension SMSResponse {
             textResponse: textResponse,
             photoData: photoData,
             isCompleted: isCompleted,
-            responseType: responseType
+            receivedAt: Date(),
+            responseType: responseType,
+            isConfirmationResponse: false,
+            isPositiveConfirmation: false,
+            responseScore: nil,
+            processingNotes: nil
         )
     }
 }

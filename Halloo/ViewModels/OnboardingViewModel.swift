@@ -19,6 +19,7 @@ import Foundation
 import SwiftUI
 import Combine
 
+
 /// Guides families through comprehensive onboarding and elderly care education workflow
 ///
 /// This ViewModel manages the critical first-time user experience that introduces families
@@ -163,6 +164,8 @@ final class OnboardingViewModel: ObservableObject {
     /// Combined with userAnswers dictionary for flexible access patterns.
     /// Used for analytics and care pattern recommendations.
     @Published var quizAnswers: [String] = []
+    
+    
     
     // MARK: - Account Creation Validation Properties
     
@@ -382,21 +385,30 @@ final class OnboardingViewModel: ObservableObject {
         case .welcome:
             currentStep = .signUp
         case .signUp:
-            _Concurrency.Task {
-                await createAccount()
+            // Only create account if we have valid data
+            if !email.isEmpty && !password.isEmpty && !fullName.isEmpty {
+                _Concurrency.Task {
+                    await createAccount()
+                }
+            } else {
+                print("⚠️ Cannot create account - missing required fields")
             }
         case .quiz:
             if currentQuestionIndex >= quizQuestions.count {
                 currentStep = .preferences
+                print("🧪 nextStep: Advanced from quiz to preferences")
+            } else {
+                print("🧪 nextStep: Quiz not complete yet (index: \(currentQuestionIndex), total: \(quizQuestions.count))")
             }
         case .preferences:
-            _Concurrency.Task {
-                await completeOnboarding()
-            }
+            // Show CreateProfileView - don't auto-complete
+            print("🧪 nextStep: Reached preferences step - should show CreateProfileView")
+            break
         case .complete:
             break
         }
     }
+    
     
     func previousStep() {
         switch currentStep {
@@ -441,7 +453,13 @@ final class OnboardingViewModel: ObservableObject {
     /// - Important: Answers inform SMS templates and care recommendation algorithms
     /// - Note: Supports both array indexing and dictionary key-based access patterns
     func answerQuestion(_ answer: String) {
-        guard let question = currentQuestion else { return }
+        print("🧪 answerQuestion called with: \(answer)")
+        guard let question = currentQuestion else { 
+            print("❌ No current question available")
+            return 
+        }
+        
+        print("🧪 Current question index: \(currentQuestionIndex), Total questions: \(quizQuestions.count)")
         
         // Store answer in indexed array for sequential access
         if currentQuestionIndex < quizAnswers.count {
@@ -453,9 +471,20 @@ final class OnboardingViewModel: ObservableObject {
         // Store in user answers dictionary for easier thematic access
         userAnswers[question.id] = answer
         
-        // Advance to next elderly care assessment question
-        if currentQuestionIndex < quizQuestions.count - 1 {
-            currentQuestionIndex += 1
+        // Always advance question index after answering
+        currentQuestionIndex += 1
+        print("🧪 Advanced question index to \(currentQuestionIndex)")
+        
+        // Check if quiz is complete
+        if currentQuestionIndex >= quizQuestions.count {
+            print("🧪 Quiz complete! Calling nextStep()...")
+            nextStep()
+        } else {
+            print("🧪 More questions remaining")
+            // Force UI update for next question
+            DispatchQueue.main.async {
+                self.objectWillChange.send()
+            }
         }
     }
     

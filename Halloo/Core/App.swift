@@ -7,16 +7,62 @@ import FirebaseStorage
 @main
 struct HalloApp: App {
     // MARK: - Dependencies
-    private let container = Container.shared
+    private let container: Container
     
     // MARK: - App Lifecycle
     init() {
         // Skip heavy initialization during Canvas/Preview execution
         if !ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS") {
-            configureFirebase()
+            // Configure Firebase FIRST, before Container initialization
+            HalloApp.configureFirebase()
+        }
+        
+        // Initialize Container AFTER Firebase is configured
+        container = Container.shared
+        
+        // Configure other services after container is initialized
+        if !ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS") {
             configureNotifications()
         }
+        
         configureAppearance()
+    }
+    
+    private static func configureFirebase() {
+        var firebaseConfigured = false
+        
+        #if DEBUG
+        // Development configuration - Skip if file missing
+        if let path = Bundle.main.path(forResource: "GoogleService-Info-Dev", ofType: "plist"),
+           let options = FirebaseOptions(contentsOfFile: path) {
+            FirebaseApp.configure(options: options)
+            firebaseConfigured = true
+        } else if let _ = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") {
+            // Fall back to regular config file if dev version missing
+            FirebaseApp.configure()
+            firebaseConfigured = true
+        } else {
+            print("⚠️ Firebase config file missing - running with mock services")
+            firebaseConfigured = false
+        }
+        #else
+        // Production configuration
+        FirebaseApp.configure()
+        firebaseConfigured = true
+        #endif
+        
+        // Only configure Firestore/Auth if Firebase was successfully configured
+        if firebaseConfigured {
+            let db = Firestore.firestore()
+            let settings = FirestoreSettings()
+            settings.cacheSettings = PersistentCacheSettings(sizeBytes: NSNumber(value: FirestoreCacheSizeUnlimited))
+            db.settings = settings
+            
+            let auth = Auth.auth()
+            auth.languageCode = "en"
+        }
+        
+        print("🔥 Firebase configured: \(firebaseConfigured)")
     }
     
     var body: some Scene {
@@ -39,34 +85,6 @@ struct HalloApp: App {
     }
     
     // MARK: - Configuration
-    private func configureFirebase() {
-        #if DEBUG
-        // Development configuration
-        if let path = Bundle.main.path(forResource: "GoogleService-Info-Dev", ofType: "plist") {
-            if let options = FirebaseOptions(contentsOfFile: path) {
-                FirebaseApp.configure(options: options)
-            }
-        } else {
-            FirebaseApp.configure()
-        }
-        #else
-        // Production configuration
-        FirebaseApp.configure()
-        #endif
-        
-        // Configure Firestore settings
-        let db = Firestore.firestore()
-        let settings = FirestoreSettings()
-        settings.cacheSettings = PersistentCacheSettings(sizeBytes: NSNumber(value: FirestoreCacheSizeUnlimited))
-        db.settings = settings
-        
-        // Configure Auth settings
-        let auth = Auth.auth()
-        auth.languageCode = "en" // Set language for auth emails
-        
-        print("🔥 Firebase configured for \(Bundle.main.bundleIdentifier ?? "unknown bundle")")
-        print("🔥 Firestore offline persistence enabled")
-    }
     
     private func configureNotifications() {
         _Concurrency.Task {
@@ -75,6 +93,13 @@ struct HalloApp: App {
     }
     
     private func configureAppearance() {
+        // Register custom fonts (Poppins & Inter available when needed)
+        AppFonts.registerFonts()
+        
+        #if DEBUG
+        AppFonts.printAvailableFonts()
+        #endif
+        
         // Configure global app appearance
         UINavigationBar.appearance().largeTitleTextAttributes = [
             .foregroundColor: UIColor.label
