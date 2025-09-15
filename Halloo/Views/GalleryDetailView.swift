@@ -22,19 +22,29 @@ struct GalleryDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.container) private var container
     
-    // Optional navigation closures
-    let onPrevious: (() -> Void)?
-    let onNext: (() -> Void)?
+    // Navigation state
+    let currentIndex: Int
+    let totalEvents: Int
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+    
+    // Computed navigation availability
+    private var hasPrevious: Bool { currentIndex > 0 }
+    private var hasNext: Bool { currentIndex < totalEvents - 1 }
     
     // MARK: - Initialization
     init(
         event: GalleryHistoryEvent,
         selectedTab: Binding<Int>,
-        onPrevious: (() -> Void)? = nil,
-        onNext: (() -> Void)? = nil
+        currentIndex: Int = 0,
+        totalEvents: Int = 1,
+        onPrevious: @escaping () -> Void = {},
+        onNext: @escaping () -> Void = {}
     ) {
         self.event = event
         self._selectedTab = selectedTab
+        self.currentIndex = currentIndex
+        self.totalEvents = totalEvents
         self.onPrevious = onPrevious
         self.onNext = onNext
     }
@@ -79,13 +89,24 @@ struct GalleryDetailView: View {
                 .ignoresSafeArea(.container, edges: .bottom) // Extend past safe area to screen edge
             }
             
-            // Floating bottom navigation
+            // Floating bottom navigation with custom dismiss behavior
             VStack {
                 Spacer()
-                FloatingPillNavigation(selectedTab: $selectedTab)
+                FloatingPillNavigationWithDismiss(selectedTab: $selectedTab, onTabTapped: {
+                    // Dismiss the detail view whenever any tab is tapped
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        dismiss()
+                    }
+                })
             }
         }
         .navigationBarHidden(true)
+        .onAppear {
+            print("DEBUG: GalleryDetailView appeared with currentIndex=\(currentIndex), totalEvents=\(totalEvents)")
+            print("DEBUG: hasPrevious=\(hasPrevious), hasNext=\(hasNext)")
+        }
     }
     
     // MARK: - Navigation Header with Chevrons
@@ -93,7 +114,7 @@ struct GalleryDetailView: View {
         HStack {
             // Back button with chevron
             Button(action: {
-                if let onPrevious = onPrevious {
+                if hasPrevious {
                     onPrevious()
                 } else {
                     dismiss()
@@ -105,7 +126,7 @@ struct GalleryDetailView: View {
                     Text("Back")
                         .font(.system(size: 16, weight: .light))
                 }
-                .foregroundColor(onPrevious != nil ? .gray : .gray.opacity(0.5))
+                .foregroundColor(hasPrevious ? .gray : .gray.opacity(0.5))
             }
             
             Spacer()
@@ -117,27 +138,21 @@ struct GalleryDetailView: View {
             
             Spacer()
             
-            // Next button with chevron (only show if navigation available)
-            if let onNext = onNext {
-                Button(action: onNext) {
-                    HStack(spacing: 8) {
-                        Text("Next")
-                            .font(.system(size: 16, weight: .light))
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .medium))
-                    }
-                    .foregroundColor(.gray)
+            // Next button with chevron - always visible, disabled when not available
+            Button(action: {
+                if hasNext {
+                    onNext()
                 }
-            } else {
-                // Empty space to maintain center alignment
+            }) {
                 HStack(spacing: 8) {
-                    Text("")
+                    Text("Next")
                         .font(.system(size: 16, weight: .light))
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .medium))
                 }
-                .foregroundColor(.clear)
+                .foregroundColor(hasNext ? .gray : .gray.opacity(0.3))
             }
+            .disabled(!hasNext)
         }
     }
     
@@ -336,129 +351,96 @@ struct GalleryDetailView: View {
     }
 }
 
-// MARK: - iOS-Style Speech Bubble View
-/**
- * PROFESSIONAL SPEECH BUBBLE - Following iOS Messages design
- * 
- * Features:
- * - Dynamic sizing with min/max width constraints
- * - Proper triangle tail positioning
- * - Elderly-friendly font sizes and accessibility
- * - iOS-authentic colors and styling
- */
-struct SpeechBubbleView: View {
-    let text: String
-    let isOutgoing: Bool
-    let backgroundColor: Color
-    let textColor: Color
+
+// MARK: - Custom Floating Navigation with Dismiss
+struct FloatingPillNavigationWithDismiss: View {
+    @Binding var selectedTab: Int
+    let onTabTapped: () -> Void
     
-    // Dynamic sizing constraints
-    private let minWidth: CGFloat = 60
-    private let maxWidthPercent: CGFloat = 0.8
-    private let cornerRadius: CGFloat = 18
-    private let padding: CGFloat = 16
-    private let tailSize: CGFloat = 15 // Bigger triangles
+    // iPhone 13 base dimensions for scaling (390x844)
+    private let iPhone13Width: CGFloat = 390
+    private let basePillWidth: CGFloat = 94
+    private let basePillHeight: CGFloat = 43
+    
+    // Calculate responsive dimensions based on screen width
+    private var pillWidth: CGFloat {
+        let screenWidth = UIScreen.main.bounds.width
+        return (basePillWidth / iPhone13Width) * screenWidth
+    }
+    
+    private var pillHeight: CGFloat {
+        let screenWidth = UIScreen.main.bounds.width
+        return (basePillHeight / iPhone13Width) * screenWidth
+    }
+    
+    private var iconSize: CGFloat {
+        let screenWidth = UIScreen.main.bounds.width
+        return (20 / iPhone13Width) * screenWidth
+    }
+    
+    private var fontSize: CGFloat {
+        let screenWidth = UIScreen.main.bounds.width
+        return (10 / iPhone13Width) * screenWidth
+    }
     
     var body: some View {
-        Text(text)
-            .font(.system(size: 18, weight: .regular)) // Elderly-friendly 18pt minimum
-            .foregroundColor(textColor)
-            .padding(.horizontal, padding)
-            .padding(.vertical, 12)
+        HStack {
+            Spacer() // Pushes navigation pill to right side
+            
+            HStack(spacing: pillWidth * 0.2) { // Proportional spacing
+                
+                // HOME TAB
+                VStack(spacing: 4) {
+                    Image(systemName: selectedTab == 0 ? "house.fill" : "house")
+                        .font(.system(size: iconSize))
+                        .foregroundColor(selectedTab == 0 ? .black : Color(hex: "9f9f9f"))
+                    
+                    Text("home")
+                        .font(.custom("Inter", size: fontSize))
+                        .tracking(-0.5)
+                        .foregroundColor(selectedTab == 0 ? .black : Color(hex: "9f9f9f"))
+                }
+                .onTapGesture {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        selectedTab = 0
+                        onTabTapped() // Always dismiss when tapped
+                    }
+                }
+                
+                // GALLERY TAB
+                VStack(spacing: 4) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: iconSize))
+                        .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f"))
+                    
+                    Text("gallery")
+                        .font(.custom("Inter", size: fontSize))
+                        .tracking(-0.5)
+                        .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f"))
+                }
+                .onTapGesture {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        selectedTab = 1
+                        onTabTapped() // Always dismiss when tapped
+                    }
+                }
+            }
+            .frame(width: pillWidth, height: pillHeight)
             .background(
-                BubbleWithTail(isOutgoing: isOutgoing, cornerRadius: cornerRadius, tailSize: tailSize)
-                    .fill(backgroundColor)
+                RoundedRectangle(cornerRadius: pillHeight / 2)
+                    .fill(Color.white)
             )
-            .frame(minWidth: minWidth)
-            .frame(maxWidth: UIScreen.main.bounds.width * maxWidthPercent, alignment: isOutgoing ? .trailing : .leading)
-    }
-}
-
-// MARK: - Corrected Bubble Shape with Attached Tail
-struct BubbleWithTail: Shape {
-    let isOutgoing: Bool
-    let cornerRadius: CGFloat
-    let tailSize: CGFloat
-    
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let width = rect.width
-        let height = rect.height
-        let tailInset: CGFloat = 20 // Triangle positioned closer to edges but avoiding rounded corners
-        
-        if isOutgoing {
-            // OUTGOING BUBBLE (Right tail attached to bottom)
-            
-            // Start from top-left, create full rounded rectangle first
-            path.move(to: CGPoint(x: cornerRadius, y: 0))
-            
-            // Top edge
-            path.addLine(to: CGPoint(x: width - cornerRadius, y: 0))
-            path.addArc(center: CGPoint(x: width - cornerRadius, y: cornerRadius),
-                       radius: cornerRadius, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
-            
-            // Right edge
-            path.addLine(to: CGPoint(x: width, y: height - cornerRadius))
-            path.addArc(center: CGPoint(x: width - cornerRadius, y: height - cornerRadius),
-                       radius: cornerRadius, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
-            
-            // Bottom edge with right-angle triangle tail pointing LEFT
-            // Go to where triangle starts (30pt from right edge)
-            path.addLine(to: CGPoint(x: width - tailInset, y: height))
-            
-            // Left-pointing triangle (outgoing messages point toward center/left)
-            path.addLine(to: CGPoint(x: width - tailInset - tailSize, y: height))          // Left point of triangle
-            path.addLine(to: CGPoint(x: width - tailInset, y: height + tailSize))          // Bottom corner
-            path.addLine(to: CGPoint(x: width - tailInset, y: height))                     // Back to start
-            
-            // Continue bottom edge to left
-            path.addLine(to: CGPoint(x: cornerRadius, y: height))
-            path.addArc(center: CGPoint(x: cornerRadius, y: height - cornerRadius),
-                       radius: cornerRadius, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
-            
-            // Left edge
-            path.addLine(to: CGPoint(x: 0, y: cornerRadius))
-            path.addArc(center: CGPoint(x: cornerRadius, y: cornerRadius),
-                       radius: cornerRadius, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
-            
-        } else {
-            // INCOMING BUBBLE (Left tail attached to bottom)
-            
-            // Start from top-left, create full rounded rectangle first
-            path.move(to: CGPoint(x: cornerRadius, y: 0))
-            
-            // Top edge
-            path.addLine(to: CGPoint(x: width - cornerRadius, y: 0))
-            path.addArc(center: CGPoint(x: width - cornerRadius, y: cornerRadius),
-                       radius: cornerRadius, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
-            
-            // Right edge
-            path.addLine(to: CGPoint(x: width, y: height - cornerRadius))
-            path.addArc(center: CGPoint(x: width - cornerRadius, y: height - cornerRadius),
-                       radius: cornerRadius, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
-            
-            // Bottom edge with right-angle triangle tail pointing RIGHT
-            // Go to where triangle starts (30pt from left edge)
-            path.addLine(to: CGPoint(x: tailInset, y: height))
-            
-            // Right-pointing triangle (incoming messages point toward center/right)
-            path.addLine(to: CGPoint(x: tailInset + tailSize, y: height))                      // Right point of triangle
-            path.addLine(to: CGPoint(x: tailInset, y: height + tailSize))                     // Bottom corner
-            path.addLine(to: CGPoint(x: tailInset, y: height))                               // Back to start
-            
-            // Continue bottom edge to left
-            path.addLine(to: CGPoint(x: cornerRadius, y: height))
-            path.addArc(center: CGPoint(x: cornerRadius, y: height - cornerRadius),
-                       radius: cornerRadius, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
-            
-            // Left edge
-            path.addLine(to: CGPoint(x: 0, y: cornerRadius))
-            path.addArc(center: CGPoint(x: cornerRadius, y: cornerRadius),
-                       radius: cornerRadius, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+            .overlay(
+                RoundedRectangle(cornerRadius: pillHeight / 2)
+                    .stroke(Color(hex: "e0e0e0"), lineWidth: 1)
+            )
+            .padding(.trailing, 10)
+            .padding(.bottom, 20)
         }
-        
-        path.closeSubpath()
-        return path
     }
 }
 

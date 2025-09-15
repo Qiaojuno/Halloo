@@ -82,12 +82,17 @@ final class Container: ObservableObject {
         print("🧪 TEMPORARILY FORCING MOCK SERVICES - Debug UI responsiveness")
         return false
         
+        // COMMENTED OUT - Code after return will never be executed
+        /*
         // Check if Firebase has been configured
         guard FirebaseApp.app() != nil else {
             print("⚠️ Firebase not configured - using mock services")
             return false
         }
+        */
         
+        /*
+        // COMMENTED OUT - Code after return will never be executed
         // In preview/canvas mode, use mock services
         if ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS") {
             print("🎨 Running in preview mode - using mock services")
@@ -101,6 +106,7 @@ final class Container: ObservableObject {
         }
         
         return true
+        */
     }
     
     // MARK: - Generic Registration

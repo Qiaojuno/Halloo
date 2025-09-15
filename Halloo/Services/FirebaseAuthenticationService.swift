@@ -1,6 +1,8 @@
 import Foundation
 import Firebase
 import FirebaseAuth
+import GoogleSignIn
+import AuthenticationServices
 import Combine
 
 // MARK: - Firebase Authentication Service
@@ -75,13 +77,88 @@ class FirebaseAuthenticationService: AuthenticationServiceProtocol {
     }
     
     func signInWithApple() async throws -> AuthResult {
-        // This would require Apple Sign In implementation
-        throw AuthenticationError.unknownError("Apple Sign In not implemented")
+        // Note: Apple Sign In integration would typically be handled at the UI level
+        // with SignInWithAppleButton, which then passes the ASAuthorization result here
+        // For now, we'll throw an error indicating this should be handled differently
+        throw AuthenticationError.unknownError("Apple Sign In should be handled through SignInWithAppleButton in the UI layer")
+    }
+    
+    /// Process Apple Sign In authorization result from UI layer
+    func processAppleSignIn(authorization: ASAuthorization) async throws -> AuthResult {
+        guard let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential else {
+            throw AuthenticationError.unknownError("Invalid Apple ID credential")
+        }
+        
+        guard let identityToken = appleIDCredential.identityToken,
+              let identityTokenString = String(data: identityToken, encoding: .utf8) else {
+            throw AuthenticationError.unknownError("Failed to get identity token from Apple")
+        }
+        
+        // Create Firebase credential
+        let credential = OAuthProvider.appleCredential(withIDToken: identityTokenString,
+                                                      rawNonce: "",
+                                                      fullName: appleIDCredential.fullName)
+        
+        // Sign in with Firebase
+        let authResult = try await auth.signIn(with: credential)
+        let firebaseUser = authResult.user
+        
+        // Update display name if provided by Apple
+        if let fullName = appleIDCredential.fullName,
+           let givenName = fullName.givenName,
+           let familyName = fullName.familyName,
+           firebaseUser.displayName == nil {
+            let changeRequest = firebaseUser.createProfileChangeRequest()
+            changeRequest.displayName = "\(givenName) \(familyName)"
+            try await changeRequest.commitChanges()
+        }
+        
+        return AuthResult(
+            uid: firebaseUser.uid,
+            email: firebaseUser.email ?? appleIDCredential.email,
+            displayName: firebaseUser.displayName,
+            isNewUser: authResult.additionalUserInfo?.isNewUser ?? false,
+            idToken: try await firebaseUser.getIDToken()
+        )
     }
     
     func signInWithGoogle() async throws -> AuthResult {
-        // This would require Google Sign In implementation
-        throw AuthenticationError.unknownError("Google Sign In not implemented")
+        // Get the app's root view controller
+        guard let windowScene = await UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let presentingViewController = await windowScene.windows.first?.rootViewController else {
+            throw AuthenticationError.unknownError("Unable to get root view controller")
+        }
+        
+        do {
+            // Start the Google Sign-In flow
+            let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presentingViewController)
+            let user = result.user
+            
+            // Get the ID token and access token
+            guard let idToken = user.idToken?.tokenString else {
+                throw AuthenticationError.unknownError("Failed to get ID token from Google")
+            }
+            
+            let accessToken = user.accessToken.tokenString
+            
+            // Create Firebase credential
+            let credential = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
+            
+            // Sign in with Firebase
+            let authResult = try await auth.signIn(with: credential)
+            let firebaseUser = authResult.user
+            
+            return AuthResult(
+                uid: firebaseUser.uid,
+                email: firebaseUser.email,
+                displayName: firebaseUser.displayName,
+                isNewUser: authResult.additionalUserInfo?.isNewUser ?? false,
+                idToken: try await firebaseUser.getIDToken()
+            )
+            
+        } catch {
+            throw AuthenticationError.unknownError("Google Sign In failed: \(error.localizedDescription)")
+        }
     }
     
     func signOut() async throws {

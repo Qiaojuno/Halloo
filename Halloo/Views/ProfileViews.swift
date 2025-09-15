@@ -1,6 +1,32 @@
 import SwiftUI
 import AVFoundation
 import Combine
+import SuperwallKit
+
+// MARK: - Custom Environment Key for Dismiss Action
+struct DismissKey: EnvironmentKey {
+    static let defaultValue: () -> Void = {}
+}
+
+extension EnvironmentValues {
+    var customDismiss: () -> Void {
+        get { self[DismissKey.self] }
+        set { self[DismissKey.self] = newValue }
+    }
+}
+
+// MARK: - Profile Onboarding Flow with Custom Dismiss
+/// Wrapper for ProfileOnboardingFlow that allows custom dismiss action for dashboard usage
+struct ProfileOnboardingFlowWithDismiss: View {
+    let dismissAction: () -> Void
+    @EnvironmentObject var profileViewModel: ProfileViewModel
+    
+    var body: some View {
+        ProfileOnboardingFlow()
+            .environmentObject(profileViewModel)
+            .environment(\.customDismiss, dismissAction)
+    }
+}
 
 // MARK: - Profile Onboarding Flow (6-Step Process)
 /// Complete profile onboarding experience replacing basic CreateProfileView
@@ -51,16 +77,22 @@ struct ProfileOnboardingFlow: View {
         switch profileViewModel.profileOnboardingStep {
         case .newProfileForm:
             Step1_NewProfileForm()
+                .transition(.identity) // Remove step transition animations
         case .profileComplete:
             Step2_ProfileComplete()
+                .transition(.identity) // Remove step transition animations
         case .smsIntroduction:
             Step3_SMSIntroduction()
+                .transition(.identity) // Remove step transition animations
         case .confirmationWait:
             Step4_ConfirmationWait()
+                .transition(.identity) // Remove step transition animations
         case .onboardingSuccess:
             Step5_OnboardingSuccess()
+                .transition(.identity) // Remove step transition animations
         case .firstHabit:
             Step6_FirstHabit()
+                .transition(.identity) // Remove step transition animations
         }
     }
 }
@@ -95,6 +127,7 @@ struct ProfileOnboardingHeader: View {
 /// - Optional photo upload (placeholder for future implementation)
 struct Step1_NewProfileForm: View {
     @EnvironmentObject var profileViewModel: ProfileViewModel
+    @Environment(\.customDismiss) var customDismiss
     @State private var showingImagePicker = false
     @State private var showingImageOptions = false
     @State private var imageSourceType: UIImagePickerController.SourceType = .photoLibrary
@@ -108,7 +141,12 @@ struct Step1_NewProfileForm: View {
             HStack {
                 Button(action: {
                     print("🔙 BACK: Back button tapped in New Profile step")
-                    profileViewModel.previousOnboardingStep()
+                    // If we're at the first step, dismiss to dashboard
+                    if profileViewModel.profileOnboardingStep == .newProfileForm {
+                        customDismiss()
+                    } else {
+                        profileViewModel.previousOnboardingStep()
+                    }
                 }) {
                     HStack(spacing: 8) {
                         Image(systemName: "chevron.left")
@@ -1570,6 +1608,7 @@ struct Step5_OnboardingSuccess: View {
 /// - Option to finish and go to dashboard
 struct Step6_FirstHabit: View {
     @EnvironmentObject var profileViewModel: ProfileViewModel
+    @EnvironmentObject var onboardingViewModel: OnboardingViewModel
     @Environment(\.container) private var container
     @State private var showingTaskCreation = false
     
@@ -1698,8 +1737,10 @@ struct Step6_FirstHabit: View {
                 }
                 .padding(.horizontal, 24)
                 
-                // Skip option
+                // Skip option - go to dashboard instead of back to "Add Family Member"
                 Button(action: {
+                    // Complete the entire onboarding to navigate to dashboard
+                    onboardingViewModel.skipToEnd()
                     profileViewModel.completeProfileOnboarding()
                 }) {
                     Text("Skip for Now")
@@ -1849,55 +1890,95 @@ struct CreateProfileView: View {
     @EnvironmentObject var profileViewModel: ProfileViewModel
     
     var body: some View {
+        Group {
+            if profileViewModel.showingProfileOnboarding {
+                // Show profile onboarding flow without animation
+                ProfileOnboardingFlow()
+                    .environmentObject(profileViewModel)
+                    .transition(.identity)
+                    .animation(nil, value: profileViewModel.showingProfileOnboarding)
+            } else {
+                // Show add family member screen
+                addFamilyMemberScreen
+                    .transition(.identity)
+                    .animation(nil, value: profileViewModel.showingProfileOnboarding)
+            }
+        }
+        .animation(nil) // Disable all animations for this view
+    }
+    
+    private var addFamilyMemberScreen: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                VStack(spacing: 30) {
-                    Spacer()
-                    
-                    Image(systemName: "person.badge.plus")
-                        .font(.system(size: 80))
-                        .foregroundColor(.blue)
-                    
-                    Text("Add Family Member")
-                        .font(.system(size: 28, weight: .bold))
-                        .tracking(-1)
-                        .foregroundColor(.black)
-                    
-                    Text("Start the guided setup process to add an elderly family member to your care coordination network")
-                        .font(.system(size: 16, weight: .regular))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                        .foregroundColor(.secondary)
-                        .tracking(-0.5)
-                    
-                    Spacer()
-                    
-                    Button(action: {
+                // Top spacing for status bar
+                Color.clear.frame(height: 60)
+                
+                // Title centered at top of screen
+                Text("Add Family Member")
+                    .font(.system(size: 28, weight: .bold))
+                    .tracking(-1)
+                    .foregroundColor(.black)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, 24)
+                
+                // Subtitle
+                Text("Set up your first profile")
+                    .font(.system(size: 16, weight: .regular))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+                    .foregroundColor(.gray)
+                    .tracking(-0.5)
+                
+                Spacer()
+                
+                // Bird2 image positioned in the center (scaled 2x)
+                Image("Bird2")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: geometry.size.width * 0.8, height: geometry.size.height * 0.5)
+                    .clipped()
+                
+                Spacer()
+                
+                // Get Started button - start profile onboarding
+                Button(action: {
+                    // Disable animations for the transition
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
                         profileViewModel.startProfileOnboarding()
-                    }) {
-                        Text("Get Started")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.blue)
-                            .cornerRadius(12)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 50)
+                }) {
+                    Text("Get Started")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, minHeight: 47)
+                        .background(Color(hex: "28ADFF"))
+                        .cornerRadius(15)
                 }
-                .padding(.horizontal, 12)
-                .background(Color.white)
-                .cornerRadius(10)
-                .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
+                .padding(.horizontal, 32)
+                .padding(.bottom, 10) // Match profile flow positioning
             }
-            .padding(.horizontal, geometry.size.width * 0.04)
-            .background(Color(hex: "f9f9f9"))
         }
-        .fullScreenCover(isPresented: $profileViewModel.showingProfileOnboarding) {
-            ProfileOnboardingFlow()
-                .environmentObject(profileViewModel)
-        }
+        .background(
+            // App background with gradient overlay matching profile creation flow
+            ZStack(alignment: .bottom) {
+                Color(hex: "f9f9f9")
+                
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.clear, // Top (fully transparent)
+                        Color(hex: "B3B3B3")     // Bottom
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 451)
+                .offset(y: 225) // Move half the height down so half is below screen
+            }
+            .ignoresSafeArea()
+        )
     }
 }
 

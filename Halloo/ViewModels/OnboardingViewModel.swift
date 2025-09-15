@@ -18,6 +18,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import SuperwallKit
 
 
 /// Guides families through comprehensive onboarding and elderly care education workflow
@@ -63,7 +64,7 @@ final class OnboardingViewModel: ObservableObject {
     /// - .quiz: Care needs assessment and elderly preference gathering
     /// - .preferences: Notification and communication setup
     /// - .complete: Onboarding finished, ready for elderly profile creation
-    @Published var currentStep: OnboardingStep = .welcome
+    @Published var currentStep: OnboardingStep = .signUp
     
     /// Family's responses to elderly care assessment questions
     /// 
@@ -156,7 +157,7 @@ final class OnboardingViewModel: ObservableObject {
     /// - Priority care areas (medication, exercise, social activities)
     ///
     /// Used to provide contextual help and appropriate care recommendations.
-    @Published var currentQuestionIndex = 0
+    @Published var currentQuestionIndex = 7  // TEMPORARY: Start at last question for faster paywall testing
     
     /// Array of family responses to elderly care assessment questions
     /// 
@@ -238,6 +239,8 @@ final class OnboardingViewModel: ObservableObject {
             return isValidSignUpForm
         case .quiz:
             return currentQuestionIndex >= quizQuestions.count
+        case .profileSetupConfirmation:
+            return true
         case .preferences:
             return true
         case .complete:
@@ -272,7 +275,41 @@ final class OnboardingViewModel: ObservableObject {
     /// elderly care context and answer options.
     var currentQuestion: QuizQuestion? {
         guard currentQuestionIndex < quizQuestions.count else { return nil }
-        return quizQuestions[currentQuestionIndex]
+        var question = quizQuestions[currentQuestionIndex]
+        
+        // Generate dynamic content for age statistic break
+        if question.id == "age_statistic_break" {
+            question.question = generateAgeStatisticText()
+        }
+        return question
+    }
+    
+    /// Whether the quiz has been completed (all questions answered)
+    var isQuizComplete: Bool {
+        return currentQuestionIndex >= quizQuestions.count
+    }
+    
+    /// Generate age-specific statistic text based on previous age answer
+    private func generateAgeStatisticText() -> String {
+        // Find the age answer from userAnswers
+        let ageAnswer = userAnswers["loved_one_age"] ?? "seniors"
+        
+        // Map age ranges to appropriate text
+        let ageGroup: String
+        switch ageAnswer {
+        case "Under 65":
+            ageGroup = "Adults under 65"
+        case "65-74":
+            ageGroup = "Seniors 65-74"
+        case "75-84":
+            ageGroup = "Seniors 75-84"
+        case "85+":
+            ageGroup = "Seniors 85+"
+        default:
+            ageGroup = "Seniors"
+        }
+        
+        return "\(ageGroup) who receive text-based reminders are 2x more likely to stick to healthy routines compared to app-based reminders."
     }
     
     /// Calculated progress percentage for onboarding workflow visualization
@@ -383,23 +420,23 @@ final class OnboardingViewModel: ObservableObject {
         
         switch currentStep {
         case .welcome:
+            // Go to signup/login page
             currentStep = .signUp
+            print("🧪 nextStep: Advanced from welcome to signup/login")
         case .signUp:
-            // Only create account if we have valid data
-            if !email.isEmpty && !password.isEmpty && !fullName.isEmpty {
-                _Concurrency.Task {
-                    await createAccount()
-                }
-            } else {
-                print("⚠️ Cannot create account - missing required fields")
-            }
+            // User should authenticate via LoginView before proceeding
+            // nextStep will be called by LoginView after successful authentication
+            print("🧪 nextStep: Waiting for user authentication in LoginView")
         case .quiz:
             if currentQuestionIndex >= quizQuestions.count {
-                currentStep = .preferences
-                print("🧪 nextStep: Advanced from quiz to preferences")
+                currentStep = .profileSetupConfirmation
+                print("🧪 nextStep: Advanced from quiz to profile setup confirmation")
             } else {
                 print("🧪 nextStep: Quiz not complete yet (index: \(currentQuestionIndex), total: \(quizQuestions.count))")
             }
+        case .profileSetupConfirmation:
+            currentStep = .preferences
+            print("🧪 nextStep: Advanced from profile setup confirmation to preferences")
         case .preferences:
             // Show CreateProfileView - don't auto-complete
             print("🧪 nextStep: Reached preferences step - should show CreateProfileView")
@@ -422,8 +459,10 @@ final class OnboardingViewModel: ObservableObject {
             } else {
                 currentStep = .signUp
             }
-        case .preferences:
+        case .profileSetupConfirmation:
             currentStep = .quiz
+        case .preferences:
+            currentStep = .profileSetupConfirmation
         case .complete:
             currentStep = .preferences
         }
@@ -432,6 +471,46 @@ final class OnboardingViewModel: ObservableObject {
     func skipToEnd() {
         currentStep = .complete
         isComplete = true
+    }
+    
+    func skipToQuiz() {
+        currentStep = .quiz
+        print("✅ Authentication successful - proceeding to quiz")
+    }
+    
+    /// Handle successful authentication and navigation logic
+    func handleSuccessfulAuthentication(authResult: AuthResult) async {
+        do {
+            // Check if user needs onboarding
+            let existingUser = try await databaseService.getUser(authResult.uid)
+            
+            if let user = existingUser, user.isOnboardingComplete {
+                // User already onboarded, skip to complete
+                await MainActor.run {
+                    // Disable animations during transition
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        isComplete = true
+                    }
+                }
+            } else {
+                // New user or incomplete onboarding, continue with quiz
+                await MainActor.run {
+                    // Disable animations during transition
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        currentStep = .quiz
+                    }
+                }
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                errorCoordinator.handle(error, context: "Post-authentication user check")
+            }
+        }
     }
     
     // MARK: - Elderly Care Assessment Actions
@@ -450,6 +529,18 @@ final class OnboardingViewModel: ObservableObject {
     /// 4. **Validation**: Ensure answer is recorded for current question context
     ///
     /// - Parameter answer: Family's selected response to elderly care assessment question
+    /// Navigate to profile setup after quiz completion
+    func proceedToProfileSetup() {
+        // Move to preferences step (CreateProfileView)
+        currentStep = .preferences
+    }
+    
+    /// Skip profile setup and go to main app
+    func skipProfileSetup() {
+        // Mark onboarding as complete and go to main app
+        currentStep = .complete
+    }
+    
     /// - Important: Answers inform SMS templates and care recommendation algorithms
     /// - Note: Supports both array indexing and dictionary key-based access patterns
     func answerQuestion(_ answer: String) {
@@ -477,8 +568,16 @@ final class OnboardingViewModel: ObservableObject {
         
         // Check if quiz is complete
         if currentQuestionIndex >= quizQuestions.count {
-            print("🧪 Quiz complete! Calling nextStep()...")
-            nextStep()
+            print("🧪 Quiz complete!")
+            
+            // Regular quiz completion - trigger paywall
+            print("🧪 Regular quiz complete! Triggering paywall...")
+            
+            // Trigger Superwall paywall BEFORE profile creation
+            Superwall.shared.register(placement: "campaign_trigger")
+            
+            // DO NOT call nextStep() - wait for paywall completion
+            print("🧪 Paywall triggered - waiting for completion...")
         } else {
             print("🧪 More questions remaining")
             // Force UI update for next question
@@ -610,6 +709,15 @@ final class OnboardingViewModel: ObservableObject {
         isLoading = false
     }
     
+    /// Proceed to profile creation after successful paywall interaction
+    func proceedAfterPaywall() {
+        print("🧪 Proceeding to profile creation after paywall")
+        
+        // Show the thank you message first, then proceed to profile setup
+        currentStep = .profileSetupConfirmation
+        print("🎉 Paywall completed successfully - showing thank you confirmation")
+    }
+    
     // MARK: - Validation Methods
     private func validateEmail(_ email: String) {
         if email.isEmpty {
@@ -708,6 +816,7 @@ enum OnboardingStep: String, CaseIterable {
     case welcome = "welcome"
     case signUp = "signUp"
     case quiz = "quiz"
+    case profileSetupConfirmation = "profileSetupConfirmation"
     case preferences = "preferences"
     case complete = "complete"
     
@@ -719,6 +828,8 @@ enum OnboardingStep: String, CaseIterable {
             return "Create Account"
         case .quiz:
             return "Quick Setup"
+        case .profileSetupConfirmation:
+            return "Profile Setup"
         case .preferences:
             return "Preferences"
         case .complete:
@@ -734,6 +845,8 @@ enum OnboardingStep: String, CaseIterable {
             return "Create your account to get started"
         case .quiz:
             return "Help us personalize your experience"
+        case .profileSetupConfirmation:
+            return "Ready to create your first profile?"
         case .preferences:
             return "Customize your notification settings"
         case .complete:
@@ -744,7 +857,7 @@ enum OnboardingStep: String, CaseIterable {
 
 struct QuizQuestion {
     let id: String
-    let question: String
+    var question: String
     let options: [String]
     let helpText: String?
     
@@ -759,37 +872,87 @@ struct QuizQuestion {
 struct OnboardingQuiz {
     static let questions = [
         QuizQuestion(
-            id: "relationship",
-            question: "Who will you be setting up reminders for?",
+            id: "care_recipient",
+            question: "Who are you setting reminders for?",
             options: [
                 "My parent(s)",
                 "My grandparent(s)",
-                "Both parents and grandparents",
-                "Other family member"
+                "Both",
+                "Other"
             ],
-            helpText: "This helps us suggest appropriate reminder types"
+            helpText: nil
         ),
         QuizQuestion(
-            id: "tech_comfort",
-            question: "How comfortable are they with technology?",
+            id: "loved_one_age",
+            question: "How old is your loved one?",
             options: [
-                "Very comfortable - they use smartphones regularly",
-                "Somewhat comfortable - they can text and call",
-                "Basic use - they can receive texts but prefer calls",
-                "Not comfortable - they prefer traditional methods"
+                "Under 65",
+                "65-74",
+                "75-84",
+                "85+"
             ],
-            helpText: "We'll adjust our communication style accordingly"
+            helpText: nil
         ),
         QuizQuestion(
-            id: "priority_tasks",
-            question: "What types of reminders are most important?",
+            id: "age_statistic_break",
+            question: "", // Will be dynamically generated
+            options: [], // No options - this is a break screen
+            helpText: nil
+        ),
+        QuizQuestion(
+            id: "reminder_motivation",
+            question: "Why do you want to set reminders for them?",
             options: [
-                "Medication reminders",
-                "Exercise and physical activity",
-                "Social activities and appointments",
-                "All of the above"
+                "For their health",
+                "For their independence",
+                "To stay connected",
+                "To reduce stress for myself"
             ],
-            helpText: "You can add all types later, but this helps us prioritize"
+            helpText: nil
+        ),
+        QuizQuestion(
+            id: "primary_habit",
+            question: "What's the #1 habit you'd love them to build right now?",
+            options: [
+                "Taking medications on time",
+                "Drinking enough water",
+                "Staying active",
+                "Daily check-ins / routines",
+                "Other"
+            ],
+            helpText: nil
+        ),
+        QuizQuestion(
+            id: "personality_type",
+            question: "What's their personality type when it comes to reminders?",
+            options: [
+                "Gentle encouragement works best",
+                "Straightforward and to the point",
+                "Funny and lighthearted",
+                "Haven't figured that out yet"
+            ],
+            helpText: nil
+        ),
+        QuizQuestion(
+            id: "reminder_frequency",
+            question: "How often should we send reminders?",
+            options: [
+                "Daily",
+                "A few times a week",
+                "Weekly"
+            ],
+            helpText: nil
+        ),
+        QuizQuestion(
+            id: "primary_motivation",
+            question: "What matters most to you in helping them?",
+            options: [
+                "Their health",
+                "Their happiness",
+                "Their independence",
+                "Staying connected with them"
+            ],
+            helpText: nil
         )
     ]
 }

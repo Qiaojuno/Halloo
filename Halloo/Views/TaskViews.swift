@@ -1,7 +1,28 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Task Views
 // Component-based architecture for Task-related UI
+
+// MARK: - Task Creation View With Dismiss (For Dashboard Usage)
+struct TaskCreationViewWithDismiss: View {
+    let preselectedProfileId: String?
+    let dismissAction: () -> Void
+    @EnvironmentObject var viewModel: TaskViewModel
+    
+    var body: some View {
+        CustomHabitCreationFlow(
+            viewModel: viewModel,
+            onDismiss: dismissAction
+        )
+        .onAppear {
+            // Set preselected profile when view appears
+            if let profileId = preselectedProfileId {
+                viewModel.preselectProfile(profileId: profileId)
+            }
+        }
+    }
+}
 
 // MARK: - Task Creation View (Multi-Step Flow)
 struct TaskCreationView: View {
@@ -90,7 +111,12 @@ struct Step1_HabitForm: View {
             HStack {
                 Spacer()
                 HStack {
-                    Button(action: onDismiss) {
+                    Button(action: {
+                        // Haptic feedback for navigation bar button
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        
+                        onDismiss()
+                    }) {
                         HStack(spacing: 8) {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 14, weight: .medium))
@@ -111,6 +137,9 @@ struct Step1_HabitForm: View {
                     Spacer()
                     
                     Button(action: {
+                        // Haptic feedback for navigation bar button
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        
                         if !habitName.isEmpty && !selectedDays.isEmpty && !selectedTimes.isEmpty {
                             onNext()
                         }
@@ -227,14 +256,15 @@ struct Step1_HabitForm: View {
                     VStack {
                         Button(action: {
                             if !habitName.isEmpty && !selectedDays.isEmpty && !selectedTimes.isEmpty {
-                                onButtonWidthCapture(geometry.size.width - 46) // CAPTURE the actual width
+                                let buttonWidth = max(200, geometry.size.width - 46) // Ensure minimum width of 200
+                                onButtonWidthCapture(buttonWidth) // CAPTURE the actual width
                                 onNext()
                             }
                         }) {
                             Text("Continue")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(.white)
-                                .frame(width: geometry.size.width - 46, height: 47) // Exact calculation: screen width - (23px × 2)
+                                .frame(width: max(200, geometry.size.width - 46), height: 47) // Ensure minimum width of 200
                                 .background(habitName.isEmpty || selectedDays.isEmpty || selectedTimes.isEmpty ? Color(hex: "BFE6FF") : Color(hex: "28ADFF"))
                                 .cornerRadius(15)
                         }
@@ -288,7 +318,12 @@ struct Step2_ConfirmationMethod: View {
             HStack {
                 Spacer()
                 HStack {
-                    Button(action: onBack) {
+                    Button(action: {
+                        // Haptic feedback for navigation bar button
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        
+                        onBack()
+                    }) {
                         HStack(spacing: 8) {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 14, weight: .medium))
@@ -378,6 +413,10 @@ struct Step2_ConfirmationMethod: View {
             VStack {
                 Button(action: {
                     if !confirmationMethod.isEmpty {
+                        // Haptic feedback for create button
+                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                        impactFeedback.impactOccurred()
+                        
                         onCreate()
                     }
                 }) {

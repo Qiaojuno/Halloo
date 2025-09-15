@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import SuperwallKit
 
 struct ContentView: View {
     // MARK: - Environment
@@ -57,13 +58,13 @@ struct ContentView: View {
         }
         .onAppear {
             initializeViewModels()
-            // DEVELOPMENT: Skip onboarding for faster testing
-            #if DEBUG
-            if !onboardingViewModel.isComplete {
-                print("🚀 DEVELOPMENT MODE: Skipping onboarding flow")
-                onboardingViewModel.skipToEnd()
-            }
-            #endif
+            // DEVELOPMENT: Enable onboarding for Superwall testing
+            // #if DEBUG
+            // if !onboardingViewModel.isComplete {
+            //     print("🚀 DEVELOPMENT MODE: Skipping onboarding flow")
+            //     onboardingViewModel.skipToEnd()
+            // }
+            // #endif
         }
         .onChange(of: onboardingViewModel.isComplete) { oldValue, newValue in
             handleOnboardingCompletion(newValue)
@@ -94,22 +95,34 @@ struct ContentView: View {
         case .welcome:
             WelcomeView()
                 .environmentObject(onboardingViewModel)
+                .transition(.identity) // No animation
             
         case .signUp:
-            AccountSetupView()
+            // Show login screen with social buttons
+            LoginView()
                 .environmentObject(onboardingViewModel)
+                .transition(.identity) // No animation
             
         case .quiz:
             QuizView()
                 .environmentObject(onboardingViewModel)
+                .transition(.identity) // No animation
+            
+        case .profileSetupConfirmation:
+            ProfileSetupConfirmationView()
+                .environmentObject(onboardingViewModel)
+                .transition(.identity) // No animation
             
         case .preferences:
             CreateProfileView()
                 .environmentObject(profileViewModel)
+                .environmentObject(onboardingViewModel)
+                .transition(.identity) // No animation
             
         case .complete:
             OnboardingCompleteView()
                 .environmentObject(onboardingViewModel)
+                .transition(.identity) // No animation
         }
     }
     
@@ -124,6 +137,11 @@ struct ContentView: View {
                 // Dashboard Tab - Home screen
                 DashboardView(selectedTab: $selectedTab)
                     .environmentObject(container.makeDashboardViewModel())
+                    .environmentObject(profileViewModel)
+            } else if selectedTab == 1 {
+                // Habits Tab - Habit management screen
+                HabitsView(selectedTab: $selectedTab)
+                    .environmentObject(container.makeDashboardViewModel()) // Reuse same ViewModel for data consistency
                     .environmentObject(profileViewModel)
             } else {
                 // Gallery Tab - Archive of completed habits with photos
@@ -236,6 +254,7 @@ struct ContentView: View {
         }
     }
     #endif
+    
     
     // MARK: - UI Configuration
     // TabBar hiding functions no longer needed since we removed TabView completely
@@ -354,6 +373,8 @@ struct LoadingView: View {
                 .scaleEffect(1.2)
                 .padding(.top, 20)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(hex: "f9f9f9")) // Same background as app to prevent black flash
         .onAppear {
             isAnimating = true
         }

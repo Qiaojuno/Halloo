@@ -170,13 +170,48 @@ class MockDatabaseService: DatabaseServiceProtocol {
         mockResponses[taskResponse.id] = taskResponse
         
         // 4. Convert responses to gallery events
+        // NOTE: Modified task IDs to avoid duplicates while keeping gallery content
+        
+        // Text event - no taskId, just a general message
         let textEvent = GalleryHistoryEvent.fromSMSResponse(textResponse)
         mockGalleryEvents[textEvent.id] = textEvent
         
-        let photoEvent = GalleryHistoryEvent.fromSMSResponse(photoResponse) 
+        // Photo event - create new response with unique taskId for gallery
+        let photoResponseForGallery = SMSResponse(
+            id: "mock-gallery-photo",
+            taskId: "gallery-photo-task", // Unique ID for gallery only
+            profileId: photoResponse.profileId,
+            userId: photoResponse.userId,
+            textResponse: photoResponse.textResponse,
+            photoData: photoResponse.photoData,
+            isCompleted: photoResponse.isCompleted,
+            receivedAt: photoResponse.receivedAt,
+            responseType: photoResponse.responseType,
+            isConfirmationResponse: photoResponse.isConfirmationResponse,
+            isPositiveConfirmation: photoResponse.isPositiveConfirmation,
+            responseScore: photoResponse.responseScore,
+            processingNotes: photoResponse.processingNotes
+        )
+        let photoEvent = GalleryHistoryEvent.fromSMSResponse(photoResponseForGallery) 
         mockGalleryEvents[photoEvent.id] = photoEvent
         
-        let taskEvent = GalleryHistoryEvent.fromSMSResponse(taskResponse)
+        // Task event - create new response with unique taskId for gallery
+        let taskResponseForGallery = SMSResponse(
+            id: "mock-gallery-combined",
+            taskId: "gallery-combined-task", // Unique ID for gallery only
+            profileId: taskResponse.profileId,
+            userId: taskResponse.userId,
+            textResponse: taskResponse.textResponse,
+            photoData: taskResponse.photoData,
+            isCompleted: taskResponse.isCompleted,
+            receivedAt: taskResponse.receivedAt,
+            responseType: taskResponse.responseType,
+            isConfirmationResponse: taskResponse.isConfirmationResponse,
+            isPositiveConfirmation: taskResponse.isPositiveConfirmation,
+            responseScore: taskResponse.responseScore,
+            processingNotes: taskResponse.processingNotes
+        )
+        let taskEvent = GalleryHistoryEvent.fromSMSResponse(taskResponseForGallery)
         mockGalleryEvents[taskEvent.id] = taskEvent
         
         // 4. CREATE RESPONSES FOR NEW DASHBOARD TASKS
@@ -198,6 +233,10 @@ class MockDatabaseService: DatabaseServiceProtocol {
         )
         mockResponses[walkResponse.id] = walkResponse
         
+        // Convert walk response to gallery event
+        let walkEvent = GalleryHistoryEvent.fromSMSResponse(walkResponse)
+        mockGalleryEvents[walkEvent.id] = walkEvent
+        
         // Response for completed "Check Blood Pressure" task  
         let bpResponse = SMSResponse(
             id: "mock-bp-response",
@@ -216,6 +255,10 @@ class MockDatabaseService: DatabaseServiceProtocol {
         )
         mockResponses[bpResponse.id] = bpResponse
         
+        // Convert BP response to gallery event
+        let bpEvent = GalleryHistoryEvent.fromSMSResponse(bpResponse)
+        mockGalleryEvents[bpEvent.id] = bpEvent
+        
         // 5. ONE PROFILE MOCKUP - Add profile creation event  
         if let profile = mockProfiles["mock-profile-1"] {
             let profileEvent = GalleryHistoryEvent.fromProfileCreation(
@@ -224,6 +267,70 @@ class MockDatabaseService: DatabaseServiceProtocol {
                 profileSlot: 0
             )
             mockGalleryEvents[profileEvent.id] = profileEvent
+        }
+        
+        // ADDITIONAL MOCK EVENTS TO TRIPLE GALLERY CONTENT
+        
+        // Text responses
+        let textResponses = [
+            ("text-1", "Took medication at 8:30 AM", -5),
+            ("text-2", "Blood pressure is 120/80", -6),
+            ("text-3", "Feeling great today!", -7),
+            ("text-4", "Completed stretching exercises", -8),
+            ("text-5", "Had a good breakfast", -9),
+            ("text-6", "Went to doctor appointment", -10)
+        ]
+        
+        for (suffix, message, hoursAgo) in textResponses {
+            let response = SMSResponse(
+                id: "mock-text-\(suffix)",
+                taskId: "gallery-text-\(suffix)",
+                profileId: "mock-profile-1",
+                userId: "mock-user-id",
+                textResponse: message,
+                photoData: nil,
+                isCompleted: true,
+                receivedAt: calendar.date(byAdding: .hour, value: hoursAgo, to: now) ?? now,
+                responseType: .text,
+                isConfirmationResponse: false,
+                isPositiveConfirmation: true,
+                responseScore: 0.9,
+                processingNotes: nil
+            )
+            mockResponses[response.id] = response
+            let event = GalleryHistoryEvent.fromSMSResponse(response)
+            mockGalleryEvents[event.id] = event
+        }
+        
+        // Photo responses
+        let photoResponses = [
+            ("photo-1", -11),
+            ("photo-2", -12),
+            ("photo-3", -13),
+            ("photo-4", -14),
+            ("photo-5", -15),
+            ("photo-6", -16)
+        ]
+        
+        for (suffix, hoursAgo) in photoResponses {
+            let response = SMSResponse(
+                id: "mock-photo-\(suffix)",
+                taskId: "gallery-photo-\(suffix)",
+                profileId: "mock-profile-1",
+                userId: "mock-user-id",
+                textResponse: nil,
+                photoData: Data("mock-photo-\(suffix)".utf8),
+                isCompleted: true,
+                receivedAt: calendar.date(byAdding: .hour, value: hoursAgo, to: now) ?? now,
+                responseType: .photo,
+                isConfirmationResponse: false,
+                isPositiveConfirmation: true,
+                responseScore: 1.0,
+                processingNotes: nil
+            )
+            mockResponses[response.id] = response
+            let event = GalleryHistoryEvent.fromSMSResponse(response)
+            mockGalleryEvents[event.id] = event
         }
         
         // Mock data created silently

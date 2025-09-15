@@ -1,11 +1,21 @@
 import SwiftUI
 
 /**
+ * Gallery presentation data for fullScreenCover
+ */
+struct GalleryPresentationData: Identifiable {
+    let id = UUID()
+    let event: GalleryHistoryEvent
+    let index: Int
+    let total: Int
+}
+
+/**
  * DASHBOARD VIEW - Main Home Screen for Elderly Care Coordination
  *
  * PURPOSE: This is the primary interface families use to coordinate elderly care.
  * Shows today's tasks for selected elderly family member, allows creating new habits,
- * and provides quick access to profile management.
+ *  * and provides quick access to profile management.
  *
  * KEY BUSINESS LOGIC:
  * - Families can manage up to 4 elderly profiles
@@ -41,7 +51,7 @@ struct DashboardView: View {
     @State private var selectedProfileIndex: Int = 0
     
     
-    /// Controls TaskCreationView sheet presentation with profile preselection
+    /// Controls TaskCreationView conditional presentation with profile preselection
     /// Triggered by + button in "Create Custom Habit" section
     @State private var showingTaskCreation = false
     
@@ -50,7 +60,7 @@ struct DashboardView: View {
     @State private var showingDirectOnboarding = false
     
     /// Controls GalleryDetailView presentation for completed task viewing
-    @State private var selectedTaskForGalleryDetail: GalleryHistoryEvent?
+    @State private var selectedTaskForGalleryDetail: GalleryPresentationData?
     
     /// Tracks all gallery events for today's completed tasks for navigation
     @State private var todaysGalleryEvents: [GalleryHistoryEvent] = []
@@ -58,7 +68,42 @@ struct DashboardView: View {
     /// Current index in the gallery events array
     @State private var currentGalleryIndex: Int = 0
     
+    /// Current total events count for navigation
+    @State private var currentTotalEvents: Int = 0
+    
     var body: some View {
+        Group {
+            if showingDirectOnboarding {
+                // Show profile onboarding flow without animation
+                ProfileOnboardingFlowWithDismiss(dismissAction: {
+                    showingDirectOnboarding = false
+                })
+                .environmentObject(profileViewModel)
+                .transition(.identity)
+                .animation(nil, value: showingDirectOnboarding)
+            } else if showingTaskCreation {
+                // Show task creation flow without animation
+                TaskCreationViewWithDismiss(
+                    preselectedProfileId: selectedProfile?.id,
+                    dismissAction: {
+                        showingTaskCreation = false
+                    }
+                )
+                .environmentObject(container.makeTaskViewModel())
+                .transition(.identity)
+                .animation(nil, value: showingTaskCreation)
+            } else {
+                // Show dashboard
+                dashboardContent
+                    .transition(.identity)
+                    .animation(nil, value: showingDirectOnboarding)
+                    .animation(nil, value: showingTaskCreation)
+            }
+        }
+        .animation(nil) // Disable all animations
+    }
+    
+    private var dashboardContent: some View {
         /*
          * RESPONSIVE LAYOUT STRUCTURE:
          * GeometryReader provides actual screen dimensions for responsive design
@@ -133,25 +178,6 @@ struct DashboardView: View {
             loadData()
         }
         /*
-         * 📝 TASK CREATION SHEET:
-         * Presents TaskCreationView when "Create Custom Habit" + button tapped
-         * IMPORTANT: Preselects currently selected elderly profile for convenience
-         * Injects TaskViewModel via container for proper dependency management
-         */
-        .fullScreenCover(isPresented: $showingTaskCreation) {
-            TaskCreationView(preselectedProfileId: selectedProfile?.id)
-                .environmentObject(container.makeTaskViewModel())
-        }
-        /*
-         * 🚀 DIRECT PROFILE ONBOARDING:
-         * Full-screen onboarding flow without double presentation
-         * Uses shared ProfileViewModel to maintain state continuity
-         */
-        .fullScreenCover(isPresented: $showingDirectOnboarding) {
-            ProfileOnboardingFlow()
-                .environmentObject(profileViewModel) // Shared instance maintains state
-        }
-        /*
          * 📱 GALLERY DETAIL VIEW:
          * Full-screen detailed view of completed task gallery events
          * Presents GalleryDetailView when "view" button tapped on completed task
@@ -160,16 +186,15 @@ struct DashboardView: View {
             // Reset when dismissed
             todaysGalleryEvents = []
             currentGalleryIndex = 0
-        }) { galleryEvent in
+            currentTotalEvents = 0
+        }) { galleryData in
             GalleryDetailView(
-                event: galleryEvent,
+                event: galleryData.event,
                 selectedTab: $selectedTab,
-                onPrevious: currentGalleryIndex > 0 ? {
-                    navigateToPreviousTask()
-                } : nil,
-                onNext: currentGalleryIndex < todaysGalleryEvents.count - 1 ? {
-                    navigateToNextTask()
-                } : nil
+                currentIndex: galleryData.index,
+                totalEvents: galleryData.total,
+                onPrevious: { navigateToPreviousTask() },
+                onNext: { navigateToNextTask() }
             )
             .transaction { transaction in
                 transaction.disablesAnimations = true
@@ -179,25 +204,41 @@ struct DashboardView: View {
     
     // MARK: - Helper Methods
     private func navigateToPreviousTask() {
-        guard currentGalleryIndex > 0 else { return }
-        currentGalleryIndex -= 1
+        print("DEBUG: navigateToPreviousTask called. Current index: \(currentGalleryIndex), Total events: \(todaysGalleryEvents.count)")
+        guard currentGalleryIndex > 0 else { 
+            print("DEBUG: Cannot navigate to previous - already at first item")
+            return 
+        }
+        
+        let newIndex = currentGalleryIndex - 1
+        let newEvent = todaysGalleryEvents[newIndex]
         
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            selectedTaskForGalleryDetail = todaysGalleryEvents[currentGalleryIndex]
+            currentGalleryIndex = newIndex
+            selectedTaskForGalleryDetail = GalleryPresentationData(event: newEvent, index: newIndex, total: todaysGalleryEvents.count)
         }
+        print("DEBUG: Navigated to previous task. New index: \(currentGalleryIndex)/\(todaysGalleryEvents.count)")
     }
     
     private func navigateToNextTask() {
-        guard currentGalleryIndex < todaysGalleryEvents.count - 1 else { return }
-        currentGalleryIndex += 1
+        print("DEBUG: navigateToNextTask called. Current index: \(currentGalleryIndex), Total events: \(todaysGalleryEvents.count)")
+        guard currentGalleryIndex < todaysGalleryEvents.count - 1 else { 
+            print("DEBUG: Cannot navigate to next - already at last item")
+            return 
+        }
+        
+        let newIndex = currentGalleryIndex + 1
+        let newEvent = todaysGalleryEvents[newIndex]
         
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            selectedTaskForGalleryDetail = todaysGalleryEvents[currentGalleryIndex]
+            currentGalleryIndex = newIndex
+            selectedTaskForGalleryDetail = GalleryPresentationData(event: newEvent, index: newIndex, total: todaysGalleryEvents.count)
         }
+        print("DEBUG: Navigated to next task. New index: \(currentGalleryIndex)/\(todaysGalleryEvents.count)")
     }
     
     private func loadTodaysGalleryEvents() async {
@@ -208,22 +249,58 @@ struct DashboardView: View {
             let databaseService = container.resolve(DatabaseServiceProtocol.self)
             let allEvents = try await databaseService.getGalleryHistoryEvents(for: userId)
             
-            // Get task IDs from today's completed tasks
-            let todaysTaskIds = viewModel.todaysCompletedTasks.map { $0.task.id }
+            // Get task IDs from today's completed tasks IN ORDER
+            let todaysTasks = viewModel.todaysCompletedTasks
+            let todaysTaskIds = todaysTasks.map { $0.task.id }
+            print("DEBUG: ========================================")
+            print("DEBUG: Loading gallery events for \(todaysTasks.count) completed tasks")
+            for (index, task) in todaysTasks.enumerated() {
+                print("DEBUG: Task \(index): ID=\(task.task.id), Title=\(task.task.title)")
+            }
+            print("DEBUG: ========================================")
             
-            // Filter gallery events to only include today's completed tasks
-            let todaysEvents = allEvents.filter { event in
+            // Create a map of task ID to gallery event
+            var taskEventMap: [String: GalleryHistoryEvent] = [:]
+            print("DEBUG: Total gallery events from database: \(allEvents.count)")
+            for event in allEvents {
                 switch event.eventData {
                 case .taskResponse(let data):
-                    return todaysTaskIds.contains(data.taskId ?? "")
+                    if let taskId = data.taskId {
+                        print("DEBUG: Found event with taskId: \(taskId)")
+                        if todaysTaskIds.contains(taskId) {
+                            // Only keep the first event for each task (avoid duplicates)
+                            if taskEventMap[taskId] == nil {
+                                taskEventMap[taskId] = event
+                                print("DEBUG: Mapped event for task \(taskId)")
+                            } else {
+                                print("DEBUG: Duplicate event for task \(taskId), skipping")
+                            }
+                        }
+                    }
                 case .profileCreated(_):
-                    return false
+                    break // Skip profile events
+                }
+            }
+            print("DEBUG: Task event map has \(taskEventMap.count) entries")
+            
+            // Build the gallery events array in the same order as completed tasks
+            var orderedEvents: [GalleryHistoryEvent] = []
+            for task in todaysTasks {
+                if let event = taskEventMap[task.task.id] {
+                    orderedEvents.append(event)
+                } else {
+                    print("DEBUG: Warning - No gallery event found for task \(task.task.id)")
                 }
             }
             
-            // Sort by creation date (oldest to newest) to maintain order
             await MainActor.run {
-                todaysGalleryEvents = todaysEvents.sorted { $0.createdAt < $1.createdAt }
+                todaysGalleryEvents = orderedEvents
+                print("DEBUG: Loaded \(todaysGalleryEvents.count) gallery events for \(todaysTaskIds.count) tasks")
+                for (index, event) in todaysGalleryEvents.enumerated() {
+                    if case .taskResponse(let data) = event.eventData {
+                        print("DEBUG: Event \(index): taskId=\(data.taskId ?? "nil"), title=\(data.taskTitle ?? "nil")")
+                    }
+                }
             }
         } catch {
             print("Error loading today's gallery events: \(error)")
@@ -285,31 +362,17 @@ struct DashboardView: View {
      * - Emoji placeholders: 6 diverse grandparent emojis for missing photos
      */
     private var profilesSection: some View {
-        // White Card with Profiles - title inside card
-        VStack(alignment: .leading, spacing: 12) {
-                /*
-                 * SECTION HEADER: "PROFILES:" label
-                 * Matches other section headers for consistency
-                 * Gray color to de-emphasize (profiles themselves are the focus)
-                 */
-                Text("PROFILES:")
-                    .font(.system(size: 15, weight: .bold))
-                    .tracking(-1)
-                    .foregroundColor(Color(hex: "9f9f9f"))
+        // Horizontally scrollable profiles without card background
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 16) { // Increased spacing for larger profiles
                 
                 /*
-                 * PROFILE DISPLAY: Fixed 4-profile layout (NO scrolling)
-                 * This prevents UI confusion and enforces business rule of max 4 profiles
-                 */
-                HStack(spacing: 12) {
-                
-                /*
-                 * PROFILE IMAGES: Elderly family member circles
+                 * PROFILE IMAGES: Larger elderly family member circles
                  * Each profile displays photo or emoji placeholder
                  * Tap gesture updates selectedProfileIndex and triggers task filtering
                  */
                 ForEach(Array(viewModel.profiles.enumerated()), id: \.offset) { index, profile in
-                    ProfileImageView(
+                    ProfileImageViewLarge(
                         profile: profile,
                         profileSlot: index, // Ensures consistent color assignment
                         isSelected: selectedProfileIndex == index
@@ -330,12 +393,16 @@ struct DashboardView: View {
                 }
                 
                 /*
-                 * ADD PROFILE BUTTON: Only appears when < 4 profiles exist
-                 * This enforces the business rule maximum and saves screen space
+                 * ADD PROFILE BUTTON: Now supports up to 5 profiles (increased from 4)
+                 * Larger size to match enlarged profile circles
                  * Opens ProfileCreationView sheet when tapped
                  */
-                if viewModel.profiles.count < 4 {
+                if viewModel.profiles.count < 5 {
                     Button(action: {
+                        // Haptic feedback for profile creation
+                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                        impactFeedback.impactOccurred()
+                        
                         // Direct onboarding launch (improved UX, no double presentation)
                         profileViewModel.startProfileOnboarding()
                         showingDirectOnboarding = true
@@ -343,24 +410,18 @@ struct DashboardView: View {
                         ZStack {
                             Circle()
                                 .fill(Color(hex: "e0e0e0"))
-                                .frame(width: 45, height: 45)
+                                .frame(width: 60, height: 60) // Enlarged to match profiles
                             
                             Image(systemName: "plus")
-                                .font(.title2)
+                                .font(.title)
                                 .fontWeight(.medium)
                                 .foregroundColor(Color(hex: "5f5f5f"))
                         }
                     }
                 }
-                
-                    Spacer() // Left-aligns all profiles (no center alignment)
-                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 16)
-        .background(Color.white)
-        .cornerRadius(10)
-        .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
+            .padding(.horizontal, 16) // Side padding for scroll content
+        }
     }
     
     // MARK: - ✨ Streaks Section (Future)
@@ -557,43 +618,63 @@ struct DashboardView: View {
                     }
                     .padding(.vertical, 20)
                 } else {
-                    ForEach(Array(viewModel.todaysCompletedTasks.enumerated()), id: \.offset) { index, task in
+                    ForEach(Array(viewModel.todaysCompletedTasks.enumerated()), id: \.element.task.id) { rowIndex, task in
                         TaskRowView(
                             task: task.task,
                             profile: task.profile,
                             showViewButton: true, // IMPORTANT: Enables viewing completion evidence
                             onViewButtonTapped: {
+                                guard selectedTaskForGalleryDetail == nil else { return }
+                                
                                 let taskToFind = task.task
+                                let taskIndex = rowIndex
+                                print("DEBUG: ========================================")
+                                print("DEBUG: View button \(taskIndex + 1) tapped")
+                                print("DEBUG: Task ID: \(taskToFind.id)")
+                                print("DEBUG: Task Title: \(taskToFind.title)")
+                                print("DEBUG: ========================================")
+                                
                                 _Concurrency.Task {
-                                    // Load all today's gallery events if not already loaded
-                                    if todaysGalleryEvents.isEmpty {
-                                        await loadTodaysGalleryEvents()
-                                    }
+                                    // Always reload today's gallery events to ensure we have all of them
+                                    await loadTodaysGalleryEvents()
                                     
-                                    // Find the specific event for this task
-                                    if let galleryEvent = await findGalleryEventForTask(taskToFind) {
-                                        // Find its index in the array
-                                        if let index = todaysGalleryEvents.firstIndex(where: { $0.id == galleryEvent.id }) {
-                                            await MainActor.run {
-                                                currentGalleryIndex = index
-                                                
-                                                // Disable animation when presenting
-                                                var transaction = Transaction()
-                                                transaction.disablesAnimations = true
-                                                withTransaction(transaction) {
-                                                    selectedTaskForGalleryDetail = galleryEvent
-                                                }
+                                    print("DEBUG: After loading, we have \(todaysGalleryEvents.count) gallery events")
+                                    print("DEBUG: Trying to open event at index \(taskIndex)")
+                                    
+                                    // The gallery events are now guaranteed to be in the same order as completed tasks
+                                    if taskIndex < todaysGalleryEvents.count {
+                                        await MainActor.run {
+                                            let galleryEvent = todaysGalleryEvents[taskIndex]
+                                            let totalEventsCount = todaysGalleryEvents.count
+                                            print("DEBUG: Successfully setting currentGalleryIndex to \(taskIndex)")
+                                            print("DEBUG: Gallery event ID: \(galleryEvent.id)")
+                                            print("DEBUG: Will show next button: \(taskIndex < totalEventsCount - 1)")
+                                            print("DEBUG: About to present with currentIndex=\(taskIndex), totalEvents=\(totalEventsCount)")
+                                            
+                                            // Set both values BEFORE presenting to ensure proper navigation state
+                                            currentGalleryIndex = taskIndex
+                                            currentTotalEvents = totalEventsCount
+                                            
+                                            // Disable animation when presenting
+                                            var transaction = Transaction()
+                                            transaction.disablesAnimations = true
+                                            withTransaction(transaction) {
+                                                selectedTaskForGalleryDetail = GalleryPresentationData(event: galleryEvent, index: taskIndex, total: totalEventsCount)
                                             }
                                         }
+                                    } else {
+                                        print("ERROR: Task index \(taskIndex) is out of bounds!")
+                                        print("ERROR: We only have \(todaysGalleryEvents.count) gallery events")
                                     }
                                 }
                             }
                         )
+                        .id(task.task.id) // Force unique identity for each row
                         .padding(.horizontal, 12)  // Match card title alignment
                         .padding(.vertical, 12)
                         .background(Color.white) // Each task has white background
                         
-                        if index < viewModel.todaysCompletedTasks.count - 1 {
+                        if rowIndex < viewModel.todaysCompletedTasks.count - 1 {
                             Divider()
                                 .overlay(Color(hex: "f8f3f3"))
                                 .padding(.horizontal, 24)  // Shorter lines aligned with tasks
@@ -623,6 +704,10 @@ struct DashboardView: View {
      */
     private var createHabitButton: some View {
         Button(action: {
+            // Haptic feedback for habit creation
+            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+            impactFeedback.impactOccurred()
+            
             showingTaskCreation = true
         }) {
             ZStack {
@@ -750,6 +835,65 @@ struct ProfileImageView: View {
     }
 }
 
+// MARK: - Large Profile Image View Component (For Redesigned Profiles Section)
+struct ProfileImageViewLarge: View {
+    let profile: ElderlyProfile
+    let profileSlot: Int // Position in profile array for consistent colors
+    let isSelected: Bool
+    
+    // Fixed colors for profile slots 1,2,3,4,5
+    private let profileColors: [Color] = [
+        Color(hex: "B9E3FF"),         // Profile slot 0 - default light blue
+        Color.red.opacity(0.6),       // Profile slot 1 - brighter
+        Color.green.opacity(0.6),     // Profile slot 2 - brighter
+        Color.purple.opacity(0.6),    // Profile slot 3 - brighter
+        Color.orange.opacity(0.6)     // Profile slot 4 - new color for 5th profile
+    ]
+    
+    // Grandparent emojis with diverse skin tones
+    private let profileEmojis: [String] = [
+        "👴🏻", "👵🏻", "👴🏽", "👵🏽", "👴🏿", "👵🏿"
+    ]
+    
+    private var borderColor: Color {
+        if profile.status != .confirmed {
+            // Grayed out for unconfirmed profiles
+            return Color.gray.opacity(0.5)  // Slightly brighter for unconfirmed
+        }
+        
+        let color = profileColors[profileSlot % profileColors.count]
+        return isSelected ? color : Color(hex: "e0e0e0")
+    }
+    
+    private var profileEmoji: String {
+        // Consistent emoji based on profile slot + name hash for variety
+        let emojiIndex = (profileSlot + abs(profile.name.hashValue)) % profileEmojis.count
+        return profileEmojis[emojiIndex]
+    }
+    
+    var body: some View {
+        AsyncImage(url: URL(string: profile.photoURL ?? "")) { image in
+            image
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } placeholder: {
+            // Placeholder with grandparent emoji
+            ZStack {
+                borderColor.opacity(0.2)  // Use profile color as background
+                Text(profileEmoji)
+                    .font(.system(size: 32)) // Larger emoji for 60px circle
+            }
+        }
+        .frame(width: 60, height: 60) // Enlarged from 45x45 to 60x60
+        .clipShape(Circle())
+        .overlay(
+            Circle()
+                .stroke(borderColor, lineWidth: isSelected ? 2.5 : 0)  // Thicker border for larger size
+        )
+        .opacity(profile.status == .confirmed ? 1.0 : 0.5) // Gray out unconfirmed
+    }
+}
+
 // MARK: - Task Row View Component
 struct TaskRowView: View {
     let task: Task
@@ -830,7 +974,7 @@ struct TaskRowView: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Color(hex: "B9E3FF"))  // Solid blue from preview
+                        .background(Color(hex: "28ADFF"))  // Rich blue like continue buttons
                         .cornerRadius(8)
                 }
                 .frame(height: 28)
@@ -991,6 +1135,10 @@ struct SharedHeaderSection: View {
              * Icon: SF Symbol person (outlined torso) for clean appearance
              */
             Button(action: {
+                // Haptic feedback for navigation bar button
+                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                impactFeedback.impactOccurred()
+                
                 // TODO: Navigate to profile settings/account screen
                 // This will handle user account management, not elderly profiles
             }) {
@@ -1416,7 +1564,7 @@ struct FloatingPillNavigation: View {
     
     // iPhone 13 base dimensions for scaling (390x844)
     private let iPhone13Width: CGFloat = 390
-    private let basePillWidth: CGFloat = 94
+    private let basePillWidth: CGFloat = 160 // Reduced size for three tabs
     private let basePillHeight: CGFloat = 43
     
     // Calculate responsive dimensions based on screen width
@@ -1437,7 +1585,7 @@ struct FloatingPillNavigation: View {
     
     private var fontSize: CGFloat {
         let screenWidth = UIScreen.main.bounds.width
-        return (10 / iPhone13Width) * screenWidth
+        return (8 / iPhone13Width) * screenWidth // Smaller font for three tabs
     }
     
     var body: some View {
@@ -1449,7 +1597,7 @@ struct FloatingPillNavigation: View {
              * Responsive dimensions based on iPhone 13 proportions (43px height on 390px width)
              * Corner radius is exactly half the height for perfect pill shape
              */
-            HStack(spacing: pillWidth * 0.2) { // Proportional spacing
+            HStack(spacing: pillWidth * 0.08) { // Very tight spacing for three tabs
                 
                 /*
                  * HOME TAB: Dynamic active/inactive state
@@ -1472,6 +1620,27 @@ struct FloatingPillNavigation: View {
                 }
                 
                 /*
+                 * HABITS TAB: Dynamic active/inactive state
+                 * Icon: bookmark.fill when active, bookmark when inactive
+                 * Text: "habits" in small Inter font with negative tracking
+                 * Color: Changes based on selectedTab state
+                 * Action: Updates selectedTab to switch to Habits view
+                 */
+                VStack(spacing: 4) {
+                    Image(systemName: selectedTab == 1 ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: iconSize))
+                        .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
+                    
+                    Text("habits")
+                        .font(.custom("Inter", size: fontSize))
+                        .tracking(-0.5) // Negative letter spacing to condense text
+                        .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
+                }
+                .onTapGesture {
+                    selectedTab = 1 // Switch to Habits tab
+                }
+                
+                /*
                  * GALLERY TAB: Dynamic active/inactive state
                  * Icon: photo.on.rectangle (photo archive representation)
                  * Text: "gallery" in small Inter font with negative tracking
@@ -1481,15 +1650,15 @@ struct FloatingPillNavigation: View {
                 VStack(spacing: 4) {
                     Image(systemName: "photo.on.rectangle")
                         .font(.system(size: iconSize))
-                        .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
+                        .foregroundColor(selectedTab == 2 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
                     
                     Text("gallery")
                         .font(.custom("Inter", size: fontSize))
                         .tracking(-0.5) // Negative letter spacing to condense text
-                        .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
+                        .foregroundColor(selectedTab == 2 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
                 }
                 .onTapGesture {
-                    selectedTab = 1 // Switch to Gallery tab
+                    selectedTab = 2 // Switch to Gallery tab
                 }
             }
             /*

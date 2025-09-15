@@ -71,9 +71,14 @@ struct GalleryView: View {
             print("🔥 GalleryView onAppear - Gallery events: \(viewModel.galleryEvents.count)")
         }
         .fullScreenCover(item: $selectedEventForDetail) { event in
+            let currentIndex = viewModel.galleryEvents.firstIndex(where: { $0.id == event.id }) ?? 0
+            let totalEvents = viewModel.galleryEvents.count
+            
             GalleryDetailView(
                 event: event, 
                 selectedTab: $selectedTab,
+                currentIndex: currentIndex,
+                totalEvents: totalEvents,
                 onPrevious: {
                     navigateToPrevious(from: event)
                 },
@@ -429,27 +434,57 @@ struct SquarePhotoView: View {
     // MARK: - Text Response Preview (Mini Speech Bubbles with Tails)
     private var textResponsePreview: some View {
         ZStack {
-            // Light blue background for consistency
+            // Light blue background matching profile created media
             Rectangle()
-                .fill(Color(hex: "E5F3FF")) // Light blue
+                .fill(Color(hex: "B9E3FF").opacity(0.2)) // Same as profile created background
                 .frame(width: 112, height: 112)
                 .cornerRadius(3)
             
-            VStack(spacing: 12) {
+            VStack(spacing: 16) {
                 // Outgoing message indicator (mini blue bubble with tail)
                 HStack {
                     Spacer()
-                    MiniBubbleWithTail(isOutgoing: true)
-                        .fill(Color(hex: "007AFF"))
-                        .frame(width: 45, height: 20)
+                    // Mini speech bubble with left alignment
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 2) {
+                            Rectangle().fill(Color.black.opacity(0.6)).frame(width: 12, height: 2)
+                            Rectangle().fill(Color.black.opacity(0.6)).frame(width: 16, height: 2)
+                            Rectangle().fill(Color.black.opacity(0.6)).frame(width: 8, height: 2)
+                        }
+                        HStack(spacing: 2) {
+                            Rectangle().fill(Color.black.opacity(0.6)).frame(width: 14, height: 2)
+                            Rectangle().fill(Color.black.opacity(0.6)).frame(width: 10, height: 2)
+                        }
+                        HStack(spacing: 2) {
+                            Rectangle().fill(Color.black.opacity(0.6)).frame(width: 18, height: 2)
+                            Rectangle().fill(Color.black.opacity(0.6)).frame(width: 6, height: 2)
+                        }
+                    }
+                    .frame(width: 60, height: 26, alignment: .leading)
+                    .offset(x: 5, y: -3)
+                    .background(
+                        MiniBubbleWithTail(isOutgoing: true)
+                            .fill(Color(hex: "007AFF"))
+                            .frame(width: 70, height: 32)
+                    )
                 }
                 .padding(.horizontal, 12)
                 
                 // Incoming message indicator (mini gray bubble with tail)
                 HStack {
-                    MiniBubbleWithTail(isOutgoing: false)
-                        .fill(Color(hex: "E5E5EA"))
-                        .frame(width: 40, height: 20)
+                    // Mini speech bubble with left alignment
+                    HStack(spacing: 2) {
+                        Rectangle().fill(Color.black.opacity(0.6)).frame(width: 8, height: 2)
+                        Rectangle().fill(Color.black.opacity(0.6)).frame(width: 12, height: 2)
+                        Rectangle().fill(Color.black.opacity(0.6)).frame(width: 6, height: 2)
+                    }
+                    .frame(width: 45, height: 14, alignment: .leading)
+                    .offset(x: 5, y: -3)
+                    .background(
+                        MiniBubbleWithTail(isOutgoing: false)
+                            .fill(Color(hex: "E5E5EA"))
+                            .frame(width: 55, height: 20)
+                    )
                     Spacer()
                 }
                 .padding(.horizontal, 12)
@@ -915,26 +950,26 @@ struct MiniBubbleWithTail: Shape {
         var path = Path()
         let width = rect.width
         let height = rect.height
-        let cornerRadius: CGFloat = 8  // Smaller corner radius for mini bubbles
-        let tailSize: CGFloat = 10     // Bigger tail for better visibility
-        let tailInset: CGFloat = 8     // Closer to edge for mini version
+        let cornerRadius: CGFloat = 4  // Less curved edges
+        let tailSize: CGFloat = 10     // Narrower triangle width
+        let tailInset: CGFloat = 6     // Closer to edge for mini version
         
         // Create rounded rectangle body
-        let bubbleRect = CGRect(x: 0, y: 0, width: width, height: height - 3) // Leave space for tail
+        let bubbleRect = CGRect(x: 0, y: 0, width: width, height: height - 6) // More space for taller tail
         path.addRoundedRect(in: bubbleRect, cornerSize: CGSize(width: cornerRadius, height: cornerRadius))
         
         if isOutgoing {
             // Left-pointing triangle for outgoing (positioned near right edge)
-            let triangleStart = CGPoint(x: width - tailInset, y: height - 3)
+            let triangleStart = CGPoint(x: width - tailInset, y: height - 6)
             path.move(to: triangleStart)
-            path.addLine(to: CGPoint(x: width - tailInset - tailSize, y: height - 3))
+            path.addLine(to: CGPoint(x: width - tailInset - tailSize, y: height - 6))
             path.addLine(to: CGPoint(x: width - tailInset, y: height))
             path.closeSubpath()
         } else {
             // Right-pointing triangle for incoming (positioned near left edge)
-            let triangleStart = CGPoint(x: tailInset, y: height - 3)
+            let triangleStart = CGPoint(x: tailInset, y: height - 6)
             path.move(to: triangleStart)
-            path.addLine(to: CGPoint(x: tailInset + tailSize, y: height - 3))
+            path.addLine(to: CGPoint(x: tailInset + tailSize, y: height - 6))
             path.addLine(to: CGPoint(x: tailInset, y: height))
             path.closeSubpath()
         }

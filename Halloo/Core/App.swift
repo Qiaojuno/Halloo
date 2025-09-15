@@ -3,9 +3,23 @@ import Firebase
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
+import SuperwallKit
+import GoogleSignIn
+
+// MARK: - App Delegate for Orientation Control
+class AppDelegate: NSObject, UIApplicationDelegate {
+    static var orientationLock = UIInterfaceOrientationMask.portrait
+    
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        return AppDelegate.orientationLock
+    }
+}
 
 @main
 struct HalloApp: App {
+    // MARK: - App Delegate
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    
     // MARK: - Dependencies
     private let container: Container
     
@@ -23,6 +37,8 @@ struct HalloApp: App {
         // Configure other services after container is initialized
         if !ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS") {
             configureNotifications()
+            configureSuperwall()
+            configureGoogleSignIn()
         }
         
         configureAppearance()
@@ -69,10 +85,22 @@ struct HalloApp: App {
         WindowGroup {
             ContentView()
                 .inject(container: container)
+                .onOpenURL { url in
+                    // Handle Google Sign-In callback
+                    GIDSignIn.sharedInstance.handle(url)
+                }
                 .onAppear {
                     // Skip app launch handling during Canvas/Preview execution
                     if !ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS") {
                         handleAppLaunch()
+                    }
+                    
+                    // Force portrait orientation and lock it
+                    AppDelegate.orientationLock = .portrait
+                    UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+                    
+                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                        windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
@@ -90,6 +118,32 @@ struct HalloApp: App {
         _Concurrency.Task {
             await requestNotificationPermissions()
         }
+    }
+    
+    private func configureSuperwall() {
+        // Superwall API key from dashboard
+        let SUPERWALL_API_KEY = "pk_1FZVcGgpr1JMD5XJ4d0Cb"
+        
+        Superwall.configure(apiKey: SUPERWALL_API_KEY)
+        print("✅ Superwall configuration initiated")
+        
+        // Optional: Set user attributes for targeting
+        // Superwall.shared.setUserAttributes([
+        //     "plan": "free",
+        //     "profiles_created": 0
+        // ])
+    }
+    
+    private func configureGoogleSignIn() {
+        guard let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
+              let plist = NSDictionary(contentsOfFile: path),
+              let clientId = plist["CLIENT_ID"] as? String else {
+            print("❌ Failed to configure Google Sign-In: Missing CLIENT_ID")
+            return
+        }
+        
+        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientId)
+        print("✅ Google Sign-In configured successfully")
     }
     
     private func configureAppearance() {
