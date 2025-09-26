@@ -83,6 +83,9 @@ final class ProfileViewModel: ObservableObject {
     /// Used by families to understand and resolve profile setup issues.
     @Published var errorMessage: String?
     
+    /// Debug information for tracking profile creation flow
+    @Published var debugInfo: String = ""
+    
     /// Controls profile creation form presentation
     @Published var showingCreateProfile = false
     
@@ -977,7 +980,7 @@ final class ProfileViewModel: ObservableObject {
         notes = profile.notes
     }
     
-    private func resetForm() {
+    func resetForm() {
         profileName = ""
         phoneNumber = "+1 "
         relationship = ""
@@ -988,6 +991,8 @@ final class ProfileViewModel: ObservableObject {
         phoneError = nil
         relationshipError = nil
         hasStartedTypingPhone = false
+        selectedPhotoData = nil
+        debugInfo = ""
     }
     
     private func updateConfirmationStatuses() {

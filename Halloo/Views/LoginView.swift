@@ -22,8 +22,8 @@ struct LoginView: View {
                 
                 // Much smaller spacing between logo and mascot
                 
-                // Mascot Sitting Image - 171W x 257H
-                Image("MascotSitting")
+                // Face Plus Image - 171W x 257H
+                Image("FacePlus")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 171, height: 257)

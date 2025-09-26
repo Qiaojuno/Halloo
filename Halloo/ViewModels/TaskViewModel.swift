@@ -88,6 +88,12 @@ final class TaskViewModel: ObservableObject {
     /// Controls task editing form presentation  
     @Published var showingEditTask = false
     
+    /// Available elderly profiles for task assignment
+    @Published var availableProfiles: [ElderlyProfile] = []
+    
+    /// Currently selected profile ID for task creation
+    @Published var selectedProfileId: String?
+    
     /// Currently selected task for editing or viewing details
     @Published var selectedTask: Task?
     

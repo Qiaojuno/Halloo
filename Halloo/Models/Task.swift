@@ -20,6 +20,7 @@ struct Task: Codable, Identifiable, Hashable {
     let notes: String
     let createdAt: Date
     var lastModifiedAt: Date
+    var lastUpdatedAt: Date?
     var completionCount: Int
     var lastCompletedAt: Date?
     var nextScheduledDate: Date
@@ -43,6 +44,7 @@ struct Task: Codable, Identifiable, Hashable {
         notes: String = "",
         createdAt: Date = Date(),
         lastModifiedAt: Date = Date(),
+        lastUpdatedAt: Date? = nil,
         completionCount: Int = 0,
         lastCompletedAt: Date? = nil,
         nextScheduledDate: Date? = nil
@@ -65,6 +67,7 @@ struct Task: Codable, Identifiable, Hashable {
         self.notes = notes
         self.createdAt = createdAt
         self.lastModifiedAt = lastModifiedAt
+        self.lastUpdatedAt = lastUpdatedAt
         self.completionCount = completionCount
         self.lastCompletedAt = lastCompletedAt
         self.nextScheduledDate = nextScheduledDate ?? scheduledTime
