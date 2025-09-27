@@ -59,6 +59,9 @@ struct DashboardView: View {
     /// Alternative to ProfileCreationView sheet for smoother UX
     @State private var showingDirectOnboarding = false
     
+    /// Controls action sheet for unified create button
+    @State private var showingCreateActionSheet = false
+    
     /// Controls GalleryDetailView presentation for completed task viewing
     @State private var selectedTaskForGalleryDetail: GalleryPresentationData?
     
@@ -74,16 +77,24 @@ struct DashboardView: View {
     var body: some View {
         Group {
             if showingDirectOnboarding {
-                // Show profile onboarding flow without animation
-                ProfileOnboardingFlowWithDismiss(dismissAction: {
-                    showingDirectOnboarding = false
-                })
-                .environmentObject(profileViewModel)
+                // TODO: Replace with new profile creation view
+                VStack {
+                    Text("Add Family Member")
+                        .font(.title)
+                    Text("Coming Soon - Will build new profile creation flow")
+                        .foregroundColor(.secondary)
+                        .padding()
+                    
+                    Button("Cancel") {
+                        showingDirectOnboarding = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
                 .transition(.identity)
                 .animation(nil, value: showingDirectOnboarding)
             } else if showingTaskCreation {
                 // Show task creation flow without animation
-                TaskCreationViewWithDismiss(
+                TaskCreationView(
                     preselectedProfileId: selectedProfile?.id,
                     dismissAction: {
                         showingTaskCreation = false
@@ -122,22 +133,13 @@ struct DashboardView: View {
                         // 🏠 HEADER: App branding + account access
                         headerSection
                         
-                        // 👥 PROFILES: Elderly family member selection (max 4)
-                        // CRITICAL: This drives all task filtering below
-                        profilesSection
-                        
-                        // ✨ HABIT CREATION: Visual call-to-action with illustrations
-                        // Opens TaskCreationView with selected profile preselected
-                        createHabitSection
+                        // ✅ COMPLETED: Interactive card stack showing task evidence
+                        // Replaces detailed view system with swipeable playing card stack
+                        cardStackSection
                         
                         // ⏰ UPCOMING: Today's pending tasks for selected profile only
                         // Shows tasks that still need to be completed today
                         upcomingSection
-                            .padding(.top, -10) // Reduce spacing to Create Custom Habit to zero
-                        
-                        // ✅ COMPLETED: Today's finished tasks with "view" buttons
-                        // Allows viewing completion evidence (photos/SMS responses)
-                        completedTasksSection
                         
                         // Bottom padding to prevent content from hiding behind navigation
                         Spacer(minLength: 100)
@@ -342,152 +344,10 @@ struct DashboardView: View {
      * PURPOSE: Establishes app identity and provides settings access
      */
     private var headerSection: some View {
-        SharedHeaderSection()
+        SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
     }
     
-    // MARK: - 👥 Profiles Section
-    /**
-     * ELDERLY PROFILE SELECTION: The heart of the family care coordination
-     * 
-     * CRITICAL BUSINESS LOGIC:
-     * - Maximum 4 elderly family members per family account
-     * - NO horizontal scrolling (fixed layout prevents confusion)
-     * - Profile selection drives ALL task filtering below
-     * - Each profile gets consistent color (Blue→Red→Green→Purple)
-     * 
-     * VISUAL SYSTEM:
-     * - Selected profile: Colored border (profile-specific color)
-     * - Unselected profiles: Gray border
-     * - Unconfirmed profiles: 50% opacity (waiting for SMS confirmation)
-     * - Emoji placeholders: 6 diverse grandparent emojis for missing photos
-     */
-    private var profilesSection: some View {
-        // Horizontally scrollable profiles without card background
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 16) { // Increased spacing for larger profiles
-                
-                /*
-                 * PROFILE IMAGES: Larger elderly family member circles
-                 * Each profile displays photo or emoji placeholder
-                 * Tap gesture updates selectedProfileIndex and triggers task filtering
-                 */
-                ForEach(Array(viewModel.profiles.enumerated()), id: \.offset) { index, profile in
-                    ProfileImageViewLarge(
-                        profile: profile,
-                        profileSlot: index, // Ensures consistent color assignment
-                        isSelected: selectedProfileIndex == index
-                    )
-                    .onTapGesture {
-                        /*
-                         * PROFILE SELECTION LOGIC:
-                         * 1. Update local UI state (selectedProfileIndex)
-                         * 2. Update ViewModel for task filtering
-                         * 3. This triggers @Published property updates
-                         * 4. UI automatically refreshes with filtered tasks
-                         */
-                        selectedProfileIndex = index
-                        if index < viewModel.profiles.count {
-                            viewModel.selectProfile(profileId: viewModel.profiles[index].id)
-                        }
-                    }
-                }
-                
-                /*
-                 * ADD PROFILE BUTTON: Now supports up to 5 profiles (increased from 4)
-                 * Larger size to match enlarged profile circles
-                 * Opens ProfileCreationView sheet when tapped
-                 */
-                if viewModel.profiles.count < 5 {
-                    Button(action: {
-                        // Haptic feedback for profile creation
-                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                        impactFeedback.impactOccurred()
-                        
-                        // Direct onboarding launch (improved UX, no double presentation)
-                        profileViewModel.startProfileOnboarding()
-                        showingDirectOnboarding = true
-                    }) {
-                        ZStack {
-                            Circle()
-                                .fill(Color(hex: "e0e0e0"))
-                                .frame(width: 60, height: 60) // Enlarged to match profiles
-                            
-                            Image(systemName: "plus")
-                                .font(.title)
-                                .fontWeight(.medium)
-                                .foregroundColor(Color(hex: "5f5f5f"))
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 16) // Side padding for scroll content
-        }
-    }
     
-    // MARK: - ✨ Streaks Section (Future)
-    /**
-     * STREAKS DISPLAY: Will show habit completion streaks
-     * 
-     * PURPOSE: Visual encouragement for consistent habit completion
-     * Currently placeholder with illustrations, will be populated with streak data
-     * 
-     * ILLUSTRATIONS:
-     * - Birds: Centered, convey freedom and care
-     * - Mascot: Right-aligned gentleman character (app personality)
-     * - Assets: "Bird1", "Bird2", "Mascot" (case-sensitive names)
-     */
-    private var createHabitSection: some View {
-        GeometryReader { geometry in
-            ZStack {
-                // White card background (no title - will be streaks card)
-                Color.white
-                    .frame(maxWidth: .infinity) // Dynamic width
-                    .frame(height: geometry.size.width * 0.314) // Proportional to 118px height
-                    .cornerRadius(10)
-                    .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
-                
-                // Overlay illustrations on top
-                HStack {
-                    // Streak display (left side)
-                    if let selectedProfile = selectedProfile, selectedProfile.currentStreak > 0 {
-                        HStack(spacing: 8) {
-                            Image(systemName: "flame.fill")
-                                .frame(width: 38, height: 51)
-                                .font(.system(size: 38))
-                                .foregroundColor(Color.orange)
-                            
-                            Text("\(selectedProfile.currentStreak)")
-                                .font(AppFonts.poppinsMedium(size: 48))
-                                .foregroundColor(.black)
-                            
-                            Text("days\nin a row")
-                                .font(AppFonts.poppins(size: 14))
-                                .foregroundColor(.black)
-                                .multilineTextAlignment(.leading)
-                        }
-                        .padding(.leading, 20)
-                    }
-                    
-                    Spacer()
-                    
-                    // Mascot (moved further right)
-                    ZStack {
-                        Image("Mascot")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: geometry.size.width * 0.43) // Taller than card
-                        
-                    }
-                    .offset(x: -10, y: geometry.size.width * 0.08) // Moved further right (was -50, now -10)
-                    .padding(.trailing, 10) // Reduced trailing padding
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: geometry.size.width * 0.314)
-                .clipped() // Clip mascot to card boundaries
-            }
-        }
-        .frame(height: UIScreen.main.bounds.width * 0.314) // Restore height for proper card spacing
-    }
     
     // MARK: - ⏰ Upcoming Section
     /**
@@ -561,12 +421,48 @@ struct DashboardView: View {
         .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
     }
     
-    // MARK: - ✅ Completed Tasks Section
+    // MARK: - ✅ Card Stack Section
+    /**
+     * INTERACTIVE CARD STACK: Playing card style display of completed tasks
+     * 
+     * REPLACES: Old completedTasksSection with detailed view system
+     * 
+     * FEATURES:
+     * - Shows max 3 cards in random fan arrangement
+     * - Each card displays either photo or SMS evidence (never both)
+     * - Swipe left/right to cycle through completed tasks
+     * - Task title displays under stack and changes with current card
+     * - Placeholder card when no completed tasks exist
+     * 
+     * DATA TRANSFORMATION:
+     * - Converts DashboardTask with SMSResponse into separate CardData
+     * - Splits ResponseType.both into individual photo and SMS cards
+     * - Maintains chronological order (most recent first)
+     */
+    private var cardStackSection: some View {
+        // CARD STACK - Full width for proper centering
+        CardStackView(events: completedTaskEvents)
+            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity) // Allow full width for internal centering
+    }
+    
+    // MARK: - Card Stack Data Conversion
+    private var completedTaskEvents: [GalleryHistoryEvent] {
+        let events: [GalleryHistoryEvent] = viewModel.todaysCompletedTasks.compactMap { task in
+            guard let response = task.response, response.isCompleted else { return nil }
+            return GalleryHistoryEvent.fromSMSResponse(response)
+        }
+        print("DEBUG: Completed tasks count: \(viewModel.todaysCompletedTasks.count)")
+        print("DEBUG: Card events count: \(events.count)")
+        return events
+    }
+    
+    // MARK: - ✅ OLD Completed Tasks Section (REPLACED BY CARD STACK)
     /**
      * TODAY'S FINISHED TASKS: What has been accomplished today
      * 
      * CRITICAL FILTERING LOGIC:
-     * - Only shows tasks for currently selected elderly profile
+     * - Only shows tasks for currently selected elderly profile447
      * - Only shows today's tasks (not previous days)
      * - Only shows completed tasks (with completion evidence)
      * 
@@ -693,22 +589,22 @@ struct DashboardView: View {
         FloatingPillNavigation(selectedTab: $selectedTab)
     }
     
-    // MARK: - ✨ Create Habit Button
+    // MARK: - ✨ Unified Create Button
     /**
-     * FLOATING CREATE HABIT BUTTON: Bottom center call-to-action
+     * FLOATING UNIFIED CREATE BUTTON: Bottom center call-to-action
      * 
-     * PURPOSE: Primary action button for creating new habits
+     * PURPOSE: Primary action button for creating new profiles or tasks
      * Positioned at bottom center for easy thumb access
-     * Opens TaskCreationView with selected profile preselected
+     * Shows action sheet to choose between profile creation or task creation
      * Same size as profile circles for visual consistency
      */
     private var createHabitButton: some View {
         Button(action: {
-            // Haptic feedback for habit creation
+            // Haptic feedback for create action
             let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
             impactFeedback.impactOccurred()
             
-            showingTaskCreation = true
+            showingCreateActionSheet = true
         }) {
             ZStack {
                 Circle()
@@ -720,6 +616,23 @@ struct DashboardView: View {
                     .font(.system(size: 20, weight: .medium))
                     .foregroundColor(.white)
             }
+        }
+        .actionSheet(isPresented: $showingCreateActionSheet) {
+            ActionSheet(
+                title: Text("What would you like to create?"),
+                buttons: [
+                    .default(Text("Add Family Member")) {
+                        // Create profile action
+                        profileViewModel.startProfileOnboarding()
+                        showingDirectOnboarding = true
+                    },
+                    .default(Text("Create Habit")) {
+                        // Create task action
+                        showingTaskCreation = true
+                    },
+                    .cancel()
+                ]
+            )
         }
     }
     
@@ -777,122 +690,8 @@ struct DashboardView: View {
     }
 }
 
-// MARK: - Profile Image View Component
-struct ProfileImageView: View {
-    let profile: ElderlyProfile
-    let profileSlot: Int // Position in profile array for consistent colors
-    let isSelected: Bool
-    
-    // Fixed colors for profile slots 1,2,3,4
-    private let profileColors: [Color] = [
-        Color(hex: "B9E3FF"),         // Profile slot 0 - default light blue
-        Color.red.opacity(0.6),       // Profile slot 1 - brighter
-        Color.green.opacity(0.6),     // Profile slot 2 - brighter
-        Color.purple.opacity(0.6)     // Profile slot 3 - brighter
-    ]
-    
-    // Grandparent emojis with diverse skin tones
-    private let profileEmojis: [String] = [
-        "👴🏻", "👵🏻", "👴🏽", "👵🏽", "👴🏿", "👵🏿"
-    ]
-    
-    private var borderColor: Color {
-        if profile.status != .confirmed {
-            // Grayed out for unconfirmed profiles
-            return Color.gray.opacity(0.5)  // Slightly brighter for unconfirmed
-        }
-        
-        let color = profileColors[profileSlot % profileColors.count]
-        return isSelected ? color : Color(hex: "e0e0e0")
-    }
-    
-    private var profileEmoji: String {
-        // Consistent emoji based on profile slot + name hash for variety
-        let emojiIndex = (profileSlot + abs(profile.name.hashValue)) % profileEmojis.count
-        return profileEmojis[emojiIndex]
-    }
-    
-    var body: some View {
-        AsyncImage(url: URL(string: profile.photoURL ?? "")) { image in
-            image
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-        } placeholder: {
-            // Placeholder with grandparent emoji
-            ZStack {
-                borderColor.opacity(0.2)  // Use profile color as background
-                Text(profileEmoji)
-                    .font(.system(size: 24))
-            }
-        }
-        .frame(width: 45, height: 45)
-        .clipShape(Circle())
-        .overlay(
-            Circle()
-                .stroke(borderColor, lineWidth: isSelected ? 2 : 0)  // No outline when unselected
-        )
-        .opacity(profile.status == .confirmed ? 1.0 : 0.5) // Gray out unconfirmed
-    }
-}
-
-// MARK: - Large Profile Image View Component (For Redesigned Profiles Section)
-struct ProfileImageViewLarge: View {
-    let profile: ElderlyProfile
-    let profileSlot: Int // Position in profile array for consistent colors
-    let isSelected: Bool
-    
-    // Fixed colors for profile slots 1,2,3,4,5
-    private let profileColors: [Color] = [
-        Color(hex: "B9E3FF"),         // Profile slot 0 - default light blue
-        Color.red.opacity(0.6),       // Profile slot 1 - brighter
-        Color.green.opacity(0.6),     // Profile slot 2 - brighter
-        Color.purple.opacity(0.6),    // Profile slot 3 - brighter
-        Color.orange.opacity(0.6)     // Profile slot 4 - new color for 5th profile
-    ]
-    
-    // Grandparent emojis with diverse skin tones
-    private let profileEmojis: [String] = [
-        "👴🏻", "👵🏻", "👴🏽", "👵🏽", "👴🏿", "👵🏿"
-    ]
-    
-    private var borderColor: Color {
-        if profile.status != .confirmed {
-            // Grayed out for unconfirmed profiles
-            return Color.gray.opacity(0.5)  // Slightly brighter for unconfirmed
-        }
-        
-        let color = profileColors[profileSlot % profileColors.count]
-        return isSelected ? color : Color(hex: "e0e0e0")
-    }
-    
-    private var profileEmoji: String {
-        // Consistent emoji based on profile slot + name hash for variety
-        let emojiIndex = (profileSlot + abs(profile.name.hashValue)) % profileEmojis.count
-        return profileEmojis[emojiIndex]
-    }
-    
-    var body: some View {
-        AsyncImage(url: URL(string: profile.photoURL ?? "")) { image in
-            image
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-        } placeholder: {
-            // Placeholder with grandparent emoji
-            ZStack {
-                borderColor.opacity(0.2)  // Use profile color as background
-                Text(profileEmoji)
-                    .font(.system(size: 32)) // Larger emoji for 60px circle
-            }
-        }
-        .frame(width: 60, height: 60) // Enlarged from 45x45 to 60x60
-        .clipShape(Circle())
-        .overlay(
-            Circle()
-                .stroke(borderColor, lineWidth: isSelected ? 2.5 : 0)  // Thicker border for larger size
-        )
-        .opacity(profile.status == .confirmed ? 1.0 : 0.5) // Gray out unconfirmed
-    }
-}
+// MARK: - ProfileImageView Components Moved to /Views/Components/ProfileImageView.swift
+// This eliminates duplicate code and provides unified ProfileImageView component
 
 // MARK: - Task Row View Component
 struct TaskRowView: View {
@@ -1024,10 +823,7 @@ extension Color {
 // MARK: - Preview Support
 #if DEBUG
 struct DashboardView_Previews: PreviewProvider {
-    static var
-    previews: some View {
-    
-        
+    static var previews: some View {
         Group {
             // SIMPLE FALLBACK PREVIEW (if comprehensive fails)
             VStack {
@@ -1039,49 +835,12 @@ struct DashboardView_Previews: PreviewProvider {
             .previewDisplayName("📱 Simple Fallback")
             
             // COMPREHENSIVE DASHBOARD LAYOUT PREVIEW
-            GeometryReader { geometry in
-                ScrollView {
-                    VStack(spacing: 0) {
-                        // Header Section - Use shared header component
-                        SharedHeaderSection()
-                        
-                        // Profiles Section  
-                        PreviewProfilesSection()
-                            .padding(.horizontal, geometry.size.width * 0.04) // Add horizontal padding
-                            .padding(.top, 8)
-                        
-                        // Create Custom Habit Section
-                        PreviewCreateHabitSection(screenWidth: geometry.size.width)
-                            .padding(.horizontal, geometry.size.width * 0.04) // Add horizontal padding
-                            .padding(.top, 20)
-                        
-                        // Upcoming Section
-                        PreviewUpcomingSection()
-                            .padding(.horizontal, geometry.size.width * 0.04) // Add horizontal padding
-                            .padding(.top, 20)
-                        
-                        // Completed Tasks Section
-                        PreviewCompletedTasksSection()
-                            .padding(.horizontal, geometry.size.width * 0.04) // Add horizontal padding
-                            .padding(.top, 20)
-                        
-                        // Bottom spacing for navigation
-                        Spacer(minLength: 100)
-                    }
-                }
-                .background(Color(hex: "f9f9f9"))
-                .overlay(
-                    // Bottom Navigation Overlay
-                    PreviewBottomNavigation()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                )
-            }
-            .previewDisplayName("📱 Complete Dashboard Layout")
+            PreviewDashboardWrapper()
+                .previewDisplayName("📱 Complete Dashboard Layout")
             
             // INDIVIDUAL SECTION PREVIEWS FOR EASY EDITING
             // Updated Header Section Preview - Uses shared component
-            SharedHeaderSection()
-                .background(Color(hex: "f9f9f9"))
+            PreviewHeaderWrapper()
                 .previewDisplayName("🏠 Header Section - UPDATED")
             
             PreviewProfilesSection()
@@ -1089,10 +848,6 @@ struct DashboardView_Previews: PreviewProvider {
                 .background(Color(hex: "f9f9f9"))
                 .previewDisplayName("👥 Profiles Section")
             
-            PreviewCreateHabitSection(screenWidth: 375)
-                .padding()
-                .background(Color(hex: "f9f9f9"))
-                .previewDisplayName("✨ Create Habit Section")
             
             PreviewUpcomingSection()
                 .padding()
@@ -1114,51 +869,7 @@ struct DashboardView_Previews: PreviewProvider {
 
 // MARK: - Organized Preview Components
 
-struct SharedHeaderSection: View {
-    var body: some View {
-        HStack(alignment: .center) {
-            /*
-             * MAIN LOGO: "Remi" brand text
-             * Font: Poppins Medium to match ProfileViews, scaled up for header
-             * Letter spacing adjusted for proper appearance at larger size
-             */
-            Text("Remi")
-                .font(AppFonts.poppinsMedium(size: 37.5))
-                .tracking(-3.1) // Scaled tracking from ProfileViews (-1.9 to -3.1 for larger size)
-                .foregroundColor(.black)
-            
-            Spacer() // Pushes profile button to right edge
-            
-            /*
-             * PROFILE SETTINGS BUTTON: Future account/settings access
-             * Currently placeholder - will navigate to profile settings screen
-             * Icon: SF Symbol person (outlined torso) for clean appearance
-             */
-            Button(action: {
-                // Haptic feedback for navigation bar button
-                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                impactFeedback.impactOccurred()
-                
-                // TODO: Navigate to profile settings/account screen
-                // This will handle user account management, not elderly profiles
-            }) {
-                Image(systemName: "person")
-                    .font(.title2)
-                    .foregroundColor(.black)
-            }
-        }
-        /*
-         * HEADER PADDING: Match Dashboard content padding
-         * Horizontal: 26px to match typical Dashboard spacing
-         * Vertical: 20px top, 10px bottom for visual separation
-         */
-        .padding(.horizontal, 26)
-        .padding(.top, 20)
-        .padding(.bottom, 10)
-    }
-}
-
-// Removed unused duplicate header components - only SharedHeaderSection is used
+// SharedHeaderSection moved to /Views/Components/SharedHeaderSection.swift
 
 struct PreviewProfilesSection: View {
     // Move static data outside body to avoid Canvas issues
@@ -1217,101 +928,6 @@ struct PreviewProfilesSection: View {
     }
 }
 
-struct PreviewCreateHabitSection: View {
-    let screenWidth: CGFloat
-    
-    var body: some View {
-        ZStack {
-            // White card background
-            VStack(spacing: 0) {
-                // Title at top of card
-                HStack {
-                    Text("CREATE A CUSTOM HABIT")
-                        .font(.system(size: 15, weight: .bold))
-                        .tracking(-1)
-                        .foregroundColor(.secondary)
-                    
-                    Spacer()
-                }
-                .padding(.horizontal, 12)
-                .padding(.top, 12) // Closer to top
-                
-                Spacer()
-            }
-            .frame(width: screenWidth * 0.92) // 92% of screen width
-            .frame(height: screenWidth * 0.314) // Proportional to 118px height
-            .background(Color.white)
-            .cornerRadius(10)
-            .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
-            
-            // + Button positioned separately in middle-right
-            HStack {
-                Spacer()
-                
-                ZStack {
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 38, height: 38) // Reduced by 1/4 (from 43 to 32)
-                        .overlay(
-                            Circle()
-                                .stroke(Color.gray.opacity(0.5), lineWidth: 1)  // Brighter add button
-                        )
-                    
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .medium)) // Reduced proportionally
-                        .foregroundColor(Color(hex: "5f5f5f"))
-                }
-                .padding(.trailing, 25) // Moved right a bit
-            }
-            .frame(width: screenWidth * 0.92)
-            .frame(height: screenWidth * 0.314)
-            
-            // Overlay illustrations on top
-            HStack {
-                Spacer()
-                
-                // Flying birds (center) - two Bird1 images with transformations
-                HStack(spacing: 12) {
-                    Image("Bird1")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 45.5, height: 36.4) // 1.3x bigger (35*1.3, 28*1.3)
-                        .offset(y: -21) //higher than right
-                    
-                    Image("Bird1")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 45.5, height: 36.4) // 1.3x bigger
-                        .scaleEffect(x: -1, y: 1) // Mirror horizontally
-                        .rotationEffect(.degrees(15)) // Rotate 15° clockwise
-                }
-                .offset(y: 15) // Move birds down a bit
-                
-                Spacer()
-                
-                // Mascot (right side, extends below card but clipped)
-                ZStack {
-                    Image("Mascot")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: screenWidth * 0.43) // Taller than card
-                    
-                    // Circle on mascot's stomach
-                    Circle()
-                        .fill(Color(hex: "28ADFF"))
-                        .frame(width: 20, height: 20)
-                        .offset(x: -5, y: 15) // Position on stomach area
-                }
-                .offset(x: -50, y: screenWidth * 0.08) // Move left for button alignment, and down slightly more
-                .padding(.trailing, 20)
-            }
-            .frame(width: screenWidth * 0.92)
-            .frame(height: screenWidth * 0.314)
-            .clipped() // Clip mascot to card boundaries
-        }
-        .frame(height: screenWidth * 0.314) // Maintain card height
-    }
-}
 
 struct PreviewUpcomingSection: View {
     // Move static data outside body to avoid Canvas issues
@@ -1682,4 +1298,57 @@ struct FloatingPillNavigation: View {
         }
     }
 }
+
+// MARK: - Preview Wrapper Structs
+private struct PreviewDashboardWrapper: View {
+    @State private var selectedProfileIndex: Int = 0
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Header Section - Use shared header component
+                    SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
+                    
+                    // Profiles Section  
+                    PreviewProfilesSection()
+                        .padding(.horizontal, geometry.size.width * 0.04) // Add horizontal padding
+                        .padding(.top, 8)
+                    
+                    
+                    // Upcoming Section
+                    PreviewUpcomingSection()
+                        .padding(.horizontal, geometry.size.width * 0.04) // Add horizontal padding
+                        .padding(.top, 20)
+                    
+                    // Completed Tasks Section
+                    PreviewCompletedTasksSection()
+                        .padding(.horizontal, geometry.size.width * 0.04) // Add horizontal padding
+                        .padding(.top, 20)
+                    
+                    // Bottom spacing for navigation
+                    Spacer(minLength: 100)
+                }
+            }
+            .background(Color(hex: "f9f9f9"))
+            .overlay(
+                // Bottom Navigation Overlay
+                PreviewBottomNavigation()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            )
+        }
+        .inject(container: Container.makeForTesting())
+    }
+}
+
+private struct PreviewHeaderWrapper: View {
+    @State private var selectedProfileIndex: Int = 0
+    
+    var body: some View {
+        SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
+            .background(Color(hex: "f9f9f9"))
+            .inject(container: Container.makeForTesting())
+    }
+}
+
 #endif

@@ -182,8 +182,7 @@ struct HalloApp: App {
             await initializeCriticalServices()
         }
         
-        // Track app launch analytics
-        trackAppLaunch()
+        // Analytics removed - no longer tracking app launch
     }
     
     private func handleAppWillEnterForeground() {
@@ -269,18 +268,7 @@ struct HalloApp: App {
         }
     }
     
-    // MARK: - Analytics
-    private func trackAppLaunch() {
-        let analyticsService = container.resolve(AnalyticsServiceProtocol.self)
-        
-        _Concurrency.Task {
-            await analyticsService.trackEvent("app_launched", parameters: [
-                "app_version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
-                "ios_version": UIDevice.current.systemVersion,
-                "device_model": UIDevice.current.model
-            ])
-        }
-    }
+    // Analytics removed - no longer tracking app events
 }
 
 // MARK: - App Configuration Extensions

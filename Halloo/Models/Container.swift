@@ -49,9 +49,6 @@ final class Container: ObservableObject {
             MockNotificationService() // Keep mock for now, implement later
         }
         
-        register(AnalyticsServiceProtocol.self) {
-            MockAnalyticsService() // TODO: Switch to Firebase Analytics
-        }
         
         register(SubscriptionServiceProtocol.self) {
             MockSubscriptionService() // Keep mock for now, implement StoreKit later
@@ -200,27 +197,26 @@ final class Container: ObservableObject {
     func makeDashboardViewModel() -> DashboardViewModel {
         DashboardViewModel(
             databaseService: resolve(DatabaseServiceProtocol.self),
-            analyticsService: resolve(AnalyticsServiceProtocol.self),
             authService: resolve(AuthenticationServiceProtocol.self),
             dataSyncCoordinator: resolve(DataSyncCoordinator.self),
             errorCoordinator: resolve(ErrorCoordinator.self)
         )
     }
     
+    
     @MainActor
-    func makeAnalyticsViewModel() -> AnalyticsViewModel {
-        AnalyticsViewModel(
-            analyticsService: resolve(AnalyticsServiceProtocol.self),
-            databaseService: resolve(DatabaseServiceProtocol.self),
+    func makeSubscriptionViewModel() -> SubscriptionViewModel {
+        SubscriptionViewModel(
+            subscriptionService: resolve(SubscriptionServiceProtocol.self),
             authService: resolve(AuthenticationServiceProtocol.self),
             errorCoordinator: resolve(ErrorCoordinator.self)
         )
     }
     
     @MainActor
-    func makeSubscriptionViewModel() -> SubscriptionViewModel {
-        SubscriptionViewModel(
-            subscriptionService: resolve(SubscriptionServiceProtocol.self),
+    func makeGalleryViewModel() -> GalleryViewModel {
+        GalleryViewModel(
+            databaseService: resolve(DatabaseServiceProtocol.self),
             authService: resolve(AuthenticationServiceProtocol.self),
             errorCoordinator: resolve(ErrorCoordinator.self)
         )

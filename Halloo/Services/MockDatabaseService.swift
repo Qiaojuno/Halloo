@@ -35,7 +35,7 @@ class MockDatabaseService: DatabaseServiceProtocol {
         )
         mockUsers[mockUser.id] = mockUser
         
-        // Mock elderly profiles with streak data
+        // Mock elderly profiles
         let mockProfile = ElderlyProfile(
             id: "mock-profile-1",
             userId: "mock-user-id",
@@ -50,7 +50,6 @@ class MockDatabaseService: DatabaseServiceProtocol {
             createdAt: Date(),
             lastActiveAt: Date(),
             confirmedAt: Date(),
-            currentStreak: 7, // 7-day streak for testing
             lastCompletionDate: Calendar.current.date(byAdding: .day, value: -1, to: Date()) // Completed yesterday
         )
         mockProfiles[mockProfile.id] = mockProfile

@@ -70,6 +70,14 @@ enum GalleryEventData: Codable, Hashable {
             self.taskTitle = smsResponse.taskTitle
         }
         
+        init(taskId: String?, textResponse: String?, photoData: Data?, responseType: String, taskTitle: String?) {
+            self.taskId = taskId
+            self.textResponse = textResponse
+            self.photoData = photoData
+            self.responseType = responseType
+            self.taskTitle = taskTitle
+        }
+        
         // Implement Equatable
         static func == (lhs: SMSResponseData, rhs: SMSResponseData) -> Bool {
             return lhs.taskId == rhs.taskId &&
@@ -99,6 +107,13 @@ enum GalleryEventData: Codable, Hashable {
             self.profileName = profile.name
             self.relationship = profile.relationship
             self.photoURL = profile.photoURL
+            self.profileSlot = profileSlot
+        }
+        
+        init(profileName: String, relationship: String, photoURL: String?, profileSlot: Int) {
+            self.profileName = profileName
+            self.relationship = relationship
+            self.photoURL = photoURL
             self.profileSlot = profileSlot
         }
     }

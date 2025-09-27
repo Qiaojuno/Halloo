@@ -29,11 +29,60 @@ struct HabitsView: View {
     @State private var selectedProfileIndex: Int = 0
     @State private var selectedDays: Set<Int> = Set(0...6) // Default to all days selected
     
+    /// Controls TaskCreationView conditional presentation with profile preselection
+    @State private var showingTaskCreation = false
+    
+    /// Controls direct ProfileOnboardingFlow presentation
+    @State private var showingDirectOnboarding = false
+    
+    /// Controls action sheet for unified create button
+    @State private var showingCreateActionSheet = false
+    
     // Days of the week for display
     private let weekDays = ["S", "M", "T", "W", "T", "F", "S"]
     private let weekDayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     
     var body: some View {
+        Group {
+            if showingDirectOnboarding {
+                // TODO: Replace with new profile creation view
+                VStack {
+                    Text("Add Family Member")
+                        .font(.title)
+                    Text("Coming Soon - Will build new profile creation flow")
+                        .foregroundColor(.secondary)
+                        .padding()
+                    
+                    Button("Cancel") {
+                        showingDirectOnboarding = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .transition(.identity)
+                .animation(nil, value: showingDirectOnboarding)
+            } else if showingTaskCreation {
+                // Show task creation flow without animation
+                TaskCreationView(
+                    preselectedProfileId: selectedProfile?.id,
+                    dismissAction: {
+                        showingTaskCreation = false
+                    }
+                )
+                .environmentObject(container.makeTaskViewModel())
+                .transition(.identity)
+                .animation(nil, value: showingTaskCreation)
+            } else {
+                // Show habits view
+                habitsContent
+                    .transition(.identity)
+                    .animation(nil, value: showingDirectOnboarding)
+                    .animation(nil, value: showingTaskCreation)
+            }
+        }
+        .animation(nil) // Disable all animations
+    }
+    
+    private var habitsContent: some View {
         GeometryReader { geometry in
             ZStack {
                 // Main content
@@ -42,9 +91,6 @@ struct HabitsView: View {
                         
                         // 🏠 HEADER: App branding + account access
                         headerSection
-                        
-                        // 👥 PROFILES: Elderly family member selection (reused from Dashboard)
-                        profilesSection
                         
                         // 📋 HABITS MANAGEMENT: All scheduled tasks with filtering and deletion
                         allScheduledTasksSection
@@ -56,10 +102,22 @@ struct HabitsView: View {
                 }
                 .background(Color(hex: "f9f9f9")) // Light gray app background
                 
-                // Bottom Navigation
+                // Bottom elements
                 VStack {
                     Spacer()
-                    bottomTabNavigation
+                    
+                    ZStack {
+                        // Unified Create Button - centered, aligned to nav pill bottom edge
+                        HStack {
+                            Spacer()
+                            unifiedCreateButton
+                            Spacer()
+                        }
+                        .padding(.bottom, -28) // Very close to bottom edge - button well below nav pill
+                        
+                        // Navigation pill - bottom right
+                        bottomTabNavigation
+                    }
                 }
             }
         }
@@ -75,41 +133,9 @@ struct HabitsView: View {
     
     // MARK: - 🏠 Header Section
     private var headerSection: some View {
-        SharedHeaderSection()
+        SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
     }
     
-    // MARK: - 👥 Profiles Section (Reused from Dashboard)
-    private var profilesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("PROFILES:")
-                .font(.system(size: 15, weight: .bold))
-                .tracking(-1)
-                .foregroundColor(Color(hex: "9f9f9f"))
-            
-            HStack(spacing: 12) {
-                ForEach(Array(viewModel.profiles.enumerated()), id: \.offset) { index, profile in
-                    ProfileImageView(
-                        profile: profile,
-                        profileSlot: index,
-                        isSelected: selectedProfileIndex == index
-                    )
-                    .onTapGesture {
-                        selectedProfileIndex = index
-                        if index < viewModel.profiles.count {
-                            viewModel.selectProfile(profileId: viewModel.profiles[index].id)
-                        }
-                    }
-                }
-                
-                Spacer()
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 16)
-        .background(Color.white)
-        .cornerRadius(10)
-        .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
-    }
     
     // MARK: - 📋 All Scheduled Tasks Section
     private var allScheduledTasksSection: some View {
@@ -146,31 +172,35 @@ struct HabitsView: View {
     
     // MARK: - Week Selector Component (Matches Create Habit View)
     private var weekSelectorSection: some View {
-        HStack(spacing: 8) {
-            ForEach(0..<7, id: \.self) { dayIndex in
-                Button(action: {
-                    if selectedDays.contains(dayIndex) {
-                        selectedDays.remove(dayIndex)
-                    } else {
-                        selectedDays.insert(dayIndex)
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                ForEach(0..<7, id: \.self) { dayIndex in
+                    Button(action: {
+                        if selectedDays.contains(dayIndex) {
+                            selectedDays.remove(dayIndex)
+                        } else {
+                            selectedDays.insert(dayIndex)
+                        }
+                    }) {
+                        Text(weekDays[dayIndex])
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(selectedDays.contains(dayIndex) ? .white : Color(hex: "0D0C0C")) // White text when selected, dark when not
+                            .frame(width: (geometry.size.width / 7), height: 39) // Responsive width, fixed height
+                            .background(
+                                Circle()
+                                    .fill(selectedDays.contains(dayIndex) ? Color(hex: "28ADFF") : Color.clear) // Blue fill when selected, clear when not
+                                    .frame(width: 39, height: 39) // Keep circle size consistent
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(selectedDays.contains(dayIndex) ? Color.clear : Color(hex: "D5D5D5"), lineWidth: 1) // No stroke when selected, gray stroke when not
+                                    .frame(width: 39, height: 39) // Keep circle size consistent
+                            )
                     }
-                }) {
-                    Text(weekDays[dayIndex])
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(selectedDays.contains(dayIndex) ? .white : Color(hex: "0D0C0C")) // White text when selected, dark when not
-                        .frame(width: 39, height: 39) // FIGMA SPEC: 39x39
-                        .background(
-                            Circle()
-                                .fill(selectedDays.contains(dayIndex) ? Color(hex: "28ADFF") : Color.clear) // Blue fill when selected, clear when not
-                        )
-                        .overlay(
-                            Circle()
-                                .stroke(selectedDays.contains(dayIndex) ? Color.clear : Color(hex: "D5D5D5"), lineWidth: 1) // No stroke when selected, gray stroke when not
-                        )
                 }
             }
-            Spacer()
         }
+        .frame(height: 39)
     }
     
     // MARK: - Habits List Section
@@ -329,6 +359,56 @@ struct HabitsView: View {
         // For now, just show feedback
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     }
+    
+    // MARK: - ✨ Unified Create Button
+    /**
+     * FLOATING UNIFIED CREATE BUTTON: Bottom center call-to-action
+     * 
+     * PURPOSE: Primary action button for creating new profiles or tasks
+     * Positioned at bottom center for easy thumb access
+     * Shows action sheet to choose between profile creation or task creation
+     * Same size as profile circles for visual consistency
+     */
+    private var unifiedCreateButton: some View {
+        Button(action: {
+            // Haptic feedback for create action
+            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+            impactFeedback.impactOccurred()
+            
+            showingCreateActionSheet = true
+        }) {
+            ZStack {
+                Circle()
+                    .fill(Color.black)
+                    .frame(width: 45, height: 45) // Same size as profile circles
+                    .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2)
+                
+                Image(systemName: "plus")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundColor(.white)
+            }
+        }
+        .actionSheet(isPresented: $showingCreateActionSheet) {
+            ActionSheet(
+                title: Text("What would you like to create?"),
+                buttons: [
+                    .default(Text("Add Family Member")) {
+                        // Create profile action
+                        profileViewModel.startProfileOnboarding()
+                        showingDirectOnboarding = true
+                    },
+                    .default(Text("Create Habit")) {
+                        // Create task action
+                        showingTaskCreation = true
+                    },
+                    .cancel()
+                ]
+            )
+        }
+    }
+    
+    // MARK: - Helper Properties
+    // selectedProfile is already defined earlier in the file
 }
 
 // MARK: - Simplified Habit Row View Component  

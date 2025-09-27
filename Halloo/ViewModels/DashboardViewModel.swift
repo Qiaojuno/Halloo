@@ -7,7 +7,7 @@
 //    • Real-time task completion tracking across all elderly profiles
 //    • SMS response monitoring with overdue task identification
 //    • Family coordination dashboard with daily progress analytics
-//  Dependencies: DatabaseService, AnalyticsService, AuthenticationService, DataSyncCoordinator
+//  Dependencies: DatabaseService, AuthenticationService, DataSyncCoordinator
 //  
 //  Business Context: Primary family interface for monitoring elderly care and SMS engagement
 //  Critical Paths: Daily task overview → SMS response tracking → Family alerts → Care coordination
@@ -158,7 +158,6 @@ final class DashboardViewModel: ObservableObject {
     /// - Overall care engagement metrics
     ///
     /// Used by families to understand care routine effectiveness.
-    @Published var weeklyProgress: WeeklyProgress = WeeklyProgress()
     
     // MARK: - Dashboard Navigation Properties
     
@@ -193,15 +192,12 @@ final class DashboardViewModel: ObservableObject {
     @Published var showingProfilesList = false
     
     /// Controls detailed analytics view for care pattern analysis
-    @Published var showingAnalytics = false
     
     // MARK: - Service Dependencies
     
     /// Database service for task and response data aggregation
     private let databaseService: DatabaseServiceProtocol
     
-    /// Analytics service for care pattern analysis and trend calculation
-    private let analyticsService: AnalyticsServiceProtocol
     
     /// Authentication service for family user context and permissions
     private let authService: AuthenticationServiceProtocol
@@ -339,19 +335,16 @@ final class DashboardViewModel: ObservableObject {
     /// 5. **Analytics Setup**: Prepares weekly progress and completion rate tracking
     ///
     /// - Parameter databaseService: Handles task and response data aggregation
-    /// - Parameter analyticsService: Provides care pattern analysis and trend calculation
     /// - Parameter authService: Provides family user context and permissions
     /// - Parameter dataSyncCoordinator: Synchronizes real-time care data across family devices
     /// - Parameter errorCoordinator: Handles errors with family-friendly context
     init(
         databaseService: DatabaseServiceProtocol,
-        analyticsService: AnalyticsServiceProtocol,
         authService: AuthenticationServiceProtocol,
         dataSyncCoordinator: DataSyncCoordinator,
         errorCoordinator: ErrorCoordinator
     ) {
         self.databaseService = databaseService
-        self.analyticsService = analyticsService
         self.authService = authService
         self.dataSyncCoordinator = dataSyncCoordinator
         self.errorCoordinator = errorCoordinator
@@ -467,11 +460,9 @@ final class DashboardViewModel: ObservableObject {
             group.addTask { await self.loadProfiles() }
             group.addTask { await self.loadTodaysTasks() }
             group.addTask { await self.loadRecentResponses() }
-            group.addTask { await self.loadAnalytics() }
         }
         
-        // Check for streak resets after data is loaded
-        await checkStreakResets()
+        // Data loading complete
         
         await MainActor.run {
             // Aggregate data for family care coordination
@@ -567,28 +558,6 @@ final class DashboardViewModel: ObservableObject {
         }
     }
     
-    private func loadAnalytics() async {
-        do {
-            guard let userId = authService.currentUser?.uid else { return }
-            
-            let analytics = try await analyticsService.getWeeklyAnalytics(for: userId)
-            
-            await MainActor.run {
-                self.weeklyProgress = WeeklyProgress(
-                    completionRate: analytics.completionRate,
-                    totalTasks: analytics.totalTasks,
-                    completedTasks: analytics.completedTasks,
-                    streak: analytics.currentStreak,
-                    dailyCompletion: analytics.dailyCompletion
-                )
-            }
-            
-        } catch {
-            await MainActor.run {
-                self.errorCoordinator.handle(error, context: "Loading analytics")
-            }
-        }
-    }
     
     // MARK: - Data Refresh
     func refreshData() {
@@ -683,15 +652,7 @@ final class DashboardViewModel: ObservableObject {
             identifyOverdueTasks()
         }
         
-        // STREAK UPDATE: Check if this is a task completion response
-        if response.isCompleted, 
-           let taskId = response.taskId,
-           let profileId = response.profileId {
-            // Update streak for the profile when task is completed
-            _Concurrency.Task {
-                await updateStreakForProfile(profileId)
-            }
-        }
+        // Streak updates removed - no longer tracking streaks
         
         // Handle confirmation responses
         if response.isConfirmationResponse,
@@ -852,9 +813,7 @@ final class DashboardViewModel: ObservableObject {
         // Navigation would be handled by the view
     }
     
-    func showAnalyticsDetail() {
-        showingAnalytics = true
-    }
+    // Analytics removed - functionality no longer needed
     
     // MARK: - Date Navigation
     func goToPreviousDay() {
@@ -880,86 +839,9 @@ final class DashboardViewModel: ObservableObject {
     
     // MARK: - Streak Management
     
-    /// Updates streak for a profile when tasks are completed
-    /// Called when task completion is detected via SMS response or manual marking
-    func updateStreakForProfile(_ profileId: String) async {
-        guard let profileIndex = profiles.firstIndex(where: { $0.id == profileId }) else { return }
-        var profile = profiles[profileIndex]
-        
-        do {
-            // Get all tasks for this profile from database
-            guard let userId = authService.currentUser?.uid else { return }
-            let allTasks = try await databaseService.getTasks(for: userId)
-            
-            let calendar = Calendar.current
-            
-            // Count tasks scheduled for today for this profile
-            let todaysTasks = allTasks.filter { task in
-                task.profileId == profileId && 
-                calendar.isDate(task.scheduledTime, inSameDayAs: Date())
-            }
-            
-            let completedTasks = todaysTasks.filter { task in
-                task.lastCompletedAt != nil && 
-                calendar.isDate(task.lastCompletedAt!, inSameDayAs: Date())
-            }
-            
-            // Update streak using the profile's method
-            profile.updateStreak(
-                tasksCompletedToday: completedTasks.count,
-                totalTasksToday: todaysTasks.count,
-                completionDate: Date()
-            )
-            
-            await MainActor.run {
-                // Update the profile in our array
-                profiles[profileIndex] = profile
-            }
-            
-            // Persist the change to database
-            try await databaseService.updateElderlyProfile(profile)
-            dataSyncCoordinator.broadcastProfileUpdate(profile)
-            
-        } catch {
-            errorCoordinator.handle(error, context: "Updating streak for profile")
-        }
-    }
+    // Streak functionality removed - no longer tracking streaks
     
-    /// Checks all profiles for streak resets due to missed days
-    func checkStreakResets() async {
-        do {
-            guard let userId = authService.currentUser?.uid else { return }
-            let allTasks = try await databaseService.getTasks(for: userId)
-            
-            let calendar = Calendar.current
-            let yesterday = calendar.date(byAdding: .day, value: -1, to: Date())!
-            
-            for (index, var profile) in profiles.enumerated() {
-                // Count tasks that were scheduled for yesterday
-                let yesterdayTasks = allTasks.filter { task in
-                    task.profileId == profile.id && 
-                    calendar.isDate(task.scheduledTime, inSameDayAs: yesterday)
-                }
-                
-                // Check if streak should be reset
-                let originalStreak = profile.currentStreak
-                profile.checkStreakReset(totalTasksYesterday: yesterdayTasks.count)
-                
-                // Update if changed
-                if profile.currentStreak != originalStreak {
-                    await MainActor.run {
-                        profiles[index] = profile
-                    }
-                    
-                    // Persist the change
-                    try await databaseService.updateElderlyProfile(profile)
-                    dataSyncCoordinator.broadcastProfileUpdate(profile)
-                }
-            }
-        } catch {
-            errorCoordinator.handle(error, context: "Checking streak resets")
-        }
-    }
+    // Streak reset checking removed - no longer tracking streaks
     
     // MARK: - Quick Actions
     func quickAddMedicationReminder() {
@@ -967,9 +849,7 @@ final class DashboardViewModel: ObservableObject {
         showingQuickAddTask = true
     }
     
-    func quickCheckAnalytics() {
-        showingAnalytics = true
-    }
+    // Analytics removed - function no longer needed
     
     func quickViewProfiles() {
         showingProfilesList = true

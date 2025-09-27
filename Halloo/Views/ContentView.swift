@@ -58,13 +58,11 @@ struct ContentView: View {
         }
         .onAppear {
             initializeViewModels()
-            // DEVELOPMENT: Enable onboarding for Superwall testing
-            // #if DEBUG
-            // if !onboardingViewModel.isComplete {
-            //     print("🚀 DEVELOPMENT MODE: Skipping onboarding flow")
-            //     onboardingViewModel.skipToEnd()
-            // }
-            // #endif
+            // SKIP LOGIN AND ONBOARDING: Automatically bypass authentication and quiz
+            if !onboardingViewModel.isComplete {
+                print("🚀 SKIPPING ONBOARDING: Bypassing login and quiz flow")
+                onboardingViewModel.skipToEnd()
+            }
         }
         .onChange(of: onboardingViewModel.isComplete) { oldValue, newValue in
             handleOnboardingCompletion(newValue)
@@ -114,10 +112,20 @@ struct ContentView: View {
                 .transition(.identity) // No animation
             
         case .preferences:
-            CreateProfileView()
-                .environmentObject(profileViewModel)
-                .environmentObject(onboardingViewModel)
-                .transition(.identity) // No animation
+            // TODO: Replace with new profile creation view
+            VStack {
+                Text("Profile Creation")
+                    .font(.title)
+                Text("Coming Soon - Will build new profile creation flow")
+                    .foregroundColor(.secondary)
+                    .padding()
+                
+                Button("Skip for Now") {
+                    onboardingViewModel.nextStep()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .transition(.identity) // No animation
             
         case .complete:
             OnboardingCompleteView()
@@ -146,6 +154,8 @@ struct ContentView: View {
             } else {
                 // Gallery Tab - Archive of completed habits with photos
                 GalleryView(selectedTab: $selectedTab)
+                    .inject(container: container)
+                    .environmentObject(profileViewModel)
             }
         }
         // No longer need onAppear since we're not using TabView
@@ -162,6 +172,9 @@ struct ContentView: View {
         
         print("🔥 Auth Service: \(type(of: authService))")
         print("🔥 Database Service: \(type(of: dbService))")
+        
+        // Note: ViewModels will use their mock services initially
+        // This is fine since we're skipping authentication
         
         isLoading = false
         print("🔥 isLoading is now: \(isLoading)")

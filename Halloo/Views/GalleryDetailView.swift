@@ -32,6 +32,9 @@ struct GalleryDetailView: View {
     private var hasPrevious: Bool { currentIndex > 0 }
     private var hasNext: Bool { currentIndex < totalEvents - 1 }
     
+    // Profile selection state for header
+    @State private var selectedProfileIndex: Int = 0
+    
     // MARK: - Initialization
     init(
         event: GalleryHistoryEvent,
@@ -57,7 +60,7 @@ struct GalleryDetailView: View {
             
             VStack(spacing: 0) {
                 // Header with Remi logo and profile icon - same as other views
-                SharedHeaderSection()
+                SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
                     .padding(.horizontal, UIScreen.main.bounds.width * 0.04) // Match DashboardView/GalleryView alignment
                 
                 // Full-width white card extending to bottom of screen
@@ -114,10 +117,14 @@ struct GalleryDetailView: View {
         HStack {
             // Back button with chevron
             Button(action: {
-                if hasPrevious {
-                    onPrevious()
-                } else {
-                    dismiss()
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    if hasPrevious {
+                        onPrevious()
+                    } else {
+                        dismiss()
+                    }
                 }
             }) {
                 HStack(spacing: 8) {
@@ -140,8 +147,12 @@ struct GalleryDetailView: View {
             
             // Next button with chevron - always visible, disabled when not available
             Button(action: {
-                if hasNext {
-                    onNext()
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    if hasNext {
+                        onNext()
+                    }
                 }
             }) {
                 HStack(spacing: 8) {

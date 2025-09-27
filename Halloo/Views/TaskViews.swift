@@ -4,16 +4,39 @@ import UIKit
 // MARK: - Task Views
 // Component-based architecture for Task-related UI
 
-// MARK: - Task Creation View With Dismiss (For Dashboard Usage)
-struct TaskCreationViewWithDismiss: View {
+// MARK: - Unified Task Creation View (ZERO DUPLICATES)
+/// Consolidates TaskCreationView and TaskCreationViewWithDismiss into single component
+/// Supports both sheet presentation (.sheet) and custom dismiss (Dashboard)
+struct TaskCreationView: View {
     let preselectedProfileId: String?
-    let dismissAction: () -> Void
+    let customDismissAction: (() -> Void)?
+    let useNavigationWrapper: Bool
+    
     @EnvironmentObject var viewModel: TaskViewModel
+    @Environment(\.presentationMode) var presentationMode
+    
+    // MARK: - Convenience Initializers
+    
+    /// Standard sheet presentation (with NavigationView)
+    init(preselectedProfileId: String? = nil) {
+        self.preselectedProfileId = preselectedProfileId
+        self.customDismissAction = nil
+        self.useNavigationWrapper = true
+    }
+    
+    /// Custom dismiss for Dashboard usage (without NavigationView) 
+    init(preselectedProfileId: String?, dismissAction: @escaping () -> Void) {
+        self.preselectedProfileId = preselectedProfileId
+        self.customDismissAction = dismissAction
+        self.useNavigationWrapper = false
+    }
     
     var body: some View {
-        CustomHabitCreationFlow(
+        let habitCreationFlow = CustomHabitCreationFlow(
             viewModel: viewModel,
-            onDismiss: dismissAction
+            onDismiss: customDismissAction ?? {
+                presentationMode.wrappedValue.dismiss()
+            }
         )
         .onAppear {
             // Set preselected profile when view appears
@@ -21,34 +44,14 @@ struct TaskCreationViewWithDismiss: View {
                 viewModel.preselectProfile(profileId: profileId)
             }
         }
-    }
-}
-
-// MARK: - Task Creation View (Multi-Step Flow)
-struct TaskCreationView: View {
-    @EnvironmentObject var viewModel: TaskViewModel
-    @Environment(\.presentationMode) var presentationMode
-    let preselectedProfileId: String? // Profile ID to preselect for task creation
-    
-    init(preselectedProfileId: String? = nil) {
-        self.preselectedProfileId = preselectedProfileId
-    }
-    
-    var body: some View {
-        NavigationView {
-            CustomHabitCreationFlow(
-                viewModel: viewModel,
-                onDismiss: {
-                    presentationMode.wrappedValue.dismiss()
-                }
-            )
-        }
-        .navigationBarHidden(true)
-        .onAppear {
-            // Set preselected profile when view appears
-            if let profileId = preselectedProfileId {
-                viewModel.preselectProfile(profileId: profileId)
+        
+        if useNavigationWrapper {
+            NavigationView {
+                habitCreationFlow
             }
+            .navigationBarHidden(true)
+        } else {
+            habitCreationFlow
         }
     }
 }

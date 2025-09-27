@@ -58,7 +58,9 @@
 │   ├── 📄 ProfileViews.swift ✅ COMPLETE - 6-step onboarding
 │   ├── 📄 TaskViews.swift ✅ COMPLETE - 2-step habit creation
 │   ├── 📄 LoginView.swift ✅ COMPLETE - Social authentication
-│   └── 📄 OnboardingViews.swift ✅ COMPLETE - Welcome/Quiz screens
+│   ├── 📄 OnboardingViews.swift ✅ COMPLETE - Welcome/Quiz screens
+│   └── 📁 Components/
+│       └── 📄 CardStackView.swift ✅ COMPLETE - Swipeable card stack
 ├── 🎨 Assets.xcassets/
 │   ├── 🖼️ Character.imageset/Mascot.png ✅
 │   ├── 🖼️ MascotSitting.imageset/ ✅
@@ -177,6 +179,13 @@ Authenticated → TabView (2 tabs visible)
 - Gallery with photo archive
 - Firebase authentication integration
 - Mock services for development
+- **CardStackView Component** - Swipeable card stack with:
+  - Smooth horizontal drag with subtle rotation arc (0.02 multiplier)
+  - Fast swipe-away animation (0.15s duration)
+  - Linear card rearrangement animation (0.3s duration)
+  - Proper card stacking with fan effect and z-index layering
+  - SMS bubble layout for task responses
+  - Empty state with paper airplane design
 
 ### 🚧 In Progress
 - SMS integration with Twilio

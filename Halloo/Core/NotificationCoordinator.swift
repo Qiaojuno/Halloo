@@ -3,6 +3,17 @@ import UIKit
 import UserNotifications
 import Combine
 
+// MARK: - TimeRange Helper
+struct TimeRange {
+    let startDate: Date
+    let endDate: Date
+    
+    init(startDate: Date, endDate: Date) {
+        self.startDate = startDate
+        self.endDate = endDate
+    }
+}
+
 // MARK: - Notification Coordinator
 final class NotificationCoordinator: ObservableObject {
     
@@ -213,25 +224,23 @@ final class NotificationCoordinator: ObservableObject {
         let opened = delivered.filter { $0.wasOpened }
         let dismissed = delivered.filter { $0.wasDismissed }
         
-        let categoryBreakdown = Dictionary(grouping: notifications) { $0.category }
-            .mapValues { notifications in
-                let deliveredCount = delivered.filter { delivered in
-                    notifications.contains { $0.id == delivered.id }
-                }.count
-                
-                let openedCount = opened.filter { opened in
-                    notifications.contains { $0.id == opened.id }
-                }.count
-                
-                return NotificationCategoryStats(
-                    category: notifications.first?.category ?? .general,
-                    scheduled: notifications.count,
-                    delivered: deliveredCount,
-                    opened: openedCount,
-                    dismissed: dismissed.count,
-                    averageResponseTime: calculateAverageResponseTime(for: notifications)
-                )
-            }
+        let groupedByCategory = Dictionary(grouping: notifications) { $0.category }
+        let categoryBreakdown = groupedByCategory.mapValues { categoryNotifications in
+            let notificationIds = Set(categoryNotifications.map { $0.id })
+            
+            let deliveredCount = delivered.filter { notificationIds.contains($0.id) }.count
+            let openedCount = opened.filter { notificationIds.contains($0.id) }.count
+            let dismissedCount = dismissed.filter { notificationIds.contains($0.id) }.count
+            
+            return NotificationCategoryStats(
+                category: categoryNotifications.first?.category ?? .general,
+                scheduled: categoryNotifications.count,
+                delivered: deliveredCount,
+                opened: openedCount,
+                dismissed: dismissedCount,
+                averageResponseTime: calculateAverageResponseTime(for: categoryNotifications)
+            )
+        }
         
         let timeOfDayBreakdown = Dictionary(grouping: notifications) { notification in
             Calendar.current.component(.hour, from: notification.scheduledTime ?? Date())
