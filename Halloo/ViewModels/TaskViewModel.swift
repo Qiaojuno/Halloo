@@ -581,65 +581,89 @@ final class TaskViewModel: ObservableObject {
     SMS reminders use simple, consistent language patterns that elderly users recognize.
     */
     private func createTaskAsync() async {
-        guard isValidForm, let profile = selectedProfile else { return }
-        
+        print("📝 Starting task creation...")
+        guard isValidForm, let profile = selectedProfile else {
+            print("⚠️ Form validation failed or no profile selected")
+            return
+        }
+        print("✅ Form validated, profile selected: \(profile.name)")
+
         isLoading = true
         errorMessage = nil
-        
+
         do {
+            print("🔍 Checking authentication...")
+            print("🔍 Auth service type: \(type(of: authService))")
+            print("🔍 Current user: \(String(describing: authService.currentUser))")
+
             guard let userId = authService.currentUser?.uid else {
+                print("❌ No user ID - authentication failed")
                 throw TaskError.userNotAuthenticated
             }
-            
+            print("✅ User authenticated with ID: \(userId)")
+
             // Protective limit: Max 10 tasks per elderly profile to prevent SMS overwhelming
             guard canCreateTask else {
+                print("❌ Max tasks reached for profile")
                 throw TaskError.maxTasksReached
             }
-            
+            print("✅ Can create task (under limit)")
+
             // Create separate task for each scheduled time (allows individual tracking)
             var createdTasks: [Task] = []
-            
-            for scheduledTime in scheduledTimes {
+            print("📋 Creating \(scheduledTimes.count) task(s) for scheduled times")
+
+            for (index, scheduledTime) in scheduledTimes.enumerated() {
+                print("   Creating task \(index + 1)/\(scheduledTimes.count)...")
                 let task = Task(
-                    id: UUID().uuidString,
+                    id: IDGenerator.habitID(),
                     userId: userId,
                     profileId: profile.id,
                     title: taskTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                     description: taskDescription.trimmingCharacters(in: .whitespacesAndNewlines),
                     category: taskCategory,
                     frequency: frequency,
-                    scheduledTime: scheduledTime, // Automatically converted to elderly profile's timezone
-                    deadlineMinutes: deadlineMinutes, // Category-specific defaults (medication: 10min, social: 2hrs)
+                    scheduledTime: scheduledTime,
+                    deadlineMinutes: deadlineMinutes,
                     requiresPhoto: requiresPhoto,
                     requiresText: requiresText,
                     customDays: frequency == .custom ? Array(customDays) : [],
                     startDate: startDate,
                     endDate: endDate,
                     status: isActive ? .active : .paused,
-                    notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
                     createdAt: Date(),
                     lastModifiedAt: Date()
                 )
-                
+                print("   Task created: \(task.title) at \(scheduledTime)")
+
+                print("   💾 Saving to database...")
                 // Persist with family synchronization
                 try await databaseService.createTask(task)
-                
+                print("   ✅ Saved to database")
+
+                print("   📱 Scheduling notifications...")
                 // Schedule SMS reminders and family notifications
                 try await scheduleTaskNotifications(for: task)
-                
+                print("   ✅ Notifications scheduled")
+
                 createdTasks.append(task)
             }
-            
+
             await MainActor.run {
+                print("🎉 Updating local state with \(createdTasks.count) new task(s)")
                 // Update local state for immediate family feedback
                 for task in createdTasks {
                     self.tasks.insert(task, at: 0)
                 }
                 self.resetForm()
                 self.showingCreateTask = false
+                print("✅ Task creation complete! Total tasks: \(self.tasks.count)")
             }
-            
+
         } catch {
+            print("❌ Error creating task: \(error)")
+            print("❌ Error type: \(type(of: error))")
+            print("❌ Error description: \(error.localizedDescription)")
             await MainActor.run {
                 // Provide family-friendly error context
                 self.errorMessage = error.localizedDescription
@@ -688,7 +712,6 @@ final class TaskViewModel: ObservableObject {
                 startDate: startDate,
                 endDate: endDate,
                 status: isActive ? .active : .paused,
-                notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
                 createdAt: task.createdAt,
                 lastModifiedAt: Date(),
                 completionCount: task.completionCount,
@@ -787,7 +810,6 @@ final class TaskViewModel: ObservableObject {
             startDate: task.startDate,
             endDate: task.endDate,
             status: newStatus,
-            notes: task.notes,
             createdAt: task.createdAt,
             lastModifiedAt: Date(),
             completionCount: task.completionCount,
@@ -864,7 +886,7 @@ final class TaskViewModel: ObservableObject {
         do {
             // Create SMS response record
             let smsResponse = SMSResponse(
-                id: UUID().uuidString,
+                id: IDGenerator.messageID(twilioSID: nil),
                 taskId: task.id,
                 profileId: task.profileId,
                 userId: task.userId,
@@ -898,7 +920,6 @@ final class TaskViewModel: ObservableObject {
                 startDate: task.startDate,
                 endDate: task.endDate,
                 status: task.status,
-                notes: task.notes,
                 createdAt: task.createdAt,
                 lastModifiedAt: Date(),
                 completionCount: task.completionCount + 1,
@@ -1023,8 +1044,7 @@ final class TaskViewModel: ObservableObject {
         startDate = task.startDate
         endDate = task.endDate
         isActive = task.status == .active
-        notes = task.notes
-        
+
         // Set selected profile (would need profile lookup)
         // selectedProfile = findProfile(by: task.profileId)
     }

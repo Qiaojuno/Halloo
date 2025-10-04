@@ -198,15 +198,15 @@ class MockNotificationService: NotificationServiceProtocol {
     }
     
     func getNotificationAnalytics(from startDate: Date, to endDate: Date) async -> NotificationAnalytics {
-        // Mock analytics data
+        // Mock analytics - return empty/zero data
         return NotificationAnalytics(
-            totalScheduled: 10,
-            totalDelivered: 8,
-            totalOpened: 5,
-            totalDismissed: 3,
-            deliveryRate: 0.8,
-            openRate: 0.625,
-            dismissalRate: 0.375,
+            totalScheduled: 0,
+            totalDelivered: 0,
+            totalOpened: 0,
+            totalDismissed: 0,
+            deliveryRate: 0.0,
+            openRate: 0.0,
+            dismissalRate: 0.0,
             categoryBreakdown: [:],
             timeOfDayBreakdown: [:],
             generatedAt: Date()
@@ -265,11 +265,7 @@ class MockNotificationService: NotificationServiceProtocol {
     func getDeliveredNotifications() async -> [UNNotification] {
         return []  // Return empty array for mock
     }
-    
-    func updateBadgeCount(_ count: Int) async {
-        print("🔔 Mock badge count updated: \(count)")
-    }
-    
+
     func incrementBadgeCount() async {
         print("🔔 Mock badge count incremented")
     }

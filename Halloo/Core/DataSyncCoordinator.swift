@@ -301,14 +301,12 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
         self.databaseService = databaseService
         self.notificationCoordinator = notificationCoordinator
         self.errorCoordinator = errorCoordinator
-        
-        // Configure continuous family coordination synchronization
-        setupAutoSync()
-        
-        // Enable cross-device family notification handling
-        setupNotificationHandling()
-        
-        // Restore previous family coordination state
+
+        // NOTE: All setup moved to initialize() to avoid blocking app startup
+        // setupAutoSync() will be called from initialize() after app launches
+        // setupNotificationHandling() will be called from initialize() after app launches
+
+        // Restore previous family coordination state (safe to do in init)
         loadLastSyncDate()
     }
     
@@ -317,9 +315,16 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     }
     
     // MARK: - Initialization
-    
+
     /// Initializes the data sync coordinator for family coordination
     func initialize() async {
+        // Start auto-sync timer now that app is running
+        setupAutoSync()
+
+        // Enable cross-device family notification handling
+        setupNotificationHandling()
+
+        // Perform initial sync
         await syncAllData()
     }
     

@@ -50,6 +50,10 @@ struct DashboardView: View {
     /// IMPORTANT: This drives task filtering - only selected profile's tasks show
     @State private var selectedProfileIndex: Int = 0
     
+    /// Controls upcoming section expand/collapse state
+    /// When collapsed: shows summary message, when expanded: shows task list or confirmation
+    @State private var isUpcomingExpanded: Bool = false
+    
     
     /// Controls TaskCreationView conditional presentation with profile preselection
     /// Triggered by + button in "Create Custom Habit" section
@@ -68,6 +72,9 @@ struct DashboardView: View {
     /// Tracks all gallery events for today's completed tasks for navigation
     @State private var todaysGalleryEvents: [GalleryHistoryEvent] = []
     
+    /// Tracks the current top card in the card stack to show its task details
+    @State private var currentTopCardEvent: GalleryHistoryEvent?
+    
     /// Current index in the gallery events array
     @State private var currentGalleryIndex: Int = 0
     
@@ -77,19 +84,11 @@ struct DashboardView: View {
     var body: some View {
         Group {
             if showingDirectOnboarding {
-                // TODO: Replace with new profile creation view
-                VStack {
-                    Text("Add Family Member")
-                        .font(.title)
-                    Text("Coming Soon - Will build new profile creation flow")
-                        .foregroundColor(.secondary)
-                        .padding()
-                    
-                    Button("Cancel") {
-                        showingDirectOnboarding = false
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
+                // ✅ NEW: Simplified single-card profile creation
+                SimplifiedProfileCreationView(onDismiss: {
+                    showingDirectOnboarding = false
+                })
+                .environmentObject(profileViewModel)
                 .transition(.identity)
                 .animation(nil, value: showingDirectOnboarding)
             } else if showingTaskCreation {
@@ -135,12 +134,20 @@ struct DashboardView: View {
                         
                         // ✅ COMPLETED: Interactive card stack showing task evidence
                         // Replaces detailed view system with swipeable playing card stack
-                        cardStackSection
+                        VStack(spacing: 4) {
+                            cardStackSection
+                            
+                            // 📋 TASK DETAILS: Shows current top card's habit information
+                            // Only visible when there are cards in the stack
+                            if currentTopCardEvent != nil {
+                                taskDetailsSection
+                            }
+                        }
                         
                         // ⏰ UPCOMING: Today's pending tasks for selected profile only
                         // Shows tasks that still need to be completed today
                         upcomingSection
-                        
+
                         // Bottom padding to prevent content from hiding behind navigation
                         Spacer(minLength: 100)
                     }
@@ -149,25 +156,37 @@ struct DashboardView: View {
                 .background(Color(hex: "f9f9f9")) // Light gray app background
                 
                 /*
-                 * 🧭 FLOATING BOTTOM ELEMENTS:
-                 * Both navigation pill and create habit button on same level
-                 * Button centered, pill on right - no conflict
+                 * 🧭 FLOATING BOTTOM ELEMENTS WITH GRADIENT:
+                 * Black gradient fade behind navigation elements for better visibility
                  */
                 VStack {
                     Spacer()
                     
-                    ZStack {
-                        // Create Custom Habit Button - centered, aligned to nav pill bottom edge
-                        HStack {
+                    // Black gradient at bottom
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color.black.opacity(0),
+                            Color.black.opacity(0.15),
+                            Color.black.opacity(0.25)
+                        ]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 120) // Gradient height
+                    .allowsHitTesting(false) // Don't block touches
+                    .overlay(
+                        // Navigation pill and + button on same level with spacer between
+                        VStack {
                             Spacer()
-                            createHabitButton
-                            Spacer()
+                            HStack {
+                                bottomTabNavigation // Left-aligned
+                                Spacer() // Space between them
+                                createHabitButton // Right-aligned
+                            }
+                            .padding(.horizontal, 30) // More side padding from screen edges
+                            .padding(.bottom, 4) // Even closer to bottom of screen
                         }
-                        .padding(.bottom, -28) // Very close to bottom edge - button well below nav pill
-                        
-                        // Navigation pill - bottom right
-                        bottomTabNavigation
-                    }
+                    )
                 }
             }
         }
@@ -350,6 +369,21 @@ struct DashboardView: View {
     
     
     // MARK: - ⏰ Upcoming Section
+    
+    /// Dynamic header text based on task count and selected profile
+    private func getUpcomingHeaderText() -> String {
+        let taskCount = viewModel.todaysUpcomingTasks.count
+        
+        if taskCount == 0 {
+            return "All steps completed today!"
+        } else {
+            // Get selected profile name
+            let profileName = selectedProfile?.name ?? "Profile"
+            let momentText = taskCount == 1 ? "moment" : "moments"
+            return "\(profileName) has \(taskCount) \(momentText) left!"
+        }
+    }
+    
     /**
      * TODAY'S PENDING TASKS: What needs to be done today
      * 
@@ -366,6 +400,58 @@ struct DashboardView: View {
      * - Each row shows profile photo, name, task title, and time
      * - Time format: 12-hour ("9AM", "2PM") for easy reading
      */
+    // MARK: - 👥 Profiles Section
+    private var profilesSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Section Title
+            Text("PROFILES")
+                .font(.system(size: 15, weight: .bold))
+                .tracking(-1)
+                .foregroundColor(Color(hex: "9f9f9f"))
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
+
+            // Profile circles
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(Array(viewModel.profiles.enumerated()), id: \.element.id) { index, profile in
+                        Button(action: {
+                            selectedProfileIndex = index
+                        }) {
+                            ProfileImageView.custom(
+                                profile: profile,
+                                profileSlot: index,
+                                isSelected: selectedProfile?.id == profile.id,
+                                size: 44
+                            )
+                        }
+                    }
+
+                    // Add Profile Button
+                    Button(action: {
+                        showingDirectOnboarding = true
+                    }) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.gray.opacity(0.1))
+                                .frame(width: 44, height: 44)
+
+                            Image(systemName: "plus")
+                                .font(.system(size: 20, weight: .medium))
+                                .foregroundColor(Color(hex: "5f5f5f"))
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+            }
+        }
+        .background(Color.white)
+        .cornerRadius(10)
+        .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
+    }
+
     private var upcomingSection: some View {
         /*
          * TASK LIST: Profile-filtered, today-only pending tasks
@@ -373,52 +459,72 @@ struct DashboardView: View {
          * White card background for clarity and grouping
          */
         VStack(spacing: 0) {
-                // Section title inside card
-                HStack {
-                    Text("UPCOMING")
-                        .font(.system(size: 15, weight: .bold))
-                        .tracking(-1)
-                        .foregroundColor(Color(hex: "9f9f9f"))
-                        .padding(.horizontal, 12)
-                        .padding(.top, 12)
-                        .padding(.bottom, 8)
-                    Spacer()
-                }
-                
-                // Task rows or Complete message
-                if viewModel.todaysUpcomingTasks.isEmpty {
-                    // Show Complete message when no tasks
+                // Collapsible header with dynamic message and chevron
+                Button(action: {
+                    isUpcomingExpanded.toggle()
+                }) {
                     HStack {
-                        Spacer()
-                        Text("Empty!")
+                        Text(getUpcomingHeaderText())
                             .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.blue)
-                        Spacer()
-                    }
-                    .padding(.vertical, 20)
-                } else {
-                    ForEach(Array(viewModel.todaysUpcomingTasks.enumerated()), id: \.offset) { index, task in
-                        TaskRowView(
-                            task: task.task,
-                            profile: task.profile,
-                            showViewButton: false, // No view button for pending tasks
-                            onViewButtonTapped: nil
-                        )
-                        .padding(.horizontal, 12)  // Match card title alignment
-                        .padding(.vertical, 12)
-                        .background(Color.white) // Each task has white background
+                            .foregroundColor(.black)
+                            .multilineTextAlignment(.leading)
                         
-                        if index < viewModel.todaysUpcomingTasks.count - 1 {
-                            Divider()
-                                .overlay(Color(hex: "f8f3f3"))
-                                .padding(.horizontal, 24)  // Shorter lines aligned with tasks
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(Color(hex: "9f9f9f"))
+                            .rotationEffect(.degrees(isUpcomingExpanded ? 90 : 0))
+                            .animation(.easeInOut(duration: 0.25), value: isUpcomingExpanded)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 16)
+                }
+                .buttonStyle(PlainButtonStyle()) // Removes default button styling
+                
+                // Expandable content with animation
+                VStack(spacing: 0) {
+                    if viewModel.todaysUpcomingTasks.isEmpty {
+                        // Show confirmation message when no tasks and expanded
+                        HStack {
+                            Spacer()
+                            Text("All tasks completed today!")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(Color(hex: "9f9f9f"))
+                            Spacer()
+                        }
+                        .padding(.vertical, 20)
+                    } else {
+                        // Show task list when tasks exist and expanded
+                        VStack(spacing: 0) {
+                            ForEach(Array(viewModel.todaysUpcomingTasks.enumerated()), id: \.offset) { index, task in
+                                TaskRowView(
+                                    task: task.task,
+                                    profile: task.profile,
+                                    showViewButton: false, // No view button for pending tasks
+                                    onViewButtonTapped: nil
+                                )
+                                .padding(.horizontal, 12)  // Match card title alignment
+                                .padding(.vertical, 12)
+                                .background(Color.white) // Each task has white background
+                                
+                                if index < viewModel.todaysUpcomingTasks.count - 1 {
+                                    Divider()
+                                        .overlay(Color(hex: "f8f3f3"))
+                                        .padding(.horizontal, 24)  // Shorter lines aligned with tasks
+                                }
+                            }
                         }
                     }
                 }
+                .opacity(isUpcomingExpanded ? 1.0 : 0.0)
+                .frame(maxHeight: isUpcomingExpanded ? .infinity : 0)
+                .clipped()
         }
         .background(Color.white) // Card background
         .cornerRadius(12) // Consistent rounded corners
         .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
+        .animation(.easeInOut(duration: 0.6), value: isUpcomingExpanded)
     }
     
     // MARK: - ✅ Card Stack Section
@@ -441,9 +547,96 @@ struct DashboardView: View {
      */
     private var cardStackSection: some View {
         // CARD STACK - Full width for proper centering
-        CardStackView(events: completedTaskEvents)
+        CardStackView(events: completedTaskEvents, currentTopEvent: $currentTopCardEvent)
             .padding(.vertical, 20)
             .frame(maxWidth: .infinity) // Allow full width for internal centering
+    }
+    
+    // MARK: - 📋 Task Details Section
+    /**
+     * CURRENT CARD DETAILS: Shows the habit information for the top card
+     * 
+     * PURPOSE: Displays the task details corresponding to the currently 
+     * visible card in the stack, providing context about what the card represents
+     * 
+     * UI BEHAVIOR:
+     * - Shows profile image, name, task title, and scheduled time
+     * - Uses standard TaskRowView without view button
+     * - Only appears when there are cards in the stack
+     * - Updates dynamically as user swipes through cards
+     */
+    private var taskDetailsSection: some View {
+        VStack(spacing: 0) {
+            // Find the matching completed task for the current top card event
+            if let topEvent = currentTopCardEvent {
+                if let matchingTask = viewModel.todaysCompletedTasks.first(where: { task in
+                    task.response?.id == topEvent.id ||
+                    (task.response != nil && GalleryHistoryEvent.fromSMSResponse(task.response!).id == topEvent.id)
+                }) {
+                    // Real task data
+                    TaskRowView(
+                        task: matchingTask.task,
+                        profile: matchingTask.profile,
+                        showViewButton: false,
+                        onViewButtonTapped: nil
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 12)
+                } else {
+                    // Mock data fallback - show basic info without full Task creation
+                    HStack(spacing: 16) {
+                        // Connected profile circle - find profile by profileId
+                        let profile = profileViewModel.profiles.first(where: { $0.id == topEvent.profileId })
+                        
+                        AsyncImage(url: URL(string: profile?.photoURL ?? "")) { image in
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } placeholder: {
+                            ZStack {
+                                // Use profile-specific color based on profile ID hash
+                                let colorIndex = abs((profile?.id ?? topEvent.profileId).hashValue) % 4
+                                let profileColor = [Color(hex: "B9E3FF"), Color.red, Color.green, Color.purple][colorIndex]
+                                profileColor.opacity(0.2)
+                                Text(String((profile?.name ?? "G").prefix(1)).uppercased())
+                                    .font(.custom("Inter", size: 14))
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.black)
+                            }
+                        }
+                        .frame(width: 32, height: 32)
+                        .clipShape(Circle())
+                        
+                        // Task details
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(profile?.name ?? "Grandma Smith")
+                                .font(.system(size: 16, weight: .heavy))
+                                .foregroundColor(.black)
+                            
+                            HStack(spacing: 4) {
+                                Text(topEvent.title)
+                                    .font(.custom("Inter", size: 13))
+                                    .fontWeight(.regular)
+                                    .foregroundColor(.black)
+                                
+                                Text("•")
+                                    .font(.custom("Inter", size: 14))
+                                    .foregroundColor(Color(hex: "9f9f9f"))
+                                
+                                Text("10AM")
+                                    .font(.custom("Inter", size: 13))
+                                    .fontWeight(.regular)
+                                    .foregroundColor(.black)
+                            }
+                        }
+                        
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 12)
+                }
+            }
+        }
     }
     
     // MARK: - Card Stack Data Conversion
@@ -586,7 +779,7 @@ struct DashboardView: View {
     
     // MARK: - 🧭 Bottom Tab Navigation
     private var bottomTabNavigation: some View {
-        FloatingPillNavigation(selectedTab: $selectedTab)
+        FloatingPillNavigation(selectedTab: $selectedTab, onTabTapped: nil)
     }
     
     // MARK: - ✨ Unified Create Button
@@ -609,11 +802,11 @@ struct DashboardView: View {
             ZStack {
                 Circle()
                     .fill(Color.black)
-                    .frame(width: 45, height: 45) // Same size as profile circles
+                    .frame(width: 57, height: 57) // Reduced by 4 points from 61
                     .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2)
                 
                 Image(systemName: "plus")
-                    .font(.system(size: 20, weight: .medium))
+                    .font(.system(size: 26, weight: .medium))
                     .foregroundColor(.white)
             }
         }
@@ -930,190 +1123,245 @@ struct PreviewProfilesSection: View {
 
 
 struct PreviewUpcomingSection: View {
-    // Move static data outside body to avoid Canvas issues
-    private let mockTasks = [
-        ("👴🏻", "Grandpa Joe", "example task • Create Now!", "9AM"),
-        ("👴🏻", "Grandpa Joe", "Walk in Garden", "2PM"),
-        ("👴🏻", "Grandpa Joe", "Call Family", "6PM")
-    ]
-    
+    @EnvironmentObject var dashboardViewModel: DashboardViewModel
+
+    var upcomingTasks: [DashboardTask] {
+        dashboardViewModel.todaysTasks.filter { !$0.isCompleted }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // White Card with title inside
-            VStack(alignment: .leading, spacing: 0) {
-                // Section Title inside the card
-                HStack {
-                    Text("UPCOMING")
-                        .font(.system(size: 15, weight: .bold))
-                        .tracking(-1)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 12)
-                        .padding(.bottom, 8)
-                    Spacer()
-                }
-                
-                // Tasks list - seamless white
-                ForEach(Array(mockTasks.enumerated()), id: \.offset) { index, task in
-                    HStack(spacing: 16) {
-                        // Profile Image - 32pt diameter
-                        ZStack {
-                            // Consistent color mapping - Grandpa Joe always blue
-                            let backgroundColor: Color = {
-                                switch task.1 {
-                                case "Grandpa Joe": return Color(hex: "B9E3FF")
-                                case "Grandma Maria": return Color.red  
-                                case "Uncle Robert": return Color.green
-                                default: return Color.purple
+            cardContent
+        }
+        .padding(.horizontal, 23)
+    }
+
+    private var cardContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            tasksList
+        }
+        .background(Color.white)
+        .cornerRadius(10)
+        .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
+    }
+
+    private var header: some View {
+        HStack {
+            Text("UPCOMING")
+                .font(.system(size: 15, weight: .bold))
+                .tracking(-1)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var tasksList: some View {
+        if upcomingTasks.isEmpty {
+            VStack(spacing: 8) {
+                Text("No upcoming tasks")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.gray)
+                Text("Create a habit to get started")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray.opacity(0.8))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 32)
+        } else {
+            ForEach(Array(upcomingTasks.enumerated()), id: \.element.id) { index, task in
+                HStack(spacing: 16) {
+                            // Profile Image - 32pt diameter
+                            Circle()
+                                .fill(Color.gray.opacity(0.2))
+                                .frame(width: 32, height: 32)
+                                .overlay(
+                                    Image(systemName: "person.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.gray)
+                                )
+
+                            // Task Details
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(task.profile.name)
+                                    .font(.system(size: 16, weight: .heavy))
+                                    .tracking(-0.25)
+                                    .foregroundColor(.black)
+
+                                HStack(spacing: 4) {
+                                    Text(task.task.title)
+                                        .font(.custom("Inter", size: 13))
+                                        .fontWeight(.regular)
+                                        .foregroundColor(.black)
+
+                                    Text("•")
+                                        .font(.custom("Inter", size: 14))
+                                        .foregroundColor(.secondary)
+
+                                    Text(formatTime(task.scheduledTime))
+                                        .font(.custom("Inter", size: 13))
+                                        .fontWeight(.regular)
+                                        .foregroundColor(.black)
                                 }
-                            }()
-                            backgroundColor.opacity(0.2)
-                            Text(task.0)
-                                .font(.system(size: 16))
-                        }
-                        .frame(width: 32, height: 32)
-                        .clipShape(Circle())
-                        
-                        // Task Details
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(task.1)
-                                .font(.system(size: 16, weight: .heavy))  // System font with heavy weight
-                                .tracking(-0.25)  // Half of original -0.5 offset
-                                .foregroundColor(.black)
-                            
-                            HStack(spacing: 4) {
-                                Text(task.2)
-                                    .font(.custom("Inter", size: 13))  // Smaller for hierarchy
-                                    .fontWeight(.regular)
-                                    .foregroundColor(.black)  // Changed from secondary to black
-                                
-                                Text("•")
-                                    .font(.custom("Inter", size: 14))
-                                    .foregroundColor(.secondary)  // Keep bullet gray
-                                
-                                Text(task.3)
-                                    .font(.custom("Inter", size: 13))  // Smaller for hierarchy
-                                    .fontWeight(.regular)
-                                    .foregroundColor(.black)  // Changed from secondary to black
+                            }
+
+                            Spacer()
+
+                            // Checkmark Button
+                            Button(action: {
+                                // Mark task as complete
+                            }) {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .frame(width: 28, height: 28)
+                                    .background(Color.black)
+                                    .clipShape(Circle())
                             }
                         }
-                        
-                        Spacer()
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(Color.white)
+
+                        if index < upcomingTasks.count - 1 {
+                            Divider()
+                                .background(Color.gray.opacity(0.2))
+                                .padding(.horizontal, 32)
+                        }
                     }
-                    .padding(.horizontal, 20)  // Increased by 4px more for better left spacing
-                    .padding(.vertical, 12)
-                    .background(Color.white) // Each task has white background
-                    
-                    if index < mockTasks.count - 1 {
-                        Divider()
-                            .background(Color.gray.opacity(0.2))
-                            .padding(.horizontal, 32)  // Even shorter lines
-                    }
-                }
-            }
-            .background(Color.white) // Overall white card background
-            .cornerRadius(10)
-            .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
         }
+    }
+
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "ha"
+        return formatter.string(from: date)
     }
 }
 
 struct PreviewCompletedTasksSection: View {
-    // Move static data outside body to avoid Canvas issues
-    private let mockCompletedTasks = [
-        ("👴🏻", "Grandpa Joe", "example task • Create Now!", "8AM"),
-        ("👴🏻", "Grandpa Joe", "Breakfast", "8:30AM")
-    ]
-    
+    @EnvironmentObject var dashboardViewModel: DashboardViewModel
+
+    var completedTasks: [DashboardTask] {
+        dashboardViewModel.todaysTasks.filter { $0.isCompleted }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            // Tasks Card with title inside
-            VStack(spacing: 0) {
-                // Section Title - moved inside card
-                HStack {
-                    Text("COMPLETED TASKS")
-                        .font(.system(size: 15, weight: .bold))
-                        .tracking(-1)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 12)
-                        .padding(.bottom, 8)
-                    Spacer()
-                }
-                
-                ForEach(Array(mockCompletedTasks.enumerated()), id: \.offset) { index, task in
-                    HStack(spacing: 16) {
-                        // Profile Image - 32pt diameter
-                        ZStack {
-                            // Consistent color mapping - Grandpa Joe always blue
-                            let backgroundColor: Color = {
-                                switch task.1 {
-                                case "Grandpa Joe": return Color(hex: "B9E3FF")
-                                case "Grandma Maria": return Color.red  
-                                case "Uncle Robert": return Color.green
-                                default: return Color.purple
-                                }
-                            }()
-                            backgroundColor.opacity(0.2)
-                            Text(task.0)
-                                .font(.system(size: 16))
-                        }
+            cardContent
+        }
+        .padding(.horizontal, 23)
+    }
+
+    private var cardContent: some View {
+        VStack(spacing: 0) {
+            header
+            tasksList
+        }
+        .background(Color.white)
+        .cornerRadius(10)
+        .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
+    }
+
+    private var header: some View {
+        HStack {
+            Text("COMPLETED TASKS")
+                .font(.system(size: 15, weight: .bold))
+                .tracking(-1)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var tasksList: some View {
+        if completedTasks.isEmpty {
+            // Empty state
+            VStack(spacing: 8) {
+                Text("No completed tasks yet")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.gray)
+                Text("Complete a task to see it here")
+                    .font(.system(size: 12))
+                    .foregroundColor(.gray.opacity(0.8))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 32)
+        } else {
+            ForEach(Array(completedTasks.enumerated()), id: \.element.id) { index, task in
+                HStack(spacing: 16) {
+                    // Profile Image - 32pt diameter
+                    Circle()
+                        .fill(Color.gray.opacity(0.2))
                         .frame(width: 32, height: 32)
-                        .clipShape(Circle())
-                        
-                        // Task Details
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(task.1)
-                                .font(.system(size: 16, weight: .heavy))  // System font with heavy weight
-                                .tracking(-0.25)  // Half of original -0.5 offset
-                                .foregroundColor(.black)
-                            
-                            HStack(spacing: 4) {
-                                Text(task.2)
-                                    .font(.custom("Inter", size: 13))  // Smaller for hierarchy
-                                    .fontWeight(.regular)
-                                    .foregroundColor(.black)  // Changed from .secondary
-                                
-                                Text("•")
-                                    .font(.custom("Inter", size: 14))
-                                    .foregroundColor(.secondary)  // Match Upcoming
-                                
-                                Text(task.3)
-                                    .font(.custom("Inter", size: 13))  // Smaller for hierarchy
-                                    .fontWeight(.regular)
-                                    .foregroundColor(.black)  // Changed from .secondary
-                            }
-                        }
-                        
-                        Spacer()
-                        
-                        // View Button - solid blue with black text
-                        Button(action: {}) {
-                            Text("view")
+                        .overlay(
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(.gray)
+                        )
+
+                    // Task Details
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(task.profile.name)
+                            .font(.system(size: 16, weight: .heavy))
+                            .tracking(-0.25)
+                            .foregroundColor(.black)
+
+                        HStack(spacing: 4) {
+                            Text(task.task.title)
                                 .font(.custom("Inter", size: 13))
-                                .fontWeight(.medium)
-                                .foregroundColor(.black)  // Changed to black
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Color(hex: "B9E3FF"))  // Solid blue from Figma
-                                .cornerRadius(8)
+                                .fontWeight(.regular)
+                                .foregroundColor(.black)
+
+                            Text("•")
+                                .font(.custom("Inter", size: 14))
+                                .foregroundColor(.secondary)
+
+                            Text(formatTime(task.scheduledTime))
+                                .font(.custom("Inter", size: 13))
+                                .fontWeight(.regular)
+                                .foregroundColor(.black)
                         }
-                        .frame(height: 28)
                     }
-                    .padding(.horizontal, 20)  // Increased by 4px more for better left spacing
-                    .padding(.vertical, 12)
-                    
-                    if index < mockCompletedTasks.count - 1 {
-                        Divider()
-                            .padding(.horizontal, 32)  // Even shorter lines
-                            .background(Color.gray.opacity(0.2))
+
+                    Spacer()
+
+                    // View Button
+                    Button(action: {}) {
+                        Text("view")
+                            .font(.custom("Inter", size: 13))
+                            .fontWeight(.medium)
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color(hex: "B9E3FF"))
+                            .cornerRadius(8)
                     }
+                    .frame(height: 28)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+
+                if index < completedTasks.count - 1 {
+                    Divider()
+                        .padding(.horizontal, 32)
+                        .background(Color.gray.opacity(0.2))
                 }
             }
-            .background(Color.white)
-            .cornerRadius(10)
-            .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
         }
+    }
+
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "ha"
+        return formatter.string(from: date)
     }
 }
 
@@ -1159,29 +1407,36 @@ struct PreviewBottomNavigation: View {
  * UNIVERSAL FLOATING PILL NAVIGATION: Shared navigation component
  * 
  * DESIGN RATIONALE:
- * - Custom design instead of native TabView for exact Figma match
- * - Pill shape (94×43.19px) positioned precisely (10px right, 20px bottom)
- * - Only 2 visible tabs (home/gallery) for MVP simplicity
+ * - Custom design to match original Remi app layout
+ * - Pill shape (140×47px) positioned LEFT-aligned (20px left, 35px bottom)  
+ * - Three tabs (home/habits/gallery) restored from original design
+ * - UPDATED 2025-09-29: Unified component with optional dismiss callback
+ * - UPDATED 2025-09-29: Changed from right to left alignment per Remi app photo
  * 
  * BUSINESS LOGIC:
- * - Home tab: Active state (black) - shows Dashboard screen
- * - Gallery tab: Inactive state (gray) - shows Gallery screen
+ * - Home tab: Dashboard screen
+ * - Habits tab: Habits management screen  
+ * - Gallery tab: Photo gallery screen
  * - Navigation logic handled by parent ContentView via TabView
+ * - Optional dismiss callback for detail views (GalleryDetailView)
  * 
  * VISUAL STATES:
  * - Active tab: Black icons/text
  * - Inactive tab: Gray icons/text
  * - White background with light gray border for definition
  * 
- * USAGE: Can be used in any view that needs tab navigation
+ * USAGE: 
+ * - Regular views: FloatingPillNavigation(selectedTab: $tab, onTabTapped: nil)
+ * - Detail views: FloatingPillNavigation(selectedTab: $tab, onTabTapped: { dismiss() })
  */
 struct FloatingPillNavigation: View {
     @Binding var selectedTab: Int
+    let onTabTapped: (() -> Void)? // Optional dismiss callback
     
     // iPhone 13 base dimensions for scaling (390x844)
     private let iPhone13Width: CGFloat = 390
-    private let basePillWidth: CGFloat = 160 // Reduced size for three tabs
-    private let basePillHeight: CGFloat = 43
+    private let basePillWidth: CGFloat = 140 // Shorter horizontally (was 160)
+    private let basePillHeight: CGFloat = 48 // Taller navigation bar (was 38)
     
     // Calculate responsive dimensions based on screen width
     private var pillWidth: CGFloat {
@@ -1206,8 +1461,6 @@ struct FloatingPillNavigation: View {
     
     var body: some View {
         HStack {
-            Spacer() // Pushes navigation pill to right side
-            
             /*
              * PILL-SHAPED NAVIGATION CONTAINER:
              * Responsive dimensions based on iPhone 13 proportions (43px height on 390px width)
@@ -1232,7 +1485,16 @@ struct FloatingPillNavigation: View {
                         .foregroundColor(selectedTab == 0 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
                 }
                 .onTapGesture {
-                    selectedTab = 0 // Switch to Home tab
+                    if let onTabTapped = onTabTapped {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            selectedTab = 0
+                            onTabTapped()
+                        }
+                    } else {
+                        selectedTab = 0 // Switch to Home tab
+                    }
                 }
                 
                 /*
@@ -1253,7 +1515,16 @@ struct FloatingPillNavigation: View {
                         .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
                 }
                 .onTapGesture {
-                    selectedTab = 1 // Switch to Habits tab
+                    if let onTabTapped = onTabTapped {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            selectedTab = 1
+                            onTabTapped()
+                        }
+                    } else {
+                        selectedTab = 1 // Switch to Habits tab
+                    }
                 }
                 
                 /*
@@ -1274,7 +1545,16 @@ struct FloatingPillNavigation: View {
                         .foregroundColor(selectedTab == 2 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
                 }
                 .onTapGesture {
-                    selectedTab = 2 // Switch to Gallery tab
+                    if let onTabTapped = onTabTapped {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            selectedTab = 2
+                            onTabTapped()
+                        }
+                    } else {
+                        selectedTab = 2 // Switch to Gallery tab
+                    }
                 }
             }
             /*
@@ -1293,8 +1573,7 @@ struct FloatingPillNavigation: View {
                 RoundedRectangle(cornerRadius: pillHeight / 2) // Same corner radius for stroke
                     .stroke(Color(hex: "e0e0e0"), lineWidth: 1)
             )
-            .padding(.trailing, 10) // 10px from right edge (Figma spec)
-            .padding(.bottom, 20)   // 20px from bottom edge (Figma spec)
+            // No padding - positioned by parent HStack
         }
     }
 }

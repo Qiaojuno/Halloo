@@ -11,7 +11,13 @@ struct User: Codable, Identifiable, Hashable {
     let subscriptionStatus: SubscriptionStatus
     let trialEndDate: Date?
     let quizAnswers: [String: String]?
-    
+
+    // Auto-calculated fields (updated by DatabaseService)
+    var profileCount: Int
+    var taskCount: Int
+    var updatedAt: Date
+    var lastSyncTimestamp: Date?
+
     init(
         id: String,
         email: String,
@@ -21,7 +27,11 @@ struct User: Codable, Identifiable, Hashable {
         isOnboardingComplete: Bool = false,
         subscriptionStatus: SubscriptionStatus = .trial,
         trialEndDate: Date? = nil,
-        quizAnswers: [String: String]? = nil
+        quizAnswers: [String: String]? = nil,
+        profileCount: Int = 0,
+        taskCount: Int = 0,
+        updatedAt: Date = Date(),
+        lastSyncTimestamp: Date? = nil
     ) {
         self.id = id
         self.email = email
@@ -32,6 +42,10 @@ struct User: Codable, Identifiable, Hashable {
         self.subscriptionStatus = subscriptionStatus
         self.trialEndDate = trialEndDate
         self.quizAnswers = quizAnswers
+        self.profileCount = profileCount
+        self.taskCount = taskCount
+        self.updatedAt = updatedAt
+        self.lastSyncTimestamp = lastSyncTimestamp
     }
 }
 

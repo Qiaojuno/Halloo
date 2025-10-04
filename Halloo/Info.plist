@@ -11,9 +11,7 @@
 			<string>Google Sign-In</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.512820993812-oef85o30roeeer1me5hjklcstf
-</string>
-				<string>uvenq5</string>
+				<string>com.googleusercontent.apps.512820993812-oef85o30roeeer1me5hjklcstfuvenq5</string>
 			</array>
 		</dict>
 	</array>

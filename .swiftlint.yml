@@ -1,0 +1,141 @@
+# SwiftLint Configuration for Halloo
+# Schema compliance rules to enforce FIREBASE-SCHEMA-CONTRACT.md
+
+# Exclude build directories and dependencies
+excluded:
+  - build
+  - Pods
+  - .build
+  - HallooTests
+  - HallooUITests
+
+# Opt-in rules (in addition to default rules)
+opt_in_rules:
+  - empty_count
+  - empty_string
+  - explicit_init
+  - redundant_nil_coalescing
+  - unused_import
+  - vertical_whitespace_closing_braces
+  - vertical_whitespace_opening_braces
+
+# Rule configurations
+line_length: 120
+file_length:
+  warning: 500
+  error: 1000
+
+identifier_name:
+  min_length:
+    warning: 2
+  max_length:
+    warning: 50
+  excluded:
+    - id
+    - db
+    - to
+    - q1
+    - q2
+    - q3
+
+type_name:
+  min_length: 3
+  max_length: 50
+
+# Custom rules for Firebase schema compliance
+custom_rules:
+
+  # Rule 1: Profile IDs must use phone numbers, not UUIDs
+  no_uuid_for_profile_ids:
+    name: "Profile IDs must use phone number as ID"
+    regex: 'ElderlyProfile\([^)]*id:\s*UUID\(\)\.uuidString'
+    message: "❌ Schema Violation: Use phone number as profile ID, not UUID. Use IDGenerator.profileID(phoneNumber:)"
+    severity: error
+
+  # Rule 2: Task IDs should use UUID (via IDGenerator)
+  use_id_generator_for_tasks:
+    name: "Use IDGenerator for task IDs"
+    regex: 'Task\([^)]*id:\s*UUID\(\)\.uuidString'
+    message: "⚠️ Use IDGenerator.habitID() instead of UUID().uuidString for consistency"
+    severity: warning
+
+  # Rule 3: Prevent flat Firestore collection paths
+  no_flat_profiles_collection:
+    name: "Use nested subcollections for profiles"
+    regex: 'db\.collection\("profiles"\)'
+    message: "❌ Schema Violation: Use nested path: db.collection(\"users/\\(uid)/profiles\") instead of flat \"profiles\" collection"
+    severity: error
+
+  no_flat_tasks_collection:
+    name: "Use nested subcollections for tasks"
+    regex: 'db\.collection\("tasks"\)'
+    message: "⚠️ TODO #1: Migrate to nested path: db.collection(\"users/\\(uid)/profiles/\\(pid)/habits\")"
+    severity: warning
+
+  no_flat_responses_collection:
+    name: "Use nested subcollections for responses"
+    regex: 'db\.collection\("responses"\)'
+    message: "⚠️ TODO #1: Migrate to nested path: db.collection(\"users/\\(uid)/profiles/\\(pid)/messages\")"
+    severity: warning
+
+  # Rule 4: Require IDGenerator usage
+  require_id_generator_import:
+    name: "Use IDGenerator for all ID generation"
+    regex: '(?<!IDGenerator\.)habitID\(\)|(?<!IDGenerator\.)messageID\('
+    message: "⚠️ Use IDGenerator.habitID() or IDGenerator.messageID() instead of direct UUID generation"
+    severity: warning
+
+  # Rule 5: Ensure phone numbers are normalized
+  phone_normalization_required:
+    name: "Phone numbers must be normalized to E.164"
+    regex: 'phoneNumber:\s*"[^+]'
+    message: "⚠️ Phone numbers should be in E.164 format (+15551234567). Use .normalizedE164()"
+    severity: warning
+
+  # Rule 6: User model must have all 13 fields
+  user_model_complete:
+    name: "User model must include all required fields"
+    regex: 'struct User:[^}]*?(?!profileCount)(?!taskCount)(?!updatedAt)(?!lastSyncTimestamp)'
+    message: "❌ User model missing required fields: profileCount, taskCount, updatedAt, lastSyncTimestamp"
+    severity: error
+
+  # Rule 7: Prevent manual Firestore dictionary building for User
+  no_manual_user_firestore_dict:
+    name: "Use createUserDocument() helper for user creation"
+    regex: 'let userData:\s*\[String:\s*Any\]\s*=\s*\[\s*"id":\s*(?!.*createUserDocument)'
+    message: "❌ Use createUserDocument(user) helper instead of manual dictionary building"
+    severity: error
+
+  # Rule 8: Enforce async/await for Firebase operations
+  require_async_await_firebase:
+    name: "Use async/await for Firebase operations"
+    regex: '\.addDocument\(data:|\.setData\((?!.*await)'
+    message: "⚠️ Use async/await (try await) for Firestore operations"
+    severity: warning
+
+  # Rule 9: Prevent force unwrapping in production code
+  no_force_unwrap:
+    name: "Avoid force unwrapping (use guard/if let)"
+    regex: '!\s*(?!\/\/)'
+    message: "⚠️ Avoid force unwrapping. Use guard let, if let, or ?? instead"
+    severity: warning
+    excluded: ".*Tests\\.swift"
+
+  # Rule 10: Encourage proper error handling
+  require_error_handling:
+    name: "Use proper error handling (throw, try/catch)"
+    regex: 'try!\s+'
+    message: "❌ Never use try! in production. Use do-catch or propagate with throws"
+    severity: error
+    excluded: ".*Tests\\.swift"
+
+# Disable some rules that conflict with schema architecture
+disabled_rules:
+  - todo  # We have intentional TODOs in schema contract
+  - trailing_comma  # Allow flexible formatting
+  - cyclomatic_complexity  # Some Firebase operations are naturally complex
+  - function_body_length  # Firebase CRUD operations can be long
+  - type_body_length  # Services have many operations
+
+# Reporter type (xcode, json, csv, checkstyle, junit, html, emoji, sonarqube)
+reporter: "xcode"

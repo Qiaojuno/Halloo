@@ -61,10 +61,33 @@ struct GalleryView: View {
             }
             .background(Color(hex: "f9f9f9")) // Light gray app background
             
-            // Floating navigation - true overlay that doesn't affect layout
+            // Floating navigation with black gradient
             VStack {
                 Spacer()
-                FloatingPillNavigation(selectedTab: $selectedTab)
+                
+                // Black gradient at bottom
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.black.opacity(0),
+                        Color.black.opacity(0.15),
+                        Color.black.opacity(0.25)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 120) // Gradient height
+                .allowsHitTesting(false) // Don't block touches
+                .overlay(
+                    VStack {
+                        Spacer()
+                        HStack {
+                            FloatingPillNavigation(selectedTab: $selectedTab, onTabTapped: nil)
+                            Spacer() // Push navigation to left
+                        }
+                        .padding(.horizontal, 30) // More side padding from screen edges
+                        .padding(.bottom, 4) // Even closer to bottom of screen
+                    }
+                )
             }
         }
         .onAppear {

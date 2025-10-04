@@ -45,19 +45,11 @@ struct HabitsView: View {
     var body: some View {
         Group {
             if showingDirectOnboarding {
-                // TODO: Replace with new profile creation view
-                VStack {
-                    Text("Add Family Member")
-                        .font(.title)
-                    Text("Coming Soon - Will build new profile creation flow")
-                        .foregroundColor(.secondary)
-                        .padding()
-                    
-                    Button("Cancel") {
-                        showingDirectOnboarding = false
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
+                // ✅ NEW: Simplified single-card profile creation
+                SimplifiedProfileCreationView(onDismiss: {
+                    showingDirectOnboarding = false
+                })
+                .environmentObject(profileViewModel)
                 .transition(.identity)
                 .animation(nil, value: showingDirectOnboarding)
             } else if showingTaskCreation {
@@ -102,22 +94,34 @@ struct HabitsView: View {
                 }
                 .background(Color(hex: "f9f9f9")) // Light gray app background
                 
-                // Bottom elements
+                // Bottom elements with gradient
                 VStack {
                     Spacer()
                     
-                    ZStack {
-                        // Unified Create Button - centered, aligned to nav pill bottom edge
-                        HStack {
+                    // Black gradient at bottom
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color.black.opacity(0),
+                            Color.black.opacity(0.15),
+                            Color.black.opacity(0.25)
+                        ]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 120) // Gradient height
+                    .allowsHitTesting(false) // Don't block touches
+                    .overlay(
+                        VStack {
                             Spacer()
-                            unifiedCreateButton
-                            Spacer()
+                            // Navigation pill only - left-aligned, no + button
+                            HStack {
+                                bottomTabNavigation // Left-aligned
+                                Spacer() // Push navigation to left
+                            }
+                            .padding(.horizontal, 30) // More side padding from screen edges
+                            .padding(.bottom, 4) // Even closer to bottom of screen
                         }
-                        .padding(.bottom, -28) // Very close to bottom edge - button well below nav pill
-                        
-                        // Navigation pill - bottom right
-                        bottomTabNavigation
-                    }
+                    )
                 }
             }
         }
@@ -128,7 +132,7 @@ struct HabitsView: View {
     
     // MARK: - 🧭 Bottom Tab Navigation
     private var bottomTabNavigation: some View {
-        FloatingPillNavigation(selectedTab: $selectedTab)
+        FloatingPillNavigation(selectedTab: $selectedTab, onTabTapped: nil)
     }
     
     // MARK: - 🏠 Header Section
@@ -251,88 +255,16 @@ struct HabitsView: View {
     
     /// Filtered habits based on selected profile and days
     private var filteredHabits: [Task] {
-        return sampleHabits.filter { habit in
+        // Get all unique tasks from the ViewModel (today's tasks contain all active tasks)
+        let allTasks = viewModel.todaysTasks.map { $0.task }
+
+        return allTasks.filter { habit in
             // Check if habit is scheduled for any of the selected days
             return selectedDays.contains { dayIndex in
                 let weekday = Weekday.fromIndex(dayIndex)
                 return habit.frequency == .daily || habit.customDays.contains(weekday)
             }
         }
-    }
-    
-    /// Sample habits for development (TODO: Replace with real data)
-    private var sampleHabits: [Task] {
-        return [
-            Task(
-                id: "habit1",
-                userId: "demo-user",
-                profileId: selectedProfile?.id ?? "",
-                title: "Take Morning Medication",
-                description: "Daily pills after breakfast",
-                category: .medication,
-                frequency: .custom,
-                scheduledTime: Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date(),
-                deadlineMinutes: 30,
-                requiresPhoto: true,
-                requiresText: false,
-                customDays: [.monday, .wednesday, .friday],
-                startDate: Date(),
-                endDate: nil,
-                status: .active,
-                notes: "",
-                createdAt: Date(),
-                lastModifiedAt: Date(),
-                completionCount: 0,
-                lastCompletedAt: nil,
-                nextScheduledDate: Date()
-            ),
-            Task(
-                id: "habit2",
-                userId: "demo-user",
-                profileId: selectedProfile?.id ?? "",
-                title: "Evening Walk",
-                description: "30-minute walk around the neighborhood",
-                category: .exercise,
-                frequency: .daily,
-                scheduledTime: Calendar.current.date(bySettingHour: 18, minute: 0, second: 0, of: Date()) ?? Date(),
-                deadlineMinutes: 60,
-                requiresPhoto: true,
-                requiresText: false,
-                customDays: [],
-                startDate: Date(),
-                endDate: nil,
-                status: .active,
-                notes: "",
-                createdAt: Date(),
-                lastModifiedAt: Date(),
-                completionCount: 0,
-                lastCompletedAt: nil,
-                nextScheduledDate: Date()
-            ),
-            Task(
-                id: "habit3",
-                userId: "demo-user",
-                profileId: selectedProfile?.id ?? "",
-                title: "Water Plants",
-                description: "Water the garden plants",
-                category: .other,
-                frequency: .custom,
-                scheduledTime: Calendar.current.date(bySettingHour: 10, minute: 30, second: 0, of: Date()) ?? Date(),
-                deadlineMinutes: 15,
-                requiresPhoto: false,
-                requiresText: true,
-                customDays: [.monday, .thursday],
-                startDate: Date(),
-                endDate: nil,
-                status: .active,
-                notes: "",
-                createdAt: Date(),
-                lastModifiedAt: Date(),
-                completionCount: 0,
-                lastCompletedAt: nil,
-                nextScheduledDate: Date()
-            )
-        ]
     }
     
     // MARK: - Helper Methods
@@ -380,7 +312,7 @@ struct HabitsView: View {
             ZStack {
                 Circle()
                     .fill(Color.black)
-                    .frame(width: 45, height: 45) // Same size as profile circles
+                    .frame(width: 61, height: 61) // Updated to match user requirements
                     .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2)
                 
                 Image(systemName: "plus")

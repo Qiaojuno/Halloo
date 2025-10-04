@@ -7,6 +7,7 @@ struct CardStackView: View {
     
     // MARK: - Properties
     let events: [GalleryHistoryEvent]
+    @Binding var currentTopEvent: GalleryHistoryEvent?
     @State private var stackedEvents: [GalleryHistoryEvent] = []
     @State private var isDragging: Bool = false
     @State private var dragOffset: CGSize = .zero
@@ -25,7 +26,11 @@ struct CardStackView: View {
             }
         }
         .onAppear {
-            stackedEvents = createMockEvents()
+            stackedEvents = events
+            currentTopEvent = stackedEvents.first
+        }
+        .onChange(of: stackedEvents) { _ in
+            currentTopEvent = stackedEvents.first
         }
     }
     
@@ -55,18 +60,19 @@ struct CardStackView: View {
                     // Calculate current visual position after any reordering
                     let currentIndex = stackedEvents.firstIndex(where: { $0.id == event.id }) ?? originalIndex
                     
-                    cardView(for: event)
-                        .scaleEffect(currentIndex == 0 ? 1.0 : 0.95 - CGFloat(currentIndex) * 0.02)
+                    cardView(for: event, cardIndex: currentIndex)
+                        .scaleEffect(getCardScale(for: currentIndex))
                         .offset(
-                            x: currentIndex == 0 ? dragOffset.width : CGFloat(currentIndex % 2 == 0 ? -8 : 8),
-                            y: currentIndex == 0 ? dragOffset.height : CGFloat(-currentIndex * 4)
+                            x: currentIndex == 0 ? dragOffset.width : getCardXOffset(for: currentIndex),
+                            y: currentIndex == 0 ? dragOffset.height : getCardYOffset(for: currentIndex)
                         )
                         .rotationEffect(.degrees(
-                            currentIndex == 0 ? Double(dragOffset.width * 0.02) : Double(currentIndex % 2 == 0 ? -3 : 3)
+                            currentIndex == 0 ? Double(dragOffset.width * 0.02) : getCardRotation(for: currentIndex)
                         ))
                         .opacity(1.0)
                         .zIndex(currentIndex == 0 ? 100 : Double(10 - currentIndex))
-                        .animation(currentIndex == 0 && isDragging ? nil : .linear(duration: 0.3), value: stackedEvents.map(\.id))
+                        .animation(currentIndex == 0 && isDragging ? nil : .easeOut(duration: 0.35), value: dragOffset)
+                        .animation(currentIndex == 0 && isDragging ? nil : .linear(duration: 0.2), value: stackedEvents.map(\.id))
                 }
             }
         }
@@ -80,16 +86,15 @@ struct CardStackView: View {
                 isDragging = false
                 
                 if abs(value.translation.width) > swipeThreshold && stackedEvents.count > 1 {
-                    // Fast exit animation
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        dragOffset = CGSize(
-                            width: value.translation.width > 0 ? 800 : -800,
-                            height: 0
-                        )
-                    }
+                    // Smooth exit animation - continue from current position
+                    let targetX = value.translation.width > 0 ? 450 : -450
+                    dragOffset = CGSize(
+                        width: targetX,
+                        height: 0
+                    )
                     
-                    // Immediately reorder after very short delay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    // Reorder after animation completes
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                         // Move top card to back
                         let topCard = stackedEvents.removeFirst()
                         stackedEvents.append(topCard)
@@ -106,9 +111,49 @@ struct CardStackView: View {
             })
     }
     
-    private func cardView(for event: GalleryHistoryEvent) -> some View {
-        ZStack {
-            Color(red: 0.12, green: 0.12, blue: 0.12)
+    // MARK: - Card Positioning Helpers
+    
+    private func getCardScale(for index: Int) -> CGFloat {
+        switch index {
+        case 0: return 1.0      // Front card: full size
+        case 1, 2: return 0.95  // Cards 1&2: 95% size
+        default: return 0.50    // Cards 3+: 50% size
+        }
+    }
+    
+    private func getCardXOffset(for index: Int) -> CGFloat {
+        switch index {
+        case 1: return -8       // Card 1: left fan
+        case 2: return 8        // Card 2: right fan
+        default: return CGFloat(index % 2 == 0 ? -4 : 4)  // Cards 3+: minimal fan
+        }
+    }
+    
+    private func getCardYOffset(for index: Int) -> CGFloat {
+        switch index {
+        case 1, 2: return CGFloat(-index * 12)  // Cards 1&2: raised much higher
+        default: return CGFloat(-index * 2)     // Cards 3+: minimal offset
+        }
+    }
+    
+    private func getCardRotation(for index: Int) -> Double {
+        switch index {
+        case 1: return -5       // Card 1: left tilt
+        case 2: return 4        // Card 2: right tilt
+        default: return Double(index % 2 == 0 ? -2 : 2)  // Cards 3+: minimal tilt
+        }
+    }
+    
+    private func cardView(for event: GalleryHistoryEvent, cardIndex: Int) -> some View {
+        // Calculate progressive lightening for text cards only
+        let baseColor: Double = 0.12
+        let lighteningAmount = event.hasPhoto ? 0.0 : Double(cardIndex) * 0.05
+        let cardColor = Color(red: baseColor + lighteningAmount, 
+                             green: baseColor + lighteningAmount, 
+                             blue: baseColor + lighteningAmount)
+        
+        return ZStack {
+            cardColor
             
             VStack {
                 // Header
@@ -175,62 +220,10 @@ struct CardStackView: View {
         .frame(width: cardWidth, height: cardHeight)
         .cornerRadius(20)
     }
-    
-    private func createMockEvents() -> [GalleryHistoryEvent] {
-        return [
-            GalleryHistoryEvent(
-                userId: "mock-user",
-                profileId: "mock-profile-1",
-                eventType: .taskResponse,
-                eventData: .taskResponse(GalleryEventData.SMSResponseData(
-                    taskId: "1",
-                    textResponse: nil,
-                    photoData: Data("mock-photo".utf8),
-                    responseType: "photo",
-                    taskTitle: "Take Medication"
-                ))
-            ),
-            GalleryHistoryEvent(
-                userId: "mock-user",
-                profileId: "mock-profile-1", 
-                eventType: .taskResponse,
-                eventData: .taskResponse(GalleryEventData.SMSResponseData(
-                    taskId: "2",
-                    textResponse: "Done!",
-                    photoData: nil,
-                    responseType: "sms",
-                    taskTitle: "Call Doctor"
-                ))
-            ),
-            GalleryHistoryEvent(
-                userId: "mock-user",
-                profileId: "mock-profile-1",
-                eventType: .taskResponse,
-                eventData: .taskResponse(GalleryEventData.SMSResponseData(
-                    taskId: "3",
-                    textResponse: nil,
-                    photoData: Data("mock-photo".utf8),
-                    responseType: "photo",
-                    taskTitle: "Exercise"
-                ))
-            ),
-            GalleryHistoryEvent(
-                userId: "mock-user",
-                profileId: "mock-profile-1",
-                eventType: .taskResponse,
-                eventData: .taskResponse(GalleryEventData.SMSResponseData(
-                    taskId: "4",
-                    textResponse: "Completed",
-                    photoData: nil,
-                    responseType: "sms",
-                    taskTitle: "Drink Water"
-                ))
-            )
-        ]
-    }
 }
 
 #Preview {
-    CardStackView(events: [])
+    @State var topEvent: GalleryHistoryEvent? = nil
+    return CardStackView(events: [], currentTopEvent: .constant(nil))
         .padding()
 }

@@ -95,32 +95,18 @@ class MockSMSService: SMSServiceProtocol {
         to endDate: Date
     ) async throws -> SMSDeliveryReport {
         print("📱 Mock: Generating delivery report for profile \(profileId)")
-        
-        // Create sample delivery results for the report
-        let sampleResults = (1...10).map { index in
-            SMSDeliveryResult(
-                messageId: "mock-report-\(UUID().uuidString)",
-                profileId: profileId,
-                phoneNumber: "+1234567890",
-                status: .delivered,
-                sentAt: startDate.addingTimeInterval(TimeInterval(index * 3600)),
-                deliveredAt: startDate.addingTimeInterval(TimeInterval(index * 3600 + 30)),
-                errorMessage: nil,
-                cost: 0.0075,
-                segments: 1
-            )
-        }
-        
+
+        // Return empty report - no hardcoded sample data
         return SMSDeliveryReport(
             profileId: profileId,
             startDate: startDate,
             endDate: endDate,
-            totalSent: 10,
-            totalDelivered: 10,
+            totalSent: 0,
+            totalDelivered: 0,
             totalFailed: 0,
-            totalCost: 0.075,
-            averageDeliveryTime: 30.0, // 30 seconds
-            deliveryDetails: sampleResults
+            totalCost: 0.0,
+            averageDeliveryTime: 0.0,
+            deliveryDetails: []
         )
     }
     

@@ -60,8 +60,9 @@ struct TaskCreationView: View {
 struct CustomHabitCreationFlow: View {
     @ObservedObject var viewModel: TaskViewModel
     let onDismiss: () -> Void
-    
-    @State private var currentStep = 1
+
+    @State private var currentStep = 0 // Start at 0 for profile selection
+    @State private var selectedProfileForHabit: String? = nil
     @State private var habitName = ""
     @State private var selectedDays: Set<Int> = []
     @State private var selectedTimes: [Date] = []
@@ -69,32 +70,56 @@ struct CustomHabitCreationFlow: View {
     @State private var buttonWidth: CGFloat = 0 // Store button width from Step 1
     @State private var showingTimePicker = false
     @State private var tempSelectedTime = Date()
-    
+
     var body: some View {
-        if currentStep == 1 {
-            Step1_HabitForm(
-                habitName: $habitName,
-                selectedDays: $selectedDays,
-                selectedTimes: $selectedTimes,
-                showingTimePicker: $showingTimePicker,
-                tempSelectedTime: $tempSelectedTime,
-                onNext: { currentStep = 2 },
-                onDismiss: onDismiss,
-                onButtonWidthCapture: { width in
-                    buttonWidth = width
-                }
-            )
-        } else {
-            Step2_ConfirmationMethod(
-                habitName: habitName,
-                confirmationMethod: $confirmationMethod,
-                capturedButtonWidth: buttonWidth,
-                onBack: { currentStep = 1 },
-                onCreate: { createHabit() }
-            )
+        Group {
+            if currentStep == 0 {
+                // Profile Selection Step
+                ProfileSelectionStep(
+                    selectedProfile: $selectedProfileForHabit,
+                    onNext: {
+                        if let profileId = selectedProfileForHabit {
+                            viewModel.preselectProfile(profileId: profileId)
+                            currentStep = 1
+                        }
+                    },
+                    onDismiss: onDismiss
+                )
+                .environmentObject(viewModel)
+            } else if currentStep == 1 {
+                Step1_HabitForm(
+                    habitName: $habitName,
+                    selectedDays: $selectedDays,
+                    selectedTimes: $selectedTimes,
+                    showingTimePicker: $showingTimePicker,
+                    tempSelectedTime: $tempSelectedTime,
+                    onNext: { currentStep = 2 },
+                    onDismiss: onDismiss,
+                    onButtonWidthCapture: { width in
+                        buttonWidth = width
+                    }
+                )
+            } else {
+                Step2_ConfirmationMethod(
+                    habitName: habitName,
+                    confirmationMethod: $confirmationMethod,
+                    capturedButtonWidth: buttonWidth,
+                    onBack: { currentStep = 1 },
+                    onCreate: { createHabit() }
+                )
+            }
+        }
+        .alert("Habit Creation Error", isPresented: .constant(viewModel.errorMessage != nil)) {
+            Button("OK") {
+                viewModel.errorMessage = nil
+            }
+        } message: {
+            if let errorMessage = viewModel.errorMessage {
+                Text(errorMessage)
+            }
         }
     }
-    
+
     // MARK: - Step 1: Habit Form (COPIED FROM PROFILEVIEWS STRUCTURE)
 struct Step1_HabitForm: View {
     @Binding var habitName: String
@@ -138,24 +163,16 @@ struct Step1_HabitForm: View {
                         .foregroundColor(.black)
                     
                     Spacer()
-                    
-                    Button(action: {
-                        // Haptic feedback for navigation bar button
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        
-                        if !habitName.isEmpty && !selectedDays.isEmpty && !selectedTimes.isEmpty {
-                            onNext()
-                        }
-                    }) {
-                        HStack(spacing: 8) {
-                            Text("Next")
-                                .font(.system(size: 16, weight: .light))
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 14, weight: .medium))
-                        }
+
+                    // Invisible spacer to balance layout (Next button removed)
+                    HStack(spacing: 8) {
+                        Text("Next")
+                            .font(.system(size: 16, weight: .light))
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .medium))
                     }
-                    .foregroundColor(.gray)
-                    .disabled(habitName.isEmpty || selectedDays.isEmpty || selectedTimes.isEmpty)
+                    .foregroundColor(.clear)
+                    .disabled(true)
                 }
                 .frame(width: 347) // Match Step 2's exact effective width (393-46)
                 Spacer()
@@ -164,18 +181,12 @@ struct Step1_HabitForm: View {
             
             ScrollView {
                 VStack(spacing: 67) {
-                    // Main Title and Subtitle
+                    // Main Title
                     VStack(spacing: 4) {
                         Text("Create Custom Habit")
                             .font(.system(size: 34, weight: .medium))
                             .kerning(-1.0)
                             .foregroundColor(.black)
-                            .multilineTextAlignment(.center)
-                        
-                        Text("Let's Create Their First Habit")
-                            .font(.system(size: 14, weight: .light))
-                            .kerning(-0.3)
-                            .foregroundColor(.gray)
                             .multilineTextAlignment(.center)
                     }
                     .padding(.top, 67)
@@ -268,7 +279,7 @@ struct Step1_HabitForm: View {
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(.white)
                                 .frame(width: max(200, geometry.size.width - 46), height: 47) // Ensure minimum width of 200
-                                .background(habitName.isEmpty || selectedDays.isEmpty || selectedTimes.isEmpty ? Color(hex: "BFE6FF") : Color(hex: "28ADFF"))
+                                .background(habitName.isEmpty || selectedDays.isEmpty || selectedTimes.isEmpty ? Color.gray.opacity(0.3) : Color.black)
                                 .cornerRadius(15)
                         }
                         .disabled(habitName.isEmpty || selectedDays.isEmpty || selectedTimes.isEmpty)
@@ -529,7 +540,7 @@ struct Step2_ConfirmationMethod: View {
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity, minHeight: 47)
-                    .background(habitName.isEmpty || selectedDays.isEmpty || selectedTimes.isEmpty ? Color(hex: "BFE6FF") : Color(hex: "B9E3FF"))
+                    .background(habitName.isEmpty || selectedDays.isEmpty || selectedTimes.isEmpty ? Color.gray.opacity(0.3) : Color.black)
                     .cornerRadius(15)
             }
             .disabled(habitName.isEmpty || selectedDays.isEmpty || selectedTimes.isEmpty)
@@ -972,6 +983,166 @@ struct TaskCard: View {
 }
 
 // MARK: - Preview Support
+// MARK: - Profile Selection Step
+struct ProfileSelectionStep: View {
+    @Binding var selectedProfile: String?
+    let onNext: () -> Void
+    let onDismiss: () -> Void
+
+    @EnvironmentObject var viewModel: TaskViewModel
+    @Environment(\.container) private var container
+
+    var body: some View {
+        VStack(spacing: 0) {
+            topNav
+            mainContent
+            Spacer()
+        }
+        .background(backgroundGradient)
+    }
+
+    private var topNav: some View {
+        HStack {
+                Spacer()
+                HStack {
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        onDismiss()
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 14, weight: .medium))
+                            Text("Back")
+                                .font(.system(size: 16, weight: .light))
+                        }
+                    }
+                    .foregroundColor(.gray)
+
+                    Spacer()
+
+                    Text("Remi")
+                        .font(.system(size: 18, weight: .semibold))
+                        .tracking(-1.9)
+                        .foregroundColor(.black)
+
+                    Spacer()
+
+                    HStack(spacing: 8) {
+                        Text("Back")
+                            .font(.system(size: 16, weight: .light))
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .foregroundColor(.clear)
+                    .disabled(true)
+                }
+                .frame(width: 347)
+                Spacer()
+            }
+            .padding(.top, 8)
+    }
+
+    private var mainContent: some View {
+        ScrollView {
+            VStack(spacing: 40) {
+                titleSection
+                profileList
+            }
+        }
+    }
+
+    private var titleSection: some View {
+        VStack(spacing: 4) {
+            Text("Select Profile")
+                .font(.system(size: 34, weight: .medium))
+                .kerning(-1.0)
+                .foregroundColor(.black)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.top, 67)
+    }
+
+    private var profileList: some View {
+        VStack(spacing: 16) {
+            ForEach(viewModel.availableProfiles) { profile in
+                ProfileSelectionCard(
+                    profile: profile,
+                    isSelected: selectedProfile == profile.id,
+                    onTap: {
+                        selectedProfile = profile.id
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            onNext()
+                        }
+                    }
+                )
+            }
+        }
+        .padding(.horizontal, 23)
+    }
+
+    private var backgroundGradient: some View {
+        ZStack(alignment: .bottom) {
+            Color(hex: "f9f9f9")
+            LinearGradient(
+                gradient: Gradient(colors: [Color.clear, Color(hex: "B3B3B3")]),
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 451)
+            .offset(y: 225)
+        }
+        .ignoresSafeArea()
+    }
+}
+
+// MARK: - Profile Selection Card
+struct ProfileSelectionCard: View {
+    let profile: ElderlyProfile
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            onTap()
+        }) {
+            HStack(spacing: 16) {
+                // Profile Photo Circle
+                Circle()
+                    .fill(Color.gray.opacity(0.1))
+                    .frame(width: 60, height: 60)
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(.gray)
+                    )
+
+                // Profile Name
+                Text(profile.name)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(.black)
+
+                Spacer()
+
+                // Selection Indicator
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(.black)
+                }
+            }
+            .padding(20)
+            .background(Color.white)
+            .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(isSelected ? Color.black : Color.gray.opacity(0.3), lineWidth: isSelected ? 2 : 1)
+            )
+            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+        }
+    }
+}
+
 #if DEBUG
 struct TaskViews_Previews: PreviewProvider {
     static var previews: some View {

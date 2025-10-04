@@ -1,85 +1,59 @@
 import SwiftUI
 import Combine
 import SuperwallKit
+import Firebase
 
 struct ContentView: View {
     // MARK: - Environment
     @Environment(\.container) private var container
-    
+
     // MARK: - State Management
-    @StateObject private var onboardingViewModel: OnboardingViewModel
-    @StateObject private var profileViewModel: ProfileViewModel
-    @State private var isLoading = true
+    @State private var onboardingViewModel: OnboardingViewModel?
+    @State private var profileViewModel: ProfileViewModel?
+    @State private var dashboardViewModel: DashboardViewModel?
+    @State private var authService: FirebaseAuthenticationService?
     @State private var selectedTab = 0
-    
+
     // MARK: - Initialization
     init() {
-        // Initialize with placeholder - will be properly set in onAppear
-        _onboardingViewModel = StateObject(wrappedValue: OnboardingViewModel(
-            authService: MockAuthenticationService(),
-            databaseService: MockDatabaseService(),
-            errorCoordinator: ErrorCoordinator()
-        ))
-        
-        // Initialize ProfileViewModel with mock services for consistency
-        _profileViewModel = StateObject(wrappedValue: ProfileViewModel(
-            databaseService: MockDatabaseService(),
-            smsService: MockSMSService(),
-            authService: MockAuthenticationService(),
-            dataSyncCoordinator: DataSyncCoordinator(
-                databaseService: MockDatabaseService(),
-                notificationCoordinator: NotificationCoordinator(),
-                errorCoordinator: ErrorCoordinator()
-            ),
-            errorCoordinator: ErrorCoordinator()
-        ))
+        // ViewModels will be created in initializeViewModels to avoid crashes during init
     }
-    
+
     var body: some View {
-        Group {
-            if isLoading {
-                LoadingView()
-                    .onAppear {
-                        print("🔥 LoadingView appeared - isLoading = true")
-                        // Failsafe: If still loading after 2 seconds, force continue
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                            if isLoading {
-                                print("⚠️ Loading timeout - forcing app start")
-                                isLoading = false
-                            }
-                        }
-                    }
-            } else {
-                navigationContent
-                    .onAppear {
-                        print("🔥 navigationContent appeared - isLoading = false")
-                    }
+        navigationContent
+            .onAppear {
+                initializeViewModels()
             }
-        }
-        .onAppear {
-            initializeViewModels()
-            // SKIP LOGIN AND ONBOARDING: Automatically bypass authentication and quiz
-            if !onboardingViewModel.isComplete {
-                print("🚀 SKIPPING ONBOARDING: Bypassing login and quiz flow")
-                onboardingViewModel.skipToEnd()
+            .onChange(of: onboardingViewModel?.isComplete) { oldValue, newValue in
+                if let newValue = newValue {
+                    handleOnboardingCompletion(newValue)
+                }
             }
-        }
-        .onChange(of: onboardingViewModel.isComplete) { oldValue, newValue in
-            handleOnboardingCompletion(newValue)
-        }
     }
     
     // MARK: - Navigation Content
     @ViewBuilder
     private var navigationContent: some View {
-        // RESTORED: Proper app flow with onboarding check
-        if !onboardingViewModel.isComplete {
-            onboardingFlow
+        if let authService = authService, onboardingViewModel != nil {
+            if authService.isAuthenticated {
+                authenticatedContent
+                    .onAppear {
+                        print("✅ Showing authenticated content (dashboard)")
+                    }
+            } else {
+                LoginView(onAuthenticationSuccess: {
+                    // Auth state will be updated by the listener automatically
+                    // Just reload profiles when ready
+                    profileViewModel?.loadProfiles()
+                })
+                .environmentObject(onboardingViewModel!)
+                .onAppear {
+                    print("📱 Showing login screen")
+                }
+            }
         } else {
-            authenticatedContent
+            LoadingView()
         }
-        
-        // DEBUG: Firebase Test Button temporarily removed
     }
     
     @ViewBuilder
@@ -87,99 +61,71 @@ struct ContentView: View {
         mainAppFlow
     }
     
-    @ViewBuilder
-    private var onboardingFlow: some View {
-        switch onboardingViewModel.currentStep {
-        case .welcome:
-            WelcomeView()
-                .environmentObject(onboardingViewModel)
-                .transition(.identity) // No animation
-            
-        case .signUp:
-            // Show login screen with social buttons
-            LoginView()
-                .environmentObject(onboardingViewModel)
-                .transition(.identity) // No animation
-            
-        case .quiz:
-            QuizView()
-                .environmentObject(onboardingViewModel)
-                .transition(.identity) // No animation
-            
-        case .profileSetupConfirmation:
-            ProfileSetupConfirmationView()
-                .environmentObject(onboardingViewModel)
-                .transition(.identity) // No animation
-            
-        case .preferences:
-            // TODO: Replace with new profile creation view
-            VStack {
-                Text("Profile Creation")
-                    .font(.title)
-                Text("Coming Soon - Will build new profile creation flow")
-                    .foregroundColor(.secondary)
-                    .padding()
-                
-                Button("Skip for Now") {
-                    onboardingViewModel.nextStep()
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .transition(.identity) // No animation
-            
-        case .complete:
-            OnboardingCompleteView()
-                .environmentObject(onboardingViewModel)
-                .transition(.identity) // No animation
-        }
-    }
     
     // MARK: - Main App Flow
     private var mainAppFlow: some View {
         // Custom navigation without TabView to eliminate black box completely
         ZStack {
             Color(hex: "f9f9f9") // Consistent app background
-            
+
             // Conditional view switching based on selectedTab
-            if selectedTab == 0 {
-                // Dashboard Tab - Home screen
-                DashboardView(selectedTab: $selectedTab)
-                    .environmentObject(container.makeDashboardViewModel())
-                    .environmentObject(profileViewModel)
-            } else if selectedTab == 1 {
-                // Habits Tab - Habit management screen
-                HabitsView(selectedTab: $selectedTab)
-                    .environmentObject(container.makeDashboardViewModel()) // Reuse same ViewModel for data consistency
-                    .environmentObject(profileViewModel)
+            if let dashboardVM = dashboardViewModel, let profileVM = profileViewModel {
+                if selectedTab == 0 {
+                    // Dashboard Tab - Home screen
+                    DashboardView(selectedTab: $selectedTab)
+                        .environmentObject(dashboardVM)
+                        .environmentObject(profileVM)
+                } else if selectedTab == 1 {
+                    // Habits Tab - Habit management screen
+                    HabitsView(selectedTab: $selectedTab)
+                        .environmentObject(dashboardVM) // Share same instance for real-time data sync
+                        .environmentObject(profileVM)
+                } else {
+                    // Gallery Tab - Archive of completed habits with photos
+                    GalleryView(selectedTab: $selectedTab)
+                        .inject(container: container)
+                        .environmentObject(profileVM)
+                }
             } else {
-                // Gallery Tab - Archive of completed habits with photos
-                GalleryView(selectedTab: $selectedTab)
-                    .inject(container: container)
-                    .environmentObject(profileViewModel)
+                // Loading state while ViewModel is being created
+                LoadingView()
             }
         }
         // No longer need onAppear since we're not using TabView
     }
     
     // MARK: - Initialization Methods
+    @MainActor
     private func initializeViewModels() {
-        // ViewModels are initialized through Container dependency injection
-        print("🔥 initializeViewModels called - setting isLoading = false")
-        
-        // Debug: Check which services are being used
-        let authService = container.resolve(AuthenticationServiceProtocol.self)
-        let dbService = container.resolve(DatabaseServiceProtocol.self)
-        
-        print("🔥 Auth Service: \(type(of: authService))")
-        print("🔥 Database Service: \(type(of: dbService))")
-        
-        // Note: ViewModels will use their mock services initially
-        // This is fine since we're skipping authentication
-        
-        isLoading = false
-        print("🔥 isLoading is now: \(isLoading)")
+        print("🔥 initializeViewModels called - creating ViewModels")
+
+        // Create ViewModels using Container (all factory methods are @MainActor)
+        onboardingViewModel = container.makeOnboardingViewModel()
+        profileViewModel = container.makeProfileViewModel()
+        dashboardViewModel = container.makeDashboardViewModel()
+
+        // Store auth service reference (singleton)
+        authService = container.resolve(AuthenticationServiceProtocol.self) as? FirebaseAuthenticationService
+
+        print("✅ All ViewModels created successfully")
+
+        // Check if user is already authenticated on app launch
+        _Concurrency.Task {
+            // Small delay to ensure Firebase Auth is ready
+            try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+
+            await MainActor.run {
+                if authService?.isAuthenticated == true {
+                    print("✅ User already authenticated on app launch, going to dashboard")
+                    // Reload profiles now that user is authenticated
+                    profileViewModel?.loadProfiles()
+                } else {
+                    print("ℹ️ User not authenticated, showing login")
+                }
+            }
+        }
     }
-    
+
     // TEMPORARY: Safe TaskViewModel creation with detailed debugging
     private func safeTaskViewModel() -> TaskViewModel? {
         print("🔥 Attempting to create TaskViewModel...")
@@ -360,28 +306,27 @@ class AuthenticationViewModel: ObservableObject {
 // MARK: - Loading View
 struct LoadingView: View {
     @State private var isAnimating = false
-    
+
     var body: some View {
         VStack(spacing: 20) {
-            // App logo or icon
-            Image(systemName: "heart.circle.fill")
-                .font(.system(size: 60))
-                .foregroundColor(.blue)
-                .scaleEffect(isAnimating ? 1.1 : 1.0)
+            // Remi logo with animation
+            Text("Remi")
+                .font(.system(size: 60, weight: .medium))
+                .tracking(-3.0)
+                .foregroundColor(.black)
+                .scaleEffect(isAnimating ? 1.05 : 1.0)
                 .animation(
                     Animation.easeInOut(duration: 1.0).repeatForever(autoreverses: true),
                     value: isAnimating
                 )
-            
-            Text("Hallo")
-                .font(.largeTitle)
-                .fontWeight(.semibold)
-                .foregroundColor(.primary)
-            
-            Text("Caring for your loved ones")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            
+
+            Text("Make sure your loved one never misses another reminder")
+                .font(.system(size: 14, weight: .regular))
+                .foregroundColor(Color(hex: "7A7A7A"))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+                .tracking(-0.3)
+
             ProgressView()
                 .scaleEffect(1.2)
                 .padding(.top, 20)

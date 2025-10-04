@@ -15,7 +15,6 @@ struct ElderlyProfile: Codable, Identifiable, Hashable {
     let createdAt: Date
     var lastActiveAt: Date
     var confirmedAt: Date?
-    var lastCompletionDate: Date?
     
     
     init(
@@ -31,8 +30,7 @@ struct ElderlyProfile: Codable, Identifiable, Hashable {
         status: ProfileStatus = .pendingConfirmation,
         createdAt: Date = Date(),
         lastActiveAt: Date = Date(),
-        confirmedAt: Date? = nil,
-        lastCompletionDate: Date? = nil
+        confirmedAt: Date? = nil
     ) {
         self.id = id
         self.userId = userId
@@ -47,7 +45,6 @@ struct ElderlyProfile: Codable, Identifiable, Hashable {
         self.createdAt = createdAt
         self.lastActiveAt = lastActiveAt
         self.confirmedAt = confirmedAt
-        self.lastCompletionDate = lastCompletionDate
     }
 }
 
@@ -64,23 +61,11 @@ extension ElderlyProfile {
     var displayTimeZone: TimeZone {
         return TimeZone(identifier: timeZone) ?? TimeZone.current
     }
-    
-    var formattedPhoneNumber: String {
-        return phoneNumber.formattedPhoneNumber
-    }
-    
+
     var daysSinceCreated: Int {
         return Calendar.current.dateComponents([.day], from: createdAt, to: Date()).day ?? 0
     }
-    
-    var daysSinceLastActive: Int {
-        return Calendar.current.dateComponents([.day], from: lastActiveAt, to: Date()).day ?? 0
-    }
-    
-    var isRecentlyActive: Bool {
-        return daysSinceLastActive <= 7
-    }
-    
+
     mutating func markAsActive() {
         self.lastActiveAt = Date()
     }

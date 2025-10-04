@@ -149,25 +149,28 @@ final class OnboardingViewModel: ObservableObject {
     
     // MARK: - Elderly Care Assessment Properties
     
-    /// Current position in the elderly care needs assessment quiz
-    /// 
-    /// Tracks progress through personalized questions about:
-    /// - Family relationship to elderly members (parent, grandparent)
-    /// - Elderly person's technology comfort level for SMS communication
-    /// - Priority care areas (medication, exercise, social activities)
+
+    // MARK: - New Onboarding Flow Properties (Steps 4-6)
+
+    /// Selected moments that the family wants to capture
     ///
-    /// Used to provide contextual help and appropriate care recommendations.
-    @Published var currentQuestionIndex = 7  // TEMPORARY: Start at last question for faster paywall testing
-    
-    /// Array of family responses to elderly care assessment questions
-    /// 
-    /// Parallel array to quiz questions containing family's answers.
-    /// Combined with userAnswers dictionary for flexible access patterns.
-    /// Used for analytics and care pattern recommendations.
-    @Published var quizAnswers: [String] = []
-    
-    
-    
+    /// Stores the multi-select choices from Step 4 (Memory Vision)
+    /// Used to personalize the paywall preview and app experience
+    @Published var selectedMoments: Set<String> = []
+
+    /// The emotional value selected by the family
+    ///
+    /// Stores the selected emotional value from Step 5 (Emotional Hook)
+    /// Used for understanding family motivation and personalization
+    @Published var emotionalValue: String = ""
+
+    /// The selected subscription plan
+    ///
+    /// Stores the subscription plan choice from Step 6 (Paywall)
+    /// Options: "annual", "monthly", "family"
+    @Published var selectedSubscriptionPlan: String = "annual"
+
+
     // MARK: - Account Creation Validation Properties
     
     /// Validation error for email address field
@@ -206,29 +209,19 @@ final class OnboardingViewModel: ObservableObject {
     /// Combine cancellables for reactive onboarding form validation
     private var cancellables = Set<AnyCancellable>()
     
-    /// Elderly care assessment questions for family personalization
-    /// 
-    /// Static questions designed to understand:
-    /// - Family's relationship context with elderly members
-    /// - Elderly person's technology comfort and SMS preferences
-    /// - Priority care areas for focused reminder recommendations
-    ///
-    /// Used to customize onboarding experience and care suggestions.
-    private let quizQuestions = OnboardingQuiz.questions
-    
-    /// Total number of quiz questions for progress tracking
-    var totalQuestions: Int {
-        return quizQuestions.count
-    }
-    
     // MARK: - Onboarding Flow Validation Properties
     
     /// Whether family can proceed to the next onboarding step
-    /// 
+    ///
     /// Validates step-specific requirements:
     /// - .welcome: Always ready to proceed (introduction step)
     /// - .signUp: Requires valid account creation form completion
-    /// - .quiz: Requires completion of all elderly care assessment questions
+    /// - .step1WhoFor: Always ready after selection
+    /// - .step2Connection: Always ready after selection
+    /// - .step3NameRelationship: Always ready after name and relationship entered
+    /// - .step4MemoryVision: Requires selected moments
+    /// - .step5EmotionalHook: Requires emotional value selection
+    /// - .step6Paywall: Always can proceed after selecting plan
     /// - .preferences: Always ready (optional configuration step)
     /// - .complete: Cannot proceed further (terminal step)
     var canProceed: Bool {
@@ -237,8 +230,18 @@ final class OnboardingViewModel: ObservableObject {
             return true
         case .signUp:
             return isValidSignUpForm
-        case .quiz:
-            return currentQuestionIndex >= quizQuestions.count
+        case .step1WhoFor:
+            return true
+        case .step2Connection:
+            return true
+        case .step3NameRelationship:
+            return true
+        case .step4MemoryVision:
+            return !selectedMoments.isEmpty
+        case .step5EmotionalHook:
+            return !emotionalValue.isEmpty
+        case .step6Paywall:
+            return true // Always can proceed after selecting plan
         case .profileSetupConfirmation:
             return true
         case .preferences:
@@ -268,49 +271,6 @@ final class OnboardingViewModel: ObservableObject {
                password == confirmPassword
     }
     
-    /// Current elderly care assessment question for family personalization
-    /// 
-    /// Returns the question object for the current quiz position, or nil
-    /// if all questions have been completed. Used to display appropriate
-    /// elderly care context and answer options.
-    var currentQuestion: QuizQuestion? {
-        guard currentQuestionIndex < quizQuestions.count else { return nil }
-        var question = quizQuestions[currentQuestionIndex]
-        
-        // Generate dynamic content for age statistic break
-        if question.id == "age_statistic_break" {
-            question.question = generateAgeStatisticText()
-        }
-        return question
-    }
-    
-    /// Whether the quiz has been completed (all questions answered)
-    var isQuizComplete: Bool {
-        return currentQuestionIndex >= quizQuestions.count
-    }
-    
-    /// Generate age-specific statistic text based on previous age answer
-    private func generateAgeStatisticText() -> String {
-        // Find the age answer from userAnswers
-        let ageAnswer = userAnswers["loved_one_age"] ?? "seniors"
-        
-        // Map age ranges to appropriate text
-        let ageGroup: String
-        switch ageAnswer {
-        case "Under 65":
-            ageGroup = "Adults under 65"
-        case "65-74":
-            ageGroup = "Seniors 65-74"
-        case "75-84":
-            ageGroup = "Seniors 75-84"
-        case "85+":
-            ageGroup = "Seniors 85+"
-        default:
-            ageGroup = "Seniors"
-        }
-        
-        return "\(ageGroup) who receive text-based reminders are 2x more likely to stick to healthy routines compared to app-based reminders."
-    }
     
     /// Calculated progress percentage for onboarding workflow visualization
     /// 
@@ -390,12 +350,6 @@ final class OnboardingViewModel: ObservableObject {
                 self?.updateProgress()
             }
             .store(in: &cancellables)
-        
-        $currentQuestionIndex
-            .sink { [weak self] _ in
-                self?.updateProgress()
-            }
-            .store(in: &cancellables)
     }
     
     // MARK: - Onboarding Flow Navigation
@@ -417,7 +371,7 @@ final class OnboardingViewModel: ObservableObject {
     /// - Warning: Incomplete steps prevent progression to maintain data integrity
     func nextStep() {
         guard canProceed else { return }
-        
+
         switch currentStep {
         case .welcome:
             // Go to signup/login page
@@ -427,13 +381,24 @@ final class OnboardingViewModel: ObservableObject {
             // User should authenticate via LoginView before proceeding
             // nextStep will be called by LoginView after successful authentication
             print("🧪 nextStep: Waiting for user authentication in LoginView")
-        case .quiz:
-            if currentQuestionIndex >= quizQuestions.count {
-                currentStep = .profileSetupConfirmation
-                print("🧪 nextStep: Advanced from quiz to profile setup confirmation")
-            } else {
-                print("🧪 nextStep: Quiz not complete yet (index: \(currentQuestionIndex), total: \(quizQuestions.count))")
-            }
+        case .step1WhoFor:
+            currentStep = .step2Connection
+            print("🧪 nextStep: Advanced from step 1 to step 2 (Connection)")
+        case .step2Connection:
+            currentStep = .step3NameRelationship
+            print("🧪 nextStep: Advanced from step 2 to step 3 (Name & Relationship)")
+        case .step3NameRelationship:
+            currentStep = .step4MemoryVision
+            print("🧪 nextStep: Advanced from step 3 to step 4 (Memory Vision)")
+        case .step4MemoryVision:
+            currentStep = .step5EmotionalHook
+            print("🧪 nextStep: Advanced from step 4 to step 5 (Emotional Hook)")
+        case .step5EmotionalHook:
+            currentStep = .step6Paywall
+            print("🧪 nextStep: Advanced from step 5 to step 6 (Paywall)")
+        case .step6Paywall:
+            currentStep = .profileSetupConfirmation
+            print("🧪 nextStep: Advanced from step 6 to profile setup confirmation")
         case .profileSetupConfirmation:
             currentStep = .preferences
             print("🧪 nextStep: Advanced from profile setup confirmation to preferences")
@@ -445,22 +410,28 @@ final class OnboardingViewModel: ObservableObject {
             break
         }
     }
-    
-    
+
+
     func previousStep() {
         switch currentStep {
         case .welcome:
             break
         case .signUp:
             currentStep = .welcome
-        case .quiz:
-            if currentQuestionIndex > 0 {
-                currentQuestionIndex -= 1
-            } else {
-                currentStep = .signUp
-            }
+        case .step1WhoFor:
+            currentStep = .signUp
+        case .step2Connection:
+            currentStep = .step1WhoFor
+        case .step3NameRelationship:
+            currentStep = .step2Connection
+        case .step4MemoryVision:
+            currentStep = .step3NameRelationship
+        case .step5EmotionalHook:
+            currentStep = .step4MemoryVision
+        case .step6Paywall:
+            currentStep = .step5EmotionalHook
         case .profileSetupConfirmation:
-            currentStep = .quiz
+            currentStep = .step6Paywall
         case .preferences:
             currentStep = .profileSetupConfirmation
         case .complete:
@@ -473,122 +444,118 @@ final class OnboardingViewModel: ObservableObject {
         isComplete = true
     }
     
-    func skipToQuiz() {
-        currentStep = .quiz
-        print("✅ Authentication successful - proceeding to quiz")
-    }
-    
     /// Handle successful authentication and navigation logic
     func handleSuccessfulAuthentication(authResult: AuthResult) async {
+        print("🔐 handleSuccessfulAuthentication called for UID: \(authResult.uid)")
+
         do {
-            // Check if user needs onboarding
+            print("📊 Checking if user exists in database...")
+
+            // Add small delay to ensure Firestore is ready after auth
+            try? await _Concurrency.Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+
+            // Check if user exists in database
             let existingUser = try await databaseService.getUser(authResult.uid)
-            
-            if let user = existingUser, user.isOnboardingComplete {
-                // User already onboarded, skip to complete
+            print("✅ Database check completed. User found: \(existingUser != nil)")
+
+            if let user = existingUser {
+                print("👤 Existing user found. Onboarding complete: \(user.isOnboardingComplete)")
+
+                // Existing user - check if onboarding complete
+                if user.isOnboardingComplete {
+                    // Already completed onboarding
+                    print("✅ User already completed onboarding, navigating to dashboard")
+                    await MainActor.run {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            isComplete = true
+                        }
+                    }
+                } else {
+                    // Existing user but incomplete onboarding - skip for MVP
+                    print("📝 Marking incomplete onboarding as complete for MVP")
+                    let updatedUser = User(
+                        id: user.id,
+                        email: user.email,
+                        fullName: user.fullName,
+                        phoneNumber: user.phoneNumber,
+                        createdAt: user.createdAt,
+                        isOnboardingComplete: true, // ✅ Skip onboarding for MVP
+                        subscriptionStatus: user.subscriptionStatus,
+                        trialEndDate: user.trialEndDate,
+                        quizAnswers: user.quizAnswers,
+                        profileCount: user.profileCount,
+                        taskCount: user.taskCount,
+                        updatedAt: Date(),
+                        lastSyncTimestamp: user.lastSyncTimestamp
+                    )
+                    try? await databaseService.updateUser(updatedUser)
+                    print("✅ User updated with complete onboarding status")
+
+                    await MainActor.run {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            isComplete = true
+                        }
+                    }
+                }
+            } else {
+                // New user - create User record with onboarding already complete
+                print("🆕 New user detected, creating user document...")
+                let newUser = User(
+                    id: authResult.uid,
+                    email: authResult.email ?? "",
+                    fullName: authResult.displayName ?? "",
+                    phoneNumber: "",
+                    createdAt: Date(),
+                    isOnboardingComplete: true, // ✅ Skip onboarding for MVP
+                    subscriptionStatus: .trial,
+                    trialEndDate: Calendar.current.date(byAdding: .day, value: 7, to: Date()),
+                    quizAnswers: [:],
+                    profileCount: 0,
+                    taskCount: 0,
+                    updatedAt: Date(),
+                    lastSyncTimestamp: nil
+                )
+                try? await databaseService.createUser(newUser)
+                print("✅ New user document created")
+
                 await MainActor.run {
-                    // Disable animations during transition
                     var transaction = Transaction()
                     transaction.disablesAnimations = true
                     withTransaction(transaction) {
                         isComplete = true
                     }
                 }
-            } else {
-                // New user or incomplete onboarding, continue with quiz
-                await MainActor.run {
-                    // Disable animations during transition
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        currentStep = .quiz
-                    }
-                }
             }
+
+            print("🎉 handleSuccessfulAuthentication completed successfully")
         } catch {
+            print("❌ Error in handleSuccessfulAuthentication: \(error)")
+            print("❌ Error type: \(type(of: error))")
+            print("❌ Error description: \(error.localizedDescription)")
+
             await MainActor.run {
-                errorMessage = error.localizedDescription
+                errorMessage = "Failed to complete sign in: \(error.localizedDescription)"
                 errorCoordinator.handle(error, context: "Post-authentication user check")
             }
         }
     }
-    
-    // MARK: - Elderly Care Assessment Actions
-    
-    /// Records family's response to current elderly care assessment question
-    ///
-    /// This method captures family input about their elderly care context, storing
-    /// responses for personalized recommendations and care coordination setup.
-    /// Each answer helps customize the app experience for the family's specific
-    /// elderly care needs and technology comfort levels.
-    ///
-    /// ## Answer Processing:
-    /// 1. **Answer Storage**: Store response in both array and dictionary formats
-    /// 2. **Progress Tracking**: Advance to next question in assessment sequence
-    /// 3. **Personalization**: Use answers to inform care recommendations
-    /// 4. **Validation**: Ensure answer is recorded for current question context
-    ///
-    /// - Parameter answer: Family's selected response to elderly care assessment question
+
+    // MARK: - Profile Setup Actions
+
     /// Navigate to profile setup after quiz completion
     func proceedToProfileSetup() {
         // Move to preferences step (CreateProfileView)
         currentStep = .preferences
     }
-    
+
     /// Skip profile setup and go to main app
     func skipProfileSetup() {
         // Mark onboarding as complete and go to main app
         currentStep = .complete
-    }
-    
-    /// - Important: Answers inform SMS templates and care recommendation algorithms
-    /// - Note: Supports both array indexing and dictionary key-based access patterns
-    func answerQuestion(_ answer: String) {
-        print("🧪 answerQuestion called with: \(answer)")
-        guard let question = currentQuestion else { 
-            print("❌ No current question available")
-            return 
-        }
-        
-        print("🧪 Current question index: \(currentQuestionIndex), Total questions: \(quizQuestions.count)")
-        
-        // Store answer in indexed array for sequential access
-        if currentQuestionIndex < quizAnswers.count {
-            quizAnswers[currentQuestionIndex] = answer
-        } else {
-            quizAnswers.append(answer)
-        }
-        
-        // Store in user answers dictionary for easier thematic access
-        userAnswers[question.id] = answer
-        
-        // Always advance question index after answering
-        currentQuestionIndex += 1
-        print("🧪 Advanced question index to \(currentQuestionIndex)")
-        
-        // Check if quiz is complete
-        if currentQuestionIndex >= quizQuestions.count {
-            print("🧪 Quiz complete!")
-            
-            // Regular quiz completion - trigger paywall
-            print("🧪 Regular quiz complete! Triggering paywall...")
-            
-            // Trigger Superwall paywall BEFORE profile creation
-            Superwall.shared.register(placement: "campaign_trigger")
-            
-            // DO NOT call nextStep() - wait for paywall completion
-            print("🧪 Paywall triggered - waiting for completion...")
-        } else {
-            print("🧪 More questions remaining")
-            // Force UI update for next question
-            DispatchQueue.main.async {
-                self.objectWillChange.send()
-            }
-        }
-    }
-    
-    func selectQuizOption(_ option: String) {
-        answerQuestion(option)
     }
     
     // MARK: - Family Account Creation & Trial Activation
@@ -634,14 +601,19 @@ final class OnboardingViewModel: ObservableObject {
                 createdAt: Date(),
                 isOnboardingComplete: false, // Requires quiz completion
                 subscriptionStatus: .trial, // Full feature access for evaluation
-                trialEndDate: Calendar.current.date(byAdding: .day, value: 3, to: Date())
+                trialEndDate: Calendar.current.date(byAdding: .day, value: 3, to: Date()),
+                quizAnswers: nil,
+                profileCount: 0,
+                taskCount: 0,
+                updatedAt: Date(),
+                lastSyncTimestamp: nil
             )
             
             // Persist family profile for elderly care coordination
             try await databaseService.createUser(user)
-            
-            // Advance to elderly care needs assessment
-            currentStep = .quiz
+
+            // MVP: Skip onboarding, go straight to dashboard
+            isComplete = true
             
         } catch {
             errorMessage = error.localizedDescription
@@ -691,7 +663,11 @@ final class OnboardingViewModel: ObservableObject {
                 isOnboardingComplete: true, // Unlocks elderly profile creation
                 subscriptionStatus: .trial, // Maintains trial access
                 trialEndDate: Calendar.current.date(byAdding: .day, value: 3, to: Date()),
-                quizAnswers: userAnswers // Permanent personalization data
+                quizAnswers: userAnswers, // Permanent personalization data
+                profileCount: 0,
+                taskCount: 0,
+                updatedAt: Date(),
+                lastSyncTimestamp: nil
             )
             
             // Persist family profile with elderly care context
@@ -712,12 +688,58 @@ final class OnboardingViewModel: ObservableObject {
     /// Proceed to profile creation after successful paywall interaction
     func proceedAfterPaywall() {
         print("🧪 Proceeding to profile creation after paywall")
-        
+
         // Show the thank you message first, then proceed to profile setup
         currentStep = .profileSetupConfirmation
         print("🎉 Paywall completed successfully - showing thank you confirmation")
     }
-    
+
+    /// Mark user's onboarding as complete in Firestore after profile creation
+    func markOnboardingComplete() async {
+        do {
+            guard let currentUser = authService.currentUser else {
+                print("❌ Cannot mark onboarding complete - no current user")
+                return
+            }
+
+            // Fetch current user data from database
+            guard let user = try await databaseService.getUser(currentUser.uid) else {
+                print("❌ Cannot mark onboarding complete - user not found in database")
+                return
+            }
+
+            // Update user with onboarding complete flag and quiz answers
+            let updatedUser = User(
+                id: user.id,
+                email: user.email,
+                fullName: user.fullName,
+                phoneNumber: user.phoneNumber,
+                createdAt: user.createdAt,
+                isOnboardingComplete: true,
+                subscriptionStatus: user.subscriptionStatus,
+                trialEndDate: user.trialEndDate,
+                quizAnswers: userAnswers.isEmpty ? user.quizAnswers : userAnswers,
+                profileCount: user.profileCount,
+                taskCount: user.taskCount,
+                updatedAt: Date(),
+                lastSyncTimestamp: user.lastSyncTimestamp
+            )
+
+            try await databaseService.updateUser(updatedUser)
+
+            await MainActor.run {
+                isComplete = true
+                print("✅ User onboarding marked as complete in Firestore")
+            }
+
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                errorCoordinator.handle(error, context: "Marking onboarding complete")
+            }
+        }
+    }
+
     // MARK: - Validation Methods
     private func validateEmail(_ email: String) {
         if email.isEmpty {
@@ -764,16 +786,52 @@ final class OnboardingViewModel: ObservableObject {
         
         do {
             let authResult = try await authService.signInWithApple()
-            
-            // Check if user needs onboarding
+
+            // Check if user exists in database
             let existingUser = try await databaseService.getUser(authResult.uid)
-            
-            if let user = existingUser, user.isOnboardingComplete {
-                // User already onboarded, skip to complete
-                isComplete = true
+
+            // MVP: Skip onboarding, go straight to dashboard
+            // Mark onboarding as complete for all authenticated users
+            isComplete = true
+
+            if let existingUser = existingUser {
+                // Existing user - update to mark onboarding complete if needed
+                if !existingUser.isOnboardingComplete {
+                    let updatedUser = User(
+                        id: existingUser.id,
+                        email: existingUser.email,
+                        fullName: existingUser.fullName,
+                        phoneNumber: existingUser.phoneNumber,
+                        createdAt: existingUser.createdAt,
+                        isOnboardingComplete: true,
+                        subscriptionStatus: existingUser.subscriptionStatus,
+                        trialEndDate: existingUser.trialEndDate,
+                        quizAnswers: existingUser.quizAnswers,
+                        profileCount: existingUser.profileCount,
+                        taskCount: existingUser.taskCount,
+                        updatedAt: Date(),
+                        lastSyncTimestamp: existingUser.lastSyncTimestamp
+                    )
+                    try? await databaseService.updateUser(updatedUser)
+                }
             } else {
-                // New user or incomplete onboarding, continue with quiz
-                currentStep = .quiz
+                // New user - create User record with onboarding already complete
+                let newUser = User(
+                    id: authResult.uid,
+                    email: authResult.email ?? "",
+                    fullName: authResult.displayName ?? "",
+                    phoneNumber: "",
+                    createdAt: Date(),
+                    isOnboardingComplete: true, // ✅ Skip onboarding for MVP
+                    subscriptionStatus: .trial,
+                    trialEndDate: Calendar.current.date(byAdding: .day, value: 7, to: Date()),
+                    quizAnswers: [:],
+                    profileCount: 0,
+                    taskCount: 0,
+                    updatedAt: Date(),
+                    lastSyncTimestamp: nil
+                )
+                try? await databaseService.createUser(newUser)
             }
             
         } catch {
@@ -787,19 +845,55 @@ final class OnboardingViewModel: ObservableObject {
     func signInWithGoogle() async {
         isLoading = true
         errorMessage = nil
-        
+
         do {
             let authResult = try await authService.signInWithGoogle()
-            
-            // Check if user needs onboarding
+
+            // Check if user exists in database
             let existingUser = try await databaseService.getUser(authResult.uid)
-            
-            if let user = existingUser, user.isOnboardingComplete {
-                // User already onboarded, skip to complete
-                isComplete = true
+
+            // MVP: Skip onboarding, go straight to dashboard
+            // Mark onboarding as complete for all authenticated users
+            isComplete = true
+
+            if let existingUser = existingUser {
+                // Existing user - update to mark onboarding complete if needed
+                if !existingUser.isOnboardingComplete {
+                    let updatedUser = User(
+                        id: existingUser.id,
+                        email: existingUser.email,
+                        fullName: existingUser.fullName,
+                        phoneNumber: existingUser.phoneNumber,
+                        createdAt: existingUser.createdAt,
+                        isOnboardingComplete: true,
+                        subscriptionStatus: existingUser.subscriptionStatus,
+                        trialEndDate: existingUser.trialEndDate,
+                        quizAnswers: existingUser.quizAnswers,
+                        profileCount: existingUser.profileCount,
+                        taskCount: existingUser.taskCount,
+                        updatedAt: Date(),
+                        lastSyncTimestamp: existingUser.lastSyncTimestamp
+                    )
+                    try? await databaseService.updateUser(updatedUser)
+                }
             } else {
-                // New user or incomplete onboarding, continue with quiz
-                currentStep = .quiz
+                // New user - create User record with onboarding already complete
+                let newUser = User(
+                    id: authResult.uid,
+                    email: authResult.email ?? "",
+                    fullName: authResult.displayName ?? "",
+                    phoneNumber: "",
+                    createdAt: Date(),
+                    isOnboardingComplete: true, // ✅ Skip onboarding for MVP
+                    subscriptionStatus: .trial,
+                    trialEndDate: Calendar.current.date(byAdding: .day, value: 7, to: Date()),
+                    quizAnswers: [:],
+                    profileCount: 0,
+                    taskCount: 0,
+                    updatedAt: Date(),
+                    lastSyncTimestamp: nil
+                )
+                try? await databaseService.createUser(newUser)
             }
             
         } catch {
@@ -815,19 +909,34 @@ final class OnboardingViewModel: ObservableObject {
 enum OnboardingStep: String, CaseIterable {
     case welcome = "welcome"
     case signUp = "signUp"
-    case quiz = "quiz"
+    case step1WhoFor = "step1WhoFor"
+    case step2Connection = "step2Connection"
+    case step3NameRelationship = "step3NameRelationship"
+    case step4MemoryVision = "step4MemoryVision"
+    case step5EmotionalHook = "step5EmotionalHook"
+    case step6Paywall = "step6Paywall"
     case profileSetupConfirmation = "profileSetupConfirmation"
     case preferences = "preferences"
     case complete = "complete"
-    
+
     var title: String {
         switch self {
         case .welcome:
-            return "Welcome to Hallo"
+            return "Welcome to Remi"
         case .signUp:
             return "Create Account"
-        case .quiz:
-            return "Quick Setup"
+        case .step1WhoFor:
+            return "Who For"
+        case .step2Connection:
+            return "Connection"
+        case .step3NameRelationship:
+            return "About Them"
+        case .step4MemoryVision:
+            return "Memory Vision"
+        case .step5EmotionalHook:
+            return "Emotional Hook"
+        case .step6Paywall:
+            return "Choose Your Plan"
         case .profileSetupConfirmation:
             return "Profile Setup"
         case .preferences:
@@ -836,15 +945,25 @@ enum OnboardingStep: String, CaseIterable {
             return "You're all set!"
         }
     }
-    
+
     var subtitle: String {
         switch self {
         case .welcome:
-            return "Help your elderly loved ones stay on track with their daily habits"
+            return "Create reminders for anyone you love"
         case .signUp:
             return "Create your account to get started"
-        case .quiz:
-            return "Help us personalize your experience"
+        case .step1WhoFor:
+            return "Who are you downloading Remi for?"
+        case .step2Connection:
+            return "How often do you think about them?"
+        case .step3NameRelationship:
+            return "Tell us about them"
+        case .step4MemoryVision:
+            return "Select moments to capture"
+        case .step5EmotionalHook:
+            return "What would these moments mean to you?"
+        case .step6Paywall:
+            return "Start your personalized memory plan"
         case .profileSetupConfirmation:
             return "Ready to create your first profile?"
         case .preferences:
@@ -869,93 +988,6 @@ struct QuizQuestion {
     }
 }
 
-struct OnboardingQuiz {
-    static let questions = [
-        QuizQuestion(
-            id: "care_recipient",
-            question: "Who are you setting reminders for?",
-            options: [
-                "My parent(s)",
-                "My grandparent(s)",
-                "Both",
-                "Other"
-            ],
-            helpText: nil
-        ),
-        QuizQuestion(
-            id: "loved_one_age",
-            question: "How old is your loved one?",
-            options: [
-                "Under 65",
-                "65-74",
-                "75-84",
-                "85+"
-            ],
-            helpText: nil
-        ),
-        QuizQuestion(
-            id: "age_statistic_break",
-            question: "", // Will be dynamically generated
-            options: [], // No options - this is a break screen
-            helpText: nil
-        ),
-        QuizQuestion(
-            id: "reminder_motivation",
-            question: "Why do you want to set reminders for them?",
-            options: [
-                "For their health",
-                "For their independence",
-                "To stay connected",
-                "To reduce stress for myself"
-            ],
-            helpText: nil
-        ),
-        QuizQuestion(
-            id: "primary_habit",
-            question: "What's the #1 habit you'd love them to build right now?",
-            options: [
-                "Taking medications on time",
-                "Drinking enough water",
-                "Staying active",
-                "Daily check-ins / routines",
-                "Other"
-            ],
-            helpText: nil
-        ),
-        QuizQuestion(
-            id: "personality_type",
-            question: "What's their personality type when it comes to reminders?",
-            options: [
-                "Gentle encouragement works best",
-                "Straightforward and to the point",
-                "Funny and lighthearted",
-                "Haven't figured that out yet"
-            ],
-            helpText: nil
-        ),
-        QuizQuestion(
-            id: "reminder_frequency",
-            question: "How often should we send reminders?",
-            options: [
-                "Daily",
-                "A few times a week",
-                "Weekly"
-            ],
-            helpText: nil
-        ),
-        QuizQuestion(
-            id: "primary_motivation",
-            question: "What matters most to you in helping them?",
-            options: [
-                "Their health",
-                "Their happiness",
-                "Their independence",
-                "Staying connected with them"
-            ],
-            helpText: nil
-        )
-    ]
-}
 
 // MARK: - Onboarding Errors
 enum OnboardingError: LocalizedError {

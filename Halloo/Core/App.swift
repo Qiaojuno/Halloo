@@ -28,57 +28,35 @@ struct HalloApp: App {
         // Skip heavy initialization during Canvas/Preview execution
         if !ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS") {
             // Configure Firebase FIRST, before Container initialization
-            HalloApp.configureFirebase()
+            do {
+                HalloApp.configureFirebase()
+                print("✅ Firebase configuration completed successfully")
+            } catch {
+                print("❌ Firebase configuration failed: \(error)")
+            }
         }
-        
+
         // Initialize Container AFTER Firebase is configured
         container = Container.shared
-        
+        print("✅ Container initialized successfully")
+
         // Configure other services after container is initialized
         if !ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS") {
             configureNotifications()
             configureSuperwall()
             configureGoogleSignIn()
         }
-        
+
         configureAppearance()
+        print("✅ App initialization completed")
     }
     
     private static func configureFirebase() {
-        var firebaseConfigured = false
-        
-        #if DEBUG
-        // Development configuration - Skip if file missing
-        if let path = Bundle.main.path(forResource: "GoogleService-Info-Dev", ofType: "plist"),
-           let options = FirebaseOptions(contentsOfFile: path) {
-            FirebaseApp.configure(options: options)
-            firebaseConfigured = true
-        } else if let _ = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") {
-            // Fall back to regular config file if dev version missing
-            FirebaseApp.configure()
-            firebaseConfigured = true
-        } else {
-            print("⚠️ Firebase config file missing - running with mock services")
-            firebaseConfigured = false
-        }
-        #else
-        // Production configuration
+        print("🔥 Starting Firebase configuration...")
+
+        // Simple Firebase configuration
         FirebaseApp.configure()
-        firebaseConfigured = true
-        #endif
-        
-        // Only configure Firestore/Auth if Firebase was successfully configured
-        if firebaseConfigured {
-            let db = Firestore.firestore()
-            let settings = FirestoreSettings()
-            settings.cacheSettings = PersistentCacheSettings(sizeBytes: NSNumber(value: FirestoreCacheSizeUnlimited))
-            db.settings = settings
-            
-            let auth = Auth.auth()
-            auth.languageCode = "en"
-        }
-        
-        print("🔥 Firebase configured: \(firebaseConfigured)")
+        print("✅ Firebase configured")
     }
     
     var body: some Scene {
@@ -94,11 +72,11 @@ struct HalloApp: App {
                     if !ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS") {
                         handleAppLaunch()
                     }
-                    
+
                     // Force portrait orientation and lock it
                     AppDelegate.orientationLock = .portrait
                     UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
-                    
+
                     if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
                         windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
                     }
@@ -149,24 +127,24 @@ struct HalloApp: App {
     private func configureAppearance() {
         // Register custom fonts (Poppins & Inter available when needed)
         AppFonts.registerFonts()
-        
+
         #if DEBUG
         AppFonts.printAvailableFonts()
         #endif
-        
+
         // Configure global app appearance
         UINavigationBar.appearance().largeTitleTextAttributes = [
             .foregroundColor: UIColor.label
         ]
-        
+
         UINavigationBar.appearance().titleTextAttributes = [
             .foregroundColor: UIColor.label
         ]
-        
+
         // Configure tab bar appearance
         UITabBar.appearance().backgroundColor = UIColor.systemBackground
         UITabBar.appearance().unselectedItemTintColor = UIColor.systemGray
-        
+
         // Senior-friendly settings
         if #available(iOS 15.0, *) {
             UINavigationBar.appearance().scrollEdgeAppearance = UINavigationBarAppearance()

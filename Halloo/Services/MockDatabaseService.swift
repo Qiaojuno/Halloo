@@ -10,330 +10,11 @@ class MockDatabaseService: DatabaseServiceProtocol {
     private var mockTasks: [String: Task] = [:]
     private var mockResponses: [String: SMSResponse] = [:]
     private var mockGalleryEvents: [String: GalleryHistoryEvent] = [:]
-    
-    private var hasInitialized = false
-    
+
     init() {
-        // Create mock data only once
-        if !hasInitialized {
-            createMockData()
-            hasInitialized = true
-        }
+        // No hardcoded data - all data must be created dynamically at runtime
     }
-    
-    private func createMockData() {
-        // Mock users
-        let mockUser = User(
-            id: "mock-user-id",
-            email: "test@example.com",
-            fullName: "Test User",
-            phoneNumber: "+1234567890",
-            createdAt: Date(),
-            isOnboardingComplete: true,
-            subscriptionStatus: .trial,
-            trialEndDate: Calendar.current.date(byAdding: .day, value: 3, to: Date())
-        )
-        mockUsers[mockUser.id] = mockUser
-        
-        // Mock elderly profiles
-        let mockProfile = ElderlyProfile(
-            id: "mock-profile-1",
-            userId: "mock-user-id",
-            name: "Grandma Smith",
-            phoneNumber: "+1987654321",
-            relationship: "Grandmother",
-            isEmergencyContact: false,
-            timeZone: TimeZone.current.identifier,
-            notes: "Takes blood pressure medication",
-            photoURL: nil,
-            status: .confirmed,
-            createdAt: Date(),
-            lastActiveAt: Date(),
-            confirmedAt: Date(),
-            lastCompletionDate: Calendar.current.date(byAdding: .day, value: -1, to: Date()) // Completed yesterday
-        )
-        mockProfiles[mockProfile.id] = mockProfile
-        
-        // Mock tasks
-        let now = Date()
-        
-        // 1. UPCOMING TASK - Evening medication (scheduled for later today)
-        let upcomingTask = Task(
-            id: "mock-task-upcoming",
-            userId: "mock-user-id",
-            profileId: "mock-profile-1",
-            title: "Take Evening Medication",
-            description: "Take blood pressure medication with dinner",
-            category: .health,
-            frequency: .daily,
-            scheduledTime: Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: now) ?? now,
-            startDate: Calendar.current.startOfDay(for: now),
-            nextScheduledDate: Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: now) ?? now
-        )
-        mockTasks[upcomingTask.id] = upcomingTask
-        
-        // 2. COMPLETED TASK - Exercise walk (completed earlier today)
-        var completedTask = Task(
-            id: "mock-task-completed",
-            userId: "mock-user-id",
-            profileId: "mock-profile-1",
-            title: "Daily Walk",
-            description: "Take a 15-minute walk around the neighborhood",
-            category: .exercise,
-            frequency: .daily,
-            scheduledTime: Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: now) ?? now,
-            startDate: Calendar.current.startOfDay(for: now),
-            nextScheduledDate: Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: now) ?? now
-        )
-        completedTask.lastCompletedAt = Calendar.current.date(byAdding: .hour, value: -2, to: now)
-        completedTask.completionCount = 1
-        mockTasks[completedTask.id] = completedTask
-        
-        // 3. ORIGINAL TASK - Keep for gallery responses
-        var originalTask = Task(
-            id: "mock-task-1",
-            userId: "mock-user-id",
-            profileId: "mock-profile-1",
-            title: "Check Blood Pressure",
-            description: "Use home blood pressure monitor",
-            category: .health,
-            frequency: .daily,
-            scheduledTime: Calendar.current.date(bySettingHour: 8, minute: 0, second: 0, of: now) ?? now,
-            startDate: Calendar.current.startOfDay(for: now),
-            nextScheduledDate: Calendar.current.date(bySettingHour: 8, minute: 0, second: 0, of: now) ?? now
-        )
-        originalTask.lastCompletedAt = Calendar.current.date(byAdding: .hour, value: -4, to: now)
-        originalTask.completionCount = 1
-        mockTasks[originalTask.id] = originalTask
-        
-        // Create simple mock data for gallery demonstration
-        createSimpleMockGalleryData()
-    }
-    
-    private func createSimpleMockGalleryData() {
-        let calendar = Calendar.current
-        let now = Date()
-        
-        // 1. ONE TEXT MOCKUP - Simple medication reminder response
-        let textResponse = SMSResponse(
-            id: "mock-text-response",
-            taskId: "mock-task-1",
-            profileId: "mock-profile-1",
-            userId: "mock-user-id",
-            textResponse: "Done! Feeling good today",
-            photoData: nil,
-            isCompleted: true,
-            receivedAt: calendar.date(byAdding: .hour, value: -2, to: now) ?? now,
-            responseType: .text,
-            isConfirmationResponse: false,
-            isPositiveConfirmation: true,
-            responseScore: 0.9,
-            processingNotes: nil
-        )
-        mockResponses[textResponse.id] = textResponse
-        
-        // 2. ONE PICTURE MOCKUP - Exercise photo response  
-        let photoResponse = SMSResponse(
-            id: "mock-photo-response",
-            taskId: "mock-task-1", 
-            profileId: "mock-profile-1",
-            userId: "mock-user-id",
-            textResponse: nil,
-            photoData: Data("mock-photo-data".utf8), // Placeholder photo data
-            isCompleted: true,
-            receivedAt: calendar.date(byAdding: .day, value: -1, to: now) ?? now,
-            responseType: .photo,
-            isConfirmationResponse: false,
-            isPositiveConfirmation: true,
-            responseScore: 1.0,
-            processingNotes: nil
-        )
-        mockResponses[photoResponse.id] = photoResponse
-        
-        // 3. ONE TASK MOCKUP - Combined text and photo response
-        let taskResponse = SMSResponse(
-            id: "mock-task-response",
-            taskId: "mock-task-1",
-            profileId: "mock-profile-1", 
-            userId: "mock-user-id",
-            textResponse: "Completed my walk around the block",
-            photoData: Data("mock-task-photo".utf8),
-            isCompleted: true,
-            receivedAt: calendar.date(byAdding: .hour, value: -4, to: now) ?? now,
-            responseType: .both,
-            isConfirmationResponse: false,
-            isPositiveConfirmation: true,
-            responseScore: 1.0,
-            processingNotes: nil
-        )
-        mockResponses[taskResponse.id] = taskResponse
-        
-        // 4. Convert responses to gallery events
-        // NOTE: Modified task IDs to avoid duplicates while keeping gallery content
-        
-        // Text event - no taskId, just a general message
-        let textEvent = GalleryHistoryEvent.fromSMSResponse(textResponse)
-        mockGalleryEvents[textEvent.id] = textEvent
-        
-        // Photo event - create new response with unique taskId for gallery
-        let photoResponseForGallery = SMSResponse(
-            id: "mock-gallery-photo",
-            taskId: "gallery-photo-task", // Unique ID for gallery only
-            profileId: photoResponse.profileId,
-            userId: photoResponse.userId,
-            textResponse: photoResponse.textResponse,
-            photoData: photoResponse.photoData,
-            isCompleted: photoResponse.isCompleted,
-            receivedAt: photoResponse.receivedAt,
-            responseType: photoResponse.responseType,
-            isConfirmationResponse: photoResponse.isConfirmationResponse,
-            isPositiveConfirmation: photoResponse.isPositiveConfirmation,
-            responseScore: photoResponse.responseScore,
-            processingNotes: photoResponse.processingNotes
-        )
-        let photoEvent = GalleryHistoryEvent.fromSMSResponse(photoResponseForGallery) 
-        mockGalleryEvents[photoEvent.id] = photoEvent
-        
-        // Task event - create new response with unique taskId for gallery
-        let taskResponseForGallery = SMSResponse(
-            id: "mock-gallery-combined",
-            taskId: "gallery-combined-task", // Unique ID for gallery only
-            profileId: taskResponse.profileId,
-            userId: taskResponse.userId,
-            textResponse: taskResponse.textResponse,
-            photoData: taskResponse.photoData,
-            isCompleted: taskResponse.isCompleted,
-            receivedAt: taskResponse.receivedAt,
-            responseType: taskResponse.responseType,
-            isConfirmationResponse: taskResponse.isConfirmationResponse,
-            isPositiveConfirmation: taskResponse.isPositiveConfirmation,
-            responseScore: taskResponse.responseScore,
-            processingNotes: taskResponse.processingNotes
-        )
-        let taskEvent = GalleryHistoryEvent.fromSMSResponse(taskResponseForGallery)
-        mockGalleryEvents[taskEvent.id] = taskEvent
-        
-        // 4. CREATE RESPONSES FOR NEW DASHBOARD TASKS
-        // Response for completed "Daily Walk" task
-        let walkResponse = SMSResponse(
-            id: "mock-walk-response",
-            taskId: "mock-task-completed",
-            profileId: "mock-profile-1", 
-            userId: "mock-user-id",
-            textResponse: "Just finished my walk! Feeling energized",
-            photoData: nil,
-            isCompleted: true,
-            receivedAt: calendar.date(byAdding: .hour, value: -2, to: now) ?? now,
-            responseType: .text,
-            isConfirmationResponse: false,
-            isPositiveConfirmation: true,
-            responseScore: 1.0,
-            processingNotes: nil
-        )
-        mockResponses[walkResponse.id] = walkResponse
-        
-        // Convert walk response to gallery event
-        let walkEvent = GalleryHistoryEvent.fromSMSResponse(walkResponse)
-        mockGalleryEvents[walkEvent.id] = walkEvent
-        
-        // Response for completed "Check Blood Pressure" task  
-        let bpResponse = SMSResponse(
-            id: "mock-bp-response",
-            taskId: "mock-task-1",
-            profileId: "mock-profile-1",
-            userId: "mock-user-id", 
-            textResponse: "Blood pressure checked: 120/80",
-            photoData: nil,
-            isCompleted: true,
-            receivedAt: calendar.date(byAdding: .hour, value: -4, to: now) ?? now,
-            responseType: .text,
-            isConfirmationResponse: false,
-            isPositiveConfirmation: true,
-            responseScore: 1.0,
-            processingNotes: nil
-        )
-        mockResponses[bpResponse.id] = bpResponse
-        
-        // Convert BP response to gallery event
-        let bpEvent = GalleryHistoryEvent.fromSMSResponse(bpResponse)
-        mockGalleryEvents[bpEvent.id] = bpEvent
-        
-        // 5. ONE PROFILE MOCKUP - Add profile creation event  
-        if let profile = mockProfiles["mock-profile-1"] {
-            let profileEvent = GalleryHistoryEvent.fromProfileCreation(
-                userId: "mock-user-id",
-                profile: profile,
-                profileSlot: 0
-            )
-            mockGalleryEvents[profileEvent.id] = profileEvent
-        }
-        
-        // ADDITIONAL MOCK EVENTS TO TRIPLE GALLERY CONTENT
-        
-        // Text responses
-        let textResponses = [
-            ("text-1", "Took medication at 8:30 AM", -5),
-            ("text-2", "Blood pressure is 120/80", -6),
-            ("text-3", "Feeling great today!", -7),
-            ("text-4", "Completed stretching exercises", -8),
-            ("text-5", "Had a good breakfast", -9),
-            ("text-6", "Went to doctor appointment", -10)
-        ]
-        
-        for (suffix, message, hoursAgo) in textResponses {
-            let response = SMSResponse(
-                id: "mock-text-\(suffix)",
-                taskId: "gallery-text-\(suffix)",
-                profileId: "mock-profile-1",
-                userId: "mock-user-id",
-                textResponse: message,
-                photoData: nil,
-                isCompleted: true,
-                receivedAt: calendar.date(byAdding: .hour, value: hoursAgo, to: now) ?? now,
-                responseType: .text,
-                isConfirmationResponse: false,
-                isPositiveConfirmation: true,
-                responseScore: 0.9,
-                processingNotes: nil
-            )
-            mockResponses[response.id] = response
-            let event = GalleryHistoryEvent.fromSMSResponse(response)
-            mockGalleryEvents[event.id] = event
-        }
-        
-        // Photo responses
-        let photoResponses = [
-            ("photo-1", -11),
-            ("photo-2", -12),
-            ("photo-3", -13),
-            ("photo-4", -14),
-            ("photo-5", -15),
-            ("photo-6", -16)
-        ]
-        
-        for (suffix, hoursAgo) in photoResponses {
-            let response = SMSResponse(
-                id: "mock-photo-\(suffix)",
-                taskId: "gallery-photo-\(suffix)",
-                profileId: "mock-profile-1",
-                userId: "mock-user-id",
-                textResponse: nil,
-                photoData: Data("mock-photo-\(suffix)".utf8),
-                isCompleted: true,
-                receivedAt: calendar.date(byAdding: .hour, value: hoursAgo, to: now) ?? now,
-                responseType: .photo,
-                isConfirmationResponse: false,
-                isPositiveConfirmation: true,
-                responseScore: 1.0,
-                processingNotes: nil
-            )
-            mockResponses[response.id] = response
-            let event = GalleryHistoryEvent.fromSMSResponse(response)
-            mockGalleryEvents[event.id] = event
-        }
-        
-        // Mock data created silently
-    }
+
     
     // MARK: - User Operations
     func createUser(_ user: User) async throws {
@@ -526,8 +207,8 @@ class MockDatabaseService: DatabaseServiceProtocol {
     
     // MARK: - Photo Storage Operations
     func uploadPhoto(_ photoData: Data, for responseId: String) async throws -> String {
-        // Return a mock URL
-        return "https://mock-storage.example.com/\(responseId).jpg"
+        // Return a dynamic mock URL using the responseId
+        return "mock://storage/\(responseId)/\(UUID().uuidString).jpg"
     }
     
     func deletePhoto(at url: String) async throws {
@@ -551,47 +232,61 @@ class MockDatabaseService: DatabaseServiceProtocol {
     
     // MARK: - Analytics (Mock Data)
     func getTaskCompletionStats(for userId: String, from startDate: Date, to endDate: Date) async throws -> TaskCompletionStats {
+        // Calculate actual stats from stored data
+        let userTasks = mockTasks.values.filter { $0.userId == userId }
+        let completedTasks = userTasks.filter { $0.completionCount > 0 }
+
         return TaskCompletionStats(
-            totalTasks: 10,
-            completedTasks: 8,
-            completionRate: 0.8,
-            averageResponseTime: 300,
-            streakCount: 5,
+            totalTasks: userTasks.count,
+            completedTasks: completedTasks.count,
+            completionRate: userTasks.isEmpty ? 0 : Double(completedTasks.count) / Double(userTasks.count),
+            averageResponseTime: 0,
+            streakCount: 0,
             categoryBreakdown: [:],
             dailyCompletion: [:],
             responseTypeBreakdown: [:]
         )
     }
-    
+
     func getProfileAnalytics(for profileId: String, userId: String) async throws -> ProfileAnalytics {
+        // Calculate actual analytics from stored data
+        let profileTasks = mockTasks.values.filter { $0.profileId == profileId && $0.userId == userId }
+        let completedTasks = profileTasks.filter { $0.completionCount > 0 }
+        let profile = mockProfiles[profileId]
+
         return ProfileAnalytics(
             profileId: profileId,
-            totalTasks: 5,
-            completedTasks: 4,
-            averageResponseTime: 250,
-            lastActiveDate: Date(),
-            responseRate: 0.8,
+            totalTasks: profileTasks.count,
+            completedTasks: completedTasks.count,
+            averageResponseTime: 0,
+            lastActiveDate: profile?.lastActiveAt ?? Date(),
+            responseRate: profileTasks.isEmpty ? 0 : Double(completedTasks.count) / Double(profileTasks.count),
             preferredResponseType: .text,
-            bestPerformingCategory: .health,
+            bestPerformingCategory: nil,
             worstPerformingCategory: nil,
             weeklyTrend: []
         )
     }
-    
+
     func getUserAnalytics(for userId: String) async throws -> UserAnalytics {
+        // Calculate actual analytics from stored data
+        let profiles = mockProfiles.values.filter { $0.userId == userId }
+        let tasks = mockTasks.values.filter { $0.userId == userId }
+        let responses = mockResponses.values.filter { $0.userId == userId }
+
         return UserAnalytics(
             userId: userId,
-            totalProfiles: 1,
-            activeProfiles: 1,
-            totalTasks: 10,
-            overallCompletionRate: 0.8,
+            totalProfiles: profiles.count,
+            activeProfiles: profiles.filter { $0.status == .confirmed }.count,
+            totalTasks: tasks.count,
+            overallCompletionRate: 0,
             profileAnalytics: [],
             subscriptionUsage: SubscriptionUsage(
                 planType: "trial",
-                profilesUsed: 1,
+                profilesUsed: profiles.count,
                 profilesLimit: 4,
-                tasksCreated: 10,
-                smssSent: 5,
+                tasksCreated: tasks.count,
+                smssSent: responses.count,
                 storageUsed: 0,
                 billingPeriodStart: Date(),
                 billingPeriodEnd: Date()
@@ -651,9 +346,9 @@ class MockDatabaseService: DatabaseServiceProtocol {
     func syncUserData(for userId: String) async throws {
         print("📦 Mock: Synced user data for \(userId)")
     }
-    
+
     func getLastSyncTimestamp(for userId: String) async throws -> Date? {
-        return Date().addingTimeInterval(-3600) // 1 hour ago
+        return nil // No hardcoded timestamp
     }
     
     func updateSyncTimestamp(for userId: String, timestamp: Date) async throws {
@@ -667,10 +362,15 @@ class MockDatabaseService: DatabaseServiceProtocol {
         let tasks = mockTasks.values.filter { $0.userId == userId }
         let responses = mockResponses.values.filter { $0.userId == userId }
         let analytics = try await getUserAnalytics(for: userId)
-        
+
+        // Return nil user if not found - no hardcoded fallback
+        guard let user = user else {
+            throw NSError(domain: "MockDatabaseService", code: 404, userInfo: [NSLocalizedDescriptionKey: "User not found"])
+        }
+
         return UserDataExport(
             userId: userId,
-            user: user ?? User(id: userId, email: "", fullName: "", phoneNumber: "", createdAt: Date(), isOnboardingComplete: false, subscriptionStatus: .trial, trialEndDate: nil),
+            user: user,
             profiles: Array(profiles),
             tasks: Array(tasks),
             responses: Array(responses),

@@ -522,16 +522,27 @@ final class ProfileViewModel: ObservableObject {
     allowing multiple family members to see confirmation status and avoid duplicate
     profile creation attempts.
     */
-    private func createProfileAsync() async {
-        guard isValidForm else { return }
-        
+    func createProfileAsync() async {
+        guard isValidForm else {
+            print("⚠️ Profile form validation failed")
+            return
+        }
+
         isLoading = true
         errorMessage = nil
-        
+
         do {
+            print("🔍 Checking authentication state...")
+            print("🔍 Auth service type: \(type(of: authService))")
+            print("🔍 Is authenticated: \(authService.isAuthenticated)")
+            print("🔍 Current user: \(String(describing: authService.currentUser))")
+
             guard let userId = authService.currentUser?.uid else {
+                print("❌ Authentication check failed - no user ID")
                 throw ProfileError.userNotAuthenticated
             }
+
+            print("✅ User authenticated with ID: \(userId)")
             
             // Protective limit: Max 4 profiles per family to prevent SMS overwhelming
             guard canCreateProfile else {
@@ -543,7 +554,7 @@ final class ProfileViewModel: ObservableObject {
             
             // Create profile with elderly-optimized defaults
             let profile = ElderlyProfile(
-                id: UUID().uuidString,
+                id: IDGenerator.profileID(phoneNumber: formattedPhone),
                 userId: userId,
                 name: profileName.trimmingCharacters(in: .whitespacesAndNewlines),
                 phoneNumber: formattedPhone,
@@ -556,24 +567,35 @@ final class ProfileViewModel: ObservableObject {
                 lastActiveAt: Date()
             )
             
+            print("💾 Saving profile to database...")
             // Persist with family synchronization
             try await databaseService.createElderlyProfile(profile)
-            
+            print("✅ Profile saved to database successfully")
+
+            print("📡 Broadcasting profile update...")
             // Broadcast profile creation to Dashboard and other family members
             dataSyncCoordinator.broadcastProfileUpdate(profile)
-            
+            print("✅ Profile update broadcasted")
+
+            print("📱 Sending confirmation SMS...")
             // Send SMS confirmation immediately (critical step)
             try await sendConfirmationSMS(for: profile)
-            
+            print("✅ SMS sent successfully")
+
             await MainActor.run {
+                print("🎉 Updating local state with new profile")
                 // Update local state for immediate family feedback
                 self.profiles.insert(profile, at: 0)
                 self.confirmationStatus[profile.id] = .sent
                 self.resetForm()
                 self.showingCreateProfile = false
+                print("✅ Profile creation complete! Total profiles: \(self.profiles.count)")
             }
-            
+
         } catch {
+            print("❌ Error creating profile: \(error)")
+            print("❌ Error type: \(type(of: error))")
+            print("❌ Error description: \(error.localizedDescription)")
             await MainActor.run {
                 // Provide family-friendly error context
                 self.errorMessage = error.localizedDescription
@@ -1204,7 +1226,7 @@ final class ProfileViewModel: ObservableObject {
         
         // Create profile object but don't persist yet
         let profile = ElderlyProfile(
-            id: UUID().uuidString,
+            id: IDGenerator.profileID(phoneNumber: formattedPhone),
             userId: userId,
             name: profileName.trimmingCharacters(in: .whitespacesAndNewlines),
             phoneNumber: formattedPhone,

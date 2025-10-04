@@ -1,8 +1,8 @@
 
 # Hallo iOS App - UI Integration Plan
 # For Claude Code UI Development & Implementation
-# Last Updated: 2025-09-13
-# Status: Gallery Navigation System + Dashboard View Integration + Unified Onboarding Branding Complete
+# Last Updated: 2025-09-29
+# Status: Dashboard Card Stack + Navigation System Refined + Black Gradient Implementation
 
 ## PROJECT OVERVIEW
 App: Hallo (iOS/SwiftUI)
@@ -19,9 +19,10 @@ Status: DashboardView + GalleryView + Gallery History Timeline Complete, Firebas
 
 ## FIGMA DESIGN SPECIFICATIONS IMPLEMENTED
 
-### Typography (UPDATED SYSTEM FONTS 2025-09-01)
+### Typography (UPDATED SYSTEM FONTS 2025-09-29)
 - **halloo. logo**: 37.5px, Regular, -3.5px tracking  
 - **Section headers (PROFILES, UPCOMING, etc.)**: 15px, Bold, -1px tracking
+- **Habit titles**: .system(size: 15, weight: .bold) with -1px tracking
 - **Profile names (Grandpa Joe, etc.)**: 16px, System font Heavy weight, -1px tracking (optimal boldness)
 - **Task descriptions & times**: 13px, Inter Regular, -0.5px tracking (smaller for hierarchy)
 - **Form Field Labels**: 16px, System font Light weight (consistent across all forms)
@@ -34,7 +35,7 @@ Status: DashboardView + GalleryView + Gallery History Timeline Complete, Firebas
 - **Tight Tracking**: `-1` for denser appearance
 - **Rationale**: System font renders weights more consistently than custom Inter font
 
-### Color Scheme (UPDATED 2025-09-01)
+### Color Scheme (UPDATED 2025-09-29)
 - **Background**: #f9f9f9 (off-white) with bottom gradient shadow effect
 - **Cards**: True white (#ffffff) with 1px light grey stroke (Color.gray.opacity(0.3))
 - **Primary Text**: #000000 (solid black)
@@ -42,14 +43,18 @@ Status: DashboardView + GalleryView + Gallery History Timeline Complete, Firebas
 - **Button Background**: #B9E3FF (view buttons and Next buttons)
 - **Profile Add Button**: Gradient circle (left: #C7E9FF, right: #28ADFF) with black + symbol
 - **Profile borders**: Pastel colors (blue/red/green/purple opacity 0.3)
-- **Bottom Gradient**: Transparent to #B3B3B3, positioned behind all content for subtle shadow effect
+- **Bottom Gradient**: Black gradient (0% → 15% → 25% opacity), 120px height
+- **+ Button**: Black circle, 57×57px, with 26px white plus sign
 
-### Layout Specifications (UPDATED GALLERY HISTORY 2025-09-07)
+### Layout Specifications (UPDATED NAVIGATION 2025-09-29)
 - **Profile images**: 44pt diameter circles with 2px colored borders
 - **Task profile images**: 32pt diameter circles
 - **Form Cards**: 10px corner radius, maxWidth: .infinity, 24px horizontal padding
 - **Button Specifications**: Next button 47px min height, 15px corner radius, light blue (#B9E3FF) background
-- **Navigation**: Custom pill-shaped (94px × 43.19px) bottom navigation
+- **Navigation**: Custom pill-shaped (140px × 48px) bottom navigation - unified 3-tab design
+- **Navigation Position**: 30px from sides, 4px from bottom edge
+- **+ Button**: 57px × 57px circle, only on Dashboard view
+- **Navigation Layout**: Left-aligned on all views, + button right-aligned on Dashboard only
 
 #### **Gallery History Layout (NEW 2025-09-07):**
 - **Photo Events**: 112×112px square thumbnails with 3px corner radius
@@ -64,17 +69,18 @@ Status: DashboardView + GalleryView + Gallery History Timeline Complete, Firebas
 
 ## IMPLEMENTED VIEWS ✅
 
-### Views/Dashboard/ ✅ COMPLETE - GALLERY INTEGRATION 2025-09-10
-- **DashboardView.swift** ✅ FULLY IMPLEMENTED & GALLERY-INTEGRATED
-  - Header with "halloo." logo + profile settings icon
-  - Profiles section with fixed 4-profile layout (no scrolling)
-  - Create Custom Habit card with birds + mascot illustration
+### Views/Dashboard/ ✅ COMPLETE - CARD STACK INTEGRATION 2025-09-29
+- **DashboardView.swift** ✅ FULLY IMPLEMENTED WITH CARD STACK
+  - Header with "halloo." logo + profile settings icon (SharedHeaderSection)
+  - Profiles section with fixed 4-profile layout (connected to actual data)
+  - **NEW**: CardStackView with swipeable task responses
+  - **NEW**: Task details section below card stack (uses TaskRowView)
+  - **NEW**: Black gradient overlay (120px, 0%-15%-25% opacity)
   - Upcoming tasks (profile-specific, today only)
-  - **NEW**: Completed tasks with functional white "view" buttons
-  - **NEW**: Direct navigation from view buttons to GalleryDetailView
-  - **NEW**: Proper task-to-gallery-event mapping for accurate navigation
-  - **NEW**: Animation-free fullScreenCover presentations
-  - Custom pill-shaped bottom navigation
+  - Completed tasks with functional white "view" buttons
+  - Direct navigation from view buttons to GalleryDetailView
+  - Custom pill-shaped bottom navigation (140×48px, left-aligned)
+  - **NEW**: + button (57×57px) only on Dashboard view
 
 ### Views/Gallery/ ✅ COMPLETE - GALLERY NAVIGATION SYSTEM 2025-09-10
 - **GalleryView.swift** ✅ FULLY IMPLEMENTED & UPGRADED

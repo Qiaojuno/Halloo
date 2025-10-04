@@ -3,11 +3,14 @@ import AuthenticationServices
 import FirebaseAuth
 
 struct LoginView: View {
+    let onAuthenticationSuccess: () -> Void
+
     @EnvironmentObject var onboardingViewModel: OnboardingViewModel
     @Environment(\.container) private var container
     @State private var isSigningIn = false
     @State private var showingError = false
     @State private var errorMessage = ""
+    @State private var debugStatus = ""
     
     var body: some View {
         GeometryReader { geometry in
@@ -87,7 +90,7 @@ struct LoginView: View {
             .background(
                 ZStack {
                     Color(hex: "f9f9f9")
-                    
+
                     VStack {
                         Spacer()
                         LinearGradient(
@@ -102,6 +105,20 @@ struct LoginView: View {
                     }
                 }
                 .ignoresSafeArea(.all)
+            )
+            .overlay(
+                VStack {
+                    if !debugStatus.isEmpty {
+                        Text(debugStatus)
+                            .font(.system(size: 12))
+                            .padding(8)
+                            .background(Color.black.opacity(0.7))
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                            .padding()
+                    }
+                    Spacer()
+                }
             )
         }
         .alert("Sign In Error", isPresented: $showingError) {
@@ -131,25 +148,32 @@ struct LoginView: View {
     
     private func processAppleSignIn(_ authorization: ASAuthorization) async {
         do {
+            await MainActor.run {
+                debugStatus = "Starting Apple Sign-In..."
+            }
+
             let authService = container.resolve(AuthenticationServiceProtocol.self)
-            
+
             // Cast to FirebaseAuthenticationService to access processAppleSignIn method
             if let firebaseAuthService = authService as? FirebaseAuthenticationService {
                 let result = try await firebaseAuthService.processAppleSignIn(authorization: authorization)
-                
-                // Let OnboardingViewModel handle the post-auth logic and navigation
-                await onboardingViewModel.handleSuccessfulAuthentication(authResult: result)
-                
+
                 await MainActor.run {
-                    completeAuthentication()
+                    debugStatus = "Sign-In succeeded! Navigating to dashboard..."
+                    isSigningIn = false
+
+                    // Trigger navigation to dashboard via callback
+                    onAuthenticationSuccess()
                 }
             } else {
                 await MainActor.run {
+                    debugStatus = "Apple Sign-In not supported"
                     showError("Apple Sign In not supported with current authentication service")
                 }
             }
         } catch {
             await MainActor.run {
+                debugStatus = "Error: \(error.localizedDescription)"
                 showError("Apple Sign In failed: \(error.localizedDescription)")
             }
         }
@@ -166,32 +190,30 @@ struct LoginView: View {
     
     private func processGoogleSignIn() async {
         do {
+            await MainActor.run {
+                debugStatus = "Starting Google Sign-In..."
+            }
+
             let authService = container.resolve(AuthenticationServiceProtocol.self)
             let result = try await authService.signInWithGoogle()
-            
-            // Let OnboardingViewModel handle the post-auth logic and navigation
-            await onboardingViewModel.handleSuccessfulAuthentication(authResult: result)
-            
+
             await MainActor.run {
-                print("✅ Google Sign In successful: \(result.uid)")
-                completeAuthentication()
+                debugStatus = "Sign-In succeeded! Navigating to dashboard..."
+                isSigningIn = false
+
+                // Trigger navigation to dashboard via callback
+                onAuthenticationSuccess()
             }
         } catch {
             await MainActor.run {
+                debugStatus = "Error: \(error.localizedDescription)"
                 showError("Google Sign In failed: \(error.localizedDescription)")
             }
         }
     }
     
     // MARK: - Helper Methods
-    
-    private func completeAuthentication() {
-        isSigningIn = false
-        // Navigation is handled by OnboardingViewModel auth methods
-        // No need to call skipToQuiz() here - it creates duplicate navigation
-        print("✅ Authentication completed - letting OnboardingViewModel handle navigation")
-    }
-    
+
     private func showError(_ message: String) {
         isSigningIn = false
         errorMessage = message
@@ -204,7 +226,7 @@ struct LoginView: View {
 #if DEBUG
 struct LoginView_Previews: PreviewProvider {
     static var previews: some View {
-        LoginView()
+        LoginView(onAuthenticationSuccess: {})
             .environmentObject(OnboardingViewModel(
                 authService: MockAuthenticationService(),
                 databaseService: MockDatabaseService(),

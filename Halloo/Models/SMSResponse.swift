@@ -127,7 +127,7 @@ extension SMSResponse {
         isPositive: Bool
     ) -> SMSResponse {
         return SMSResponse(
-            id: UUID().uuidString,
+            id: IDGenerator.messageID(twilioSID: nil),
             taskId: nil,
             profileId: profileId,
             userId: userId,
@@ -161,7 +161,7 @@ extension SMSResponse {
         }
         
         return SMSResponse(
-            id: UUID().uuidString,
+            id: IDGenerator.messageID(twilioSID: nil),
             taskId: taskId,
             profileId: profileId,
             userId: userId,

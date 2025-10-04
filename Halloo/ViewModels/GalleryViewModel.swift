@@ -184,67 +184,14 @@ final class GalleryViewModel: ObservableObject {
     /// - Returns: Array of GalleryHistoryEvent objects for the current user
     /// - Throws: Database errors or network errors during fetch
     private func fetchGalleryEvents() async throws -> [GalleryHistoryEvent] {
-        // For now, return mock data that matches the expected structure
-        // In production, this would call databaseService.getGalleryEvents(userId:)
-        
-        return createMockGalleryEvents()
-    }
-    
-    /// Create mock gallery events for development and testing
-    /// 
-    /// - Returns: Array of mock GalleryHistoryEvent objects
-    private func createMockGalleryEvents() -> [GalleryHistoryEvent] {
-        let calendar = Calendar.current
-        let now = Date()
-        
-        return [
-            // Recent task response with photo
-            GalleryHistoryEvent(
-                id: "event-1",
-                userId: "mock-user-id",
-                profileId: "mock-profile-1",
-                eventType: .taskResponse,
-                createdAt: calendar.date(byAdding: .hour, value: -2, to: now) ?? now,
-                eventData: .taskResponse(.init(
-                    taskId: "task-1",
-                    textResponse: "Took my medication!",
-                    photoData: nil,
-                    responseType: "yes",
-                    taskTitle: "Take Morning Medication"
-                ))
-            ),
-            
-            // Profile creation event
-            GalleryHistoryEvent(
-                id: "event-2", 
-                userId: "mock-user-id",
-                profileId: "mock-profile-1",
-                eventType: .profileCreated,
-                createdAt: calendar.date(byAdding: .day, value: -1, to: now) ?? now,
-                eventData: .profileCreated(.init(
-                    profileName: "Grandma Smith",
-                    relationship: "Grandmother",
-                    photoURL: nil,
-                    profileSlot: 0
-                ))
-            ),
-            
-            // Earlier task response
-            GalleryHistoryEvent(
-                id: "event-3",
-                userId: "mock-user-id", 
-                profileId: "mock-profile-1",
-                eventType: .taskResponse,
-                createdAt: calendar.date(byAdding: .day, value: -2, to: now) ?? now,
-                eventData: .taskResponse(.init(
-                    taskId: "task-2",
-                    textResponse: "Went for my walk",
-                    photoData: nil,
-                    responseType: "yes",
-                    taskTitle: "Evening Walk"
-                ))
-            )
-        ]
+        // Return real data from database
+        guard let userId = authService.currentUser?.uid else {
+            return []
+        }
+
+        // TODO: Implement database method to fetch gallery events
+        // For now, return empty array until real implementation is ready
+        return []
     }
     
     /// Periodic refresh disabled to avoid compilation issues

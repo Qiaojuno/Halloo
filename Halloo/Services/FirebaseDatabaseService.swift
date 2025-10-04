@@ -8,150 +8,137 @@ import Combine
 class FirebaseDatabaseService: DatabaseServiceProtocol {
     
     // MARK: - Properties
-    private let db = Firestore.firestore()
-    private let storage = Storage.storage()
+    private lazy var db: Firestore = Firestore.firestore()
+    private lazy var storage: Storage = Storage.storage()
     private var listeners: [ListenerRegistration] = []
     
-    // MARK: - Collections
-    private enum Collection: String {
-        case users = "users"
-        case profiles = "profiles"
-        case tasks = "tasks"
-        case responses = "responses"
-        case galleryEvents = "gallery_events"
-        
-        var path: String { rawValue }
+    // MARK: - Collection Paths (Nested Subcollections)
+    /// Dynamic collection path builder for nested Firestore structure
+    /// Schema: /users/{uid}/profiles/{pid}/habits/{hid} and /users/{uid}/profiles/{pid}/messages/{mid}
+    private enum CollectionPath {
+        case users
+        case userProfiles(userId: String)
+        case userGalleryEvents(userId: String)
+        case profileHabits(userId: String, profileId: String)
+        case profileMessages(userId: String, profileId: String)
+
+        var path: String {
+            switch self {
+            case .users:
+                return "users"
+            case .userProfiles(let userId):
+                return "users/\(userId)/profiles"
+            case .userGalleryEvents(let userId):
+                return "users/\(userId)/gallery_events"
+            case .profileHabits(let userId, let profileId):
+                return "users/\(userId)/profiles/\(profileId)/habits"
+            case .profileMessages(let userId, let profileId):
+                return "users/\(userId)/profiles/\(profileId)/messages"
+            }
+        }
+
+        /// Returns a document reference for the given path and document ID
+        func document(_ documentId: String, in db: Firestore) -> DocumentReference {
+            return db.collection(path).document(documentId)
+        }
+
+        /// Returns a collection reference for the given path
+        func collection(in db: Firestore) -> CollectionReference {
+            return db.collection(path)
+        }
     }
     
     // MARK: - User Operations
     
     func createUser(_ user: User) async throws {
         let userData = try encodeToFirestore(user)
-        try await db.collection(Collection.users.path).document(user.id).setData(userData)
+        try await CollectionPath.users.document(user.id, in: db).setData(userData)
     }
-    
+
     func getUser(_ userId: String) async throws -> User? {
-        let document = try await db.collection(Collection.users.path).document(userId).getDocument()
-        
+        let document = try await CollectionPath.users.document(userId, in: db).getDocument()
+
         guard let data = document.data() else {
             return nil
         }
-        
+
         return try decodeFromFirestore(data, as: User.self)
     }
-    
+
     func updateUser(_ user: User) async throws {
         let userData = try encodeToFirestore(user)
-        try await db.collection(Collection.users.path).document(user.id).updateData(userData)
+        try await CollectionPath.users.document(user.id, in: db).updateData(userData)
     }
     
     func deleteUser(_ userId: String) async throws {
-        let batch = db.batch()
-        
-        // Delete user document
-        let userRef = db.collection(Collection.users.path).document(userId)
-        batch.deleteDocument(userRef)
-        
-        // Delete all user's profiles
-        let profilesQuery = db.collection(Collection.profiles.path).whereField("userId", isEqualTo: userId)
-        let profilesSnapshot = try await profilesQuery.getDocuments()
-        
-        for profileDoc in profilesSnapshot.documents {
-            batch.deleteDocument(profileDoc.reference)
-            
-            // Delete all tasks for this profile
-            let tasksQuery = db.collection(Collection.tasks.path).whereField("profileId", isEqualTo: profileDoc.documentID)
-            let tasksSnapshot = try await tasksQuery.getDocuments()
-            
-            for taskDoc in tasksSnapshot.documents {
-                batch.deleteDocument(taskDoc.reference)
-            }
-        }
-        
-        // Delete all user's responses
-        let responsesQuery = db.collection(Collection.responses.path).whereField("userId", isEqualTo: userId)
-        let responsesSnapshot = try await responsesQuery.getDocuments()
-        
-        for responseDoc in responsesSnapshot.documents {
-            batch.deleteDocument(responseDoc.reference)
-        }
-        
-        try await batch.commit()
+        // ✅ Use recursive helper for safe cascade delete
+        try await deleteUserRecursively(userId)
     }
     
     // MARK: - Profile Operations
     
     func createElderlyProfile(_ profile: ElderlyProfile) async throws {
         let profileData = try encodeToFirestore(profile)
-        try await db.collection(Collection.profiles.path).document(profile.id).setData(profileData)
-        
+        try await CollectionPath.userProfiles(userId: profile.userId)
+            .document(profile.id, in: db)
+            .setData(profileData)
+
         // Update user's profile count
         try await updateUserProfileCount(profile.userId)
     }
-    
+
     func getElderlyProfile(_ profileId: String) async throws -> ElderlyProfile? {
-        let document = try await db.collection(Collection.profiles.path).document(profileId).getDocument()
-        
-        guard let data = document.data() else {
+        // Use collection group query to find profile across all users
+        let snapshot = try await db.collectionGroup("profiles")
+            .whereField("id", isEqualTo: profileId)
+            .limit(to: 1)
+            .getDocuments()
+
+        guard let document = snapshot.documents.first,
+              let data = document.data() as? [String: Any] else {
             return nil
         }
-        
+
         return try decodeFromFirestore(data, as: ElderlyProfile.self)
     }
-    
+
     func getElderlyProfiles(for userId: String) async throws -> [ElderlyProfile] {
-        let snapshot = try await db.collection(Collection.profiles.path)
-            .whereField("userId", isEqualTo: userId)
+        let snapshot = try await CollectionPath.userProfiles(userId: userId)
+            .collection(in: db)
             .order(by: "createdAt")
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: ElderlyProfile.self)
         }
     }
-    
+
     func updateElderlyProfile(_ profile: ElderlyProfile) async throws {
         let profileData = try encodeToFirestore(profile)
-        try await db.collection(Collection.profiles.path).document(profile.id).updateData(profileData)
+        try await CollectionPath.userProfiles(userId: profile.userId)
+            .document(profile.id, in: db)
+            .updateData(profileData)
     }
-    
+
     func deleteElderlyProfile(_ profileId: String) async throws {
-        let batch = db.batch()
-        
-        // Get profile to get userId
-        let profileDoc = try await db.collection(Collection.profiles.path).document(profileId).getDocument()
-        guard let profileData = profileDoc.data(),
+        // Use collection group query to find profile
+        let snapshot = try await db.collectionGroup("profiles")
+            .whereField("id", isEqualTo: profileId)
+            .limit(to: 1)
+            .getDocuments()
+
+        guard let document = snapshot.documents.first,
+              let profileData = document.data() as? [String: Any],
               let userId = profileData["userId"] as? String else {
             throw DatabaseError.documentNotFound
         }
-        
-        // Delete profile
-        batch.deleteDocument(profileDoc.reference)
-        
-        // Delete all tasks for this profile
-        let tasksQuery = db.collection(Collection.tasks.path).whereField("profileId", isEqualTo: profileId)
-        let tasksSnapshot = try await tasksQuery.getDocuments()
-        
-        for taskDoc in tasksSnapshot.documents {
-            batch.deleteDocument(taskDoc.reference)
-        }
-        
-        // Delete all responses for this profile
-        let responsesQuery = db.collection(Collection.responses.path).whereField("profileId", isEqualTo: profileId)
-        let responsesSnapshot = try await responsesQuery.getDocuments()
-        
-        for responseDoc in responsesSnapshot.documents {
-            batch.deleteDocument(responseDoc.reference)
-        }
-        
-        try await batch.commit()
-        
-        // Update user's profile count
-        try await updateUserProfileCount(userId)
+
+        // ✅ Use recursive helper for safe cascade delete
+        try await deleteProfileRecursively(profileId, userId: userId)
     }
-    
+
     func getConfirmedProfiles(for userId: String) async throws -> [ElderlyProfile] {
-        let query = db.collection(Collection.profiles.path)
+        let query = CollectionPath.userProfiles(userId: userId).collection(in: db)
             .whereField("userId", isEqualTo: userId)
             .whereField("status", isEqualTo: "confirmed")
             .order(by: "createdAt", descending: true)
@@ -166,69 +153,79 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     
     func createGalleryHistoryEvent(_ event: GalleryHistoryEvent) async throws {
         let eventData = try encodeToFirestore(event)
-        try await db.collection(Collection.galleryEvents.path).document(event.id).setData(eventData)
+        try await CollectionPath.userGalleryEvents(userId: event.userId)
+            .document(event.id, in: db)
+            .setData(eventData)
     }
-    
+
     func getGalleryHistoryEvents(for userId: String) async throws -> [GalleryHistoryEvent] {
-        let query = db.collection(Collection.galleryEvents.path)
-            .whereField("userId", isEqualTo: userId)
+        let snapshot = try await CollectionPath.userGalleryEvents(userId: userId)
+            .collection(in: db)
             .order(by: "createdAt", descending: true)
-        
-        let snapshot = try await query.getDocuments()
+            .getDocuments()
+
         return try snapshot.documents.compactMap { doc in
             try doc.data(as: GalleryHistoryEvent.self)
         }
     }
     
-    // MARK: - Task Operations
-    
+    // MARK: - Task/Habit Operations
+
     func createTask(_ task: Task) async throws {
         let taskData = try encodeToFirestore(task)
-        try await db.collection(Collection.tasks.path).document(task.id).setData(taskData)
-        
+        try await CollectionPath.profileHabits(userId: task.userId, profileId: task.profileId)
+            .document(task.id, in: db)
+            .setData(taskData)
+
         // Update user's task count
         try await updateUserTaskCount(task.userId)
     }
-    
+
     func getTask(_ taskId: String) async throws -> Task? {
-        let document = try await db.collection(Collection.tasks.path).document(taskId).getDocument()
-        
-        guard let data = document.data() else {
+        // Use collection group query to find task across all users/profiles
+        let snapshot = try await db.collectionGroup("habits")
+            .whereField("id", isEqualTo: taskId)
+            .limit(to: 1)
+            .getDocuments()
+
+        guard let document = snapshot.documents.first,
+              let data = document.data() as? [String: Any] else {
             return nil
         }
-        
+
         return try decodeFromFirestore(data, as: Task.self)
     }
-    
+
     func getProfileTasks(_ profileId: String) async throws -> [Task] {
-        let snapshot = try await db.collection(Collection.tasks.path)
+        // Use collection group query since we don't have userId
+        let snapshot = try await db.collectionGroup("habits")
             .whereField("profileId", isEqualTo: profileId)
             .order(by: "createdAt")
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: Task.self)
         }
     }
-    
+
     func getTasks(for userId: String) async throws -> [Task] {
-        let snapshot = try await db.collection(Collection.tasks.path)
+        // Use collection group query to get all tasks for user across all profiles
+        let snapshot = try await db.collectionGroup("habits")
             .whereField("userId", isEqualTo: userId)
             .order(by: "createdAt")
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: Task.self)
         }
     }
-    
+
     func getTasks(for profileId: String, userId: String) async throws -> [Task] {
-        let snapshot = try await db.collection(Collection.tasks.path)
-            .whereField("profileId", isEqualTo: profileId)
-            .whereField("userId", isEqualTo: userId)
+        let snapshot = try await CollectionPath.profileHabits(userId: userId, profileId: profileId)
+            .collection(in: db)
             .order(by: "createdAt")
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: Task.self)
         }
@@ -238,187 +235,236 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: date)
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
-        
-        let snapshot = try await db.collection(Collection.tasks.path)
+
+        // Use collection group query across all user's profiles
+        let snapshot = try await db.collectionGroup("habits")
             .whereField("userId", isEqualTo: userId)
             .whereField("nextScheduledDate", isGreaterThanOrEqualTo: Timestamp(date: startOfDay))
             .whereField("nextScheduledDate", isLessThan: Timestamp(date: endOfDay))
             .order(by: "nextScheduledDate")
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: Task.self)
         }
     }
-    
+
     func archiveTask(_ taskId: String) async throws {
-        try await db.collection(Collection.tasks.path).document(taskId).updateData([
+        // Find task using collection group query
+        let snapshot = try await db.collectionGroup("habits")
+            .whereField("id", isEqualTo: taskId)
+            .limit(to: 1)
+            .getDocuments()
+
+        guard let document = snapshot.documents.first else {
+            throw DatabaseError.documentNotFound
+        }
+
+        try await document.reference.updateData([
             "status": TaskStatus.archived.rawValue,
             "archivedAt": FieldValue.serverTimestamp()
         ])
     }
-    
+
     func getTodaysTasks(_ userId: String) async throws -> [Task] {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
-        
-        let snapshot = try await db.collection(Collection.tasks.path)
+
+        // Use collection group query across all user's profiles
+        let snapshot = try await db.collectionGroup("habits")
             .whereField("userId", isEqualTo: userId)
             .whereField("nextScheduledDate", isGreaterThanOrEqualTo: Timestamp(date: today))
             .whereField("nextScheduledDate", isLessThan: Timestamp(date: tomorrow))
             .order(by: "nextScheduledDate")
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: Task.self)
         }
     }
-    
+
     func getActiveTasks(for userId: String) async throws -> [Task] {
-        let snapshot = try await db.collection(Collection.tasks.path)
+        // Use collection group query across all user's profiles
+        let snapshot = try await db.collectionGroup("habits")
             .whereField("userId", isEqualTo: userId)
             .whereField("status", isEqualTo: TaskStatus.active.rawValue)
             .order(by: "nextScheduledDate")
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: Task.self)
         }
     }
-    
+
     func updateTask(_ task: Task) async throws {
         let taskData = try encodeToFirestore(task)
-        try await db.collection(Collection.tasks.path).document(task.id).updateData(taskData)
+        try await CollectionPath.profileHabits(userId: task.userId, profileId: task.profileId)
+            .document(task.id, in: db)
+            .updateData(taskData)
     }
     
     func deleteTask(_ taskId: String) async throws {
-        let batch = db.batch()
-        
-        // Get task to get userId
-        let taskDoc = try await db.collection(Collection.tasks.path).document(taskId).getDocument()
-        guard let taskData = taskDoc.data(),
-              let userId = taskData["userId"] as? String else {
+        // Find task using collection group query
+        let snapshot = try await db.collectionGroup("habits")
+            .whereField("id", isEqualTo: taskId)
+            .limit(to: 1)
+            .getDocuments()
+
+        guard let taskDoc = snapshot.documents.first,
+              let taskData = taskDoc.data() as? [String: Any],
+              let userId = taskData["userId"] as? String,
+              let profileId = taskData["profileId"] as? String else {
             throw DatabaseError.documentNotFound
         }
-        
-        // Delete task
-        batch.deleteDocument(taskDoc.reference)
-        
-        // Delete all responses for this task
-        let responsesQuery = db.collection(Collection.responses.path).whereField("taskId", isEqualTo: taskId)
-        let responsesSnapshot = try await responsesQuery.getDocuments()
-        
-        for responseDoc in responsesSnapshot.documents {
-            batch.deleteDocument(responseDoc.reference)
+
+        // Delete all messages for this task (nested under profile)
+        let messagesSnapshot = try await db.collectionGroup("messages")
+            .whereField("taskId", isEqualTo: taskId)
+            .getDocuments()
+
+        for messageDoc in messagesSnapshot.documents {
+            try await messageDoc.reference.delete()
         }
-        
-        try await batch.commit()
-        
+
+        // Delete the task itself
+        try await taskDoc.reference.delete()
+
         // Update user's task count
         try await updateUserTaskCount(userId)
     }
     
-    // MARK: - Response Operations
-    
+    // MARK: - Response/Message Operations
+
     func createSMSResponse(_ response: SMSResponse) async throws {
+        guard let profileId = response.profileId else {
+            throw DatabaseError.invalidData
+        }
+
         let responseData = try encodeToFirestore(response)
-        try await db.collection(Collection.responses.path).document(response.id).setData(responseData)
+        try await CollectionPath.profileMessages(userId: response.userId, profileId: profileId)
+            .document(response.id, in: db)
+            .setData(responseData)
     }
-    
+
     func getSMSResponse(_ responseId: String) async throws -> SMSResponse? {
-        let document = try await db.collection(Collection.responses.path).document(responseId).getDocument()
-        
-        guard let data = document.data() else {
+        // Use collection group query to find message across all users/profiles
+        let snapshot = try await db.collectionGroup("messages")
+            .whereField("id", isEqualTo: responseId)
+            .limit(to: 1)
+            .getDocuments()
+
+        guard let document = snapshot.documents.first,
+              let data = document.data() as? [String: Any] else {
             return nil
         }
-        
+
         return try decodeFromFirestore(data, as: SMSResponse.self)
     }
-    
+
     func getSMSResponses(for taskId: String) async throws -> [SMSResponse] {
-        let snapshot = try await db.collection(Collection.responses.path)
+        // Use collection group query since we don't have userId/profileId
+        let snapshot = try await db.collectionGroup("messages")
             .whereField("taskId", isEqualTo: taskId)
             .order(by: "receivedAt", descending: true)
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: SMSResponse.self)
         }
     }
-    
+
     func getSMSResponses(for profileId: String, userId: String) async throws -> [SMSResponse] {
-        let snapshot = try await db.collection(Collection.responses.path)
-            .whereField("profileId", isEqualTo: profileId)
-            .whereField("userId", isEqualTo: userId)
+        let snapshot = try await CollectionPath.profileMessages(userId: userId, profileId: profileId)
+            .collection(in: db)
             .order(by: "receivedAt", descending: true)
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: SMSResponse.self)
         }
     }
-    
+
     func getSMSResponses(for userId: String, date: Date) async throws -> [SMSResponse] {
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: date)
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
-        
-        let snapshot = try await db.collection(Collection.responses.path)
+
+        // Use collection group query across all user's profiles
+        let snapshot = try await db.collectionGroup("messages")
             .whereField("userId", isEqualTo: userId)
             .whereField("receivedAt", isGreaterThanOrEqualTo: Timestamp(date: startOfDay))
             .whereField("receivedAt", isLessThan: Timestamp(date: endOfDay))
             .order(by: "receivedAt", descending: true)
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: SMSResponse.self)
         }
     }
-    
+
     func getRecentSMSResponses(for userId: String, limit: Int) async throws -> [SMSResponse] {
-        let snapshot = try await db.collection(Collection.responses.path)
+        // Use collection group query across all user's profiles
+        let snapshot = try await db.collectionGroup("messages")
             .whereField("userId", isEqualTo: userId)
             .order(by: "receivedAt", descending: true)
             .limit(to: limit)
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: SMSResponse.self)
         }
     }
-    
+
     func getConfirmationResponses(for profileId: String) async throws -> [SMSResponse] {
-        let snapshot = try await db.collection(Collection.responses.path)
+        // Use collection group query since we don't have userId
+        let snapshot = try await db.collectionGroup("messages")
             .whereField("profileId", isEqualTo: profileId)
             .whereField("responseType", isEqualTo: ResponseType.text.rawValue)
             .order(by: "receivedAt", descending: true)
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: SMSResponse.self)
         }
     }
-    
+
     func getCompletedResponsesWithPhotos() async throws -> [SMSResponse] {
-        let snapshot = try await db.collection(Collection.responses.path)
+        // Use collection group query across all users/profiles
+        let snapshot = try await db.collectionGroup("messages")
             .whereField("isCompleted", isEqualTo: true)
             .whereField("responseType", in: [ResponseType.photo.rawValue, ResponseType.both.rawValue])
             .order(by: "receivedAt", descending: true)
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: SMSResponse.self)
         }
     }
-    
+
     func updateSMSResponse(_ response: SMSResponse) async throws {
+        guard let profileId = response.profileId else {
+            throw DatabaseError.invalidData
+        }
+
         let responseData = try encodeToFirestore(response)
-        try await db.collection(Collection.responses.path).document(response.id).updateData(responseData)
+        try await CollectionPath.profileMessages(userId: response.userId, profileId: profileId)
+            .document(response.id, in: db)
+            .updateData(responseData)
     }
-    
+
     func deleteSMSResponse(_ responseId: String) async throws {
-        try await db.collection(Collection.responses.path).document(responseId).delete()
+        // Find message using collection group query
+        let snapshot = try await db.collectionGroup("messages")
+            .whereField("id", isEqualTo: responseId)
+            .limit(to: 1)
+            .getDocuments()
+
+        guard let document = snapshot.documents.first else {
+            throw DatabaseError.documentNotFound
+        }
+
+        try await document.reference.delete()
     }
     
     // MARK: - Photo Storage Operations
@@ -445,8 +491,9 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     
     func observeUserTasks(_ userId: String) -> AnyPublisher<[Task], Error> {
         let subject = PassthroughSubject<[Task], Error>()
-        
-        let listener = db.collection(Collection.tasks.path)
+
+        // Use collection group query to observe all tasks across user's profiles
+        let listener = db.collectionGroup("habits")
             .whereField("userId", isEqualTo: userId)
             .order(by: "nextScheduledDate")
             .addSnapshotListener { snapshot, error in
@@ -454,12 +501,12 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
                     subject.send(completion: .failure(error))
                     return
                 }
-                
+
                 guard let documents = snapshot?.documents else {
                     subject.send([])
                     return
                 }
-                
+
                 do {
                     let tasks = try documents.map { document in
                         try self.decodeFromFirestore(document.data(), as: Task.self)
@@ -469,23 +516,24 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
                     subject.send(completion: .failure(error))
                 }
             }
-        
+
         listeners.append(listener)
         return subject.eraseToAnyPublisher()
     }
-    
+
     func observeUserProfiles(_ userId: String) -> AnyPublisher<[ElderlyProfile], Error> {
         let subject = PassthroughSubject<[ElderlyProfile], Error>()
-        
-        let listener = db.collection(Collection.profiles.path)
-            .whereField("userId", isEqualTo: userId)
+
+        // Observe nested profiles collection under user
+        let listener = CollectionPath.userProfiles(userId: userId)
+            .collection(in: db)
             .order(by: "createdAt")
             .addSnapshotListener { snapshot, error in
                 if let error = error {
                     subject.send(completion: .failure(error))
                     return
                 }
-                
+
                 guard let documents = snapshot?.documents else {
                     subject.send([])
                     return
@@ -508,13 +556,14 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     // MARK: - Analytics and Reporting
     
     func getTaskCompletionStats(for userId: String, from startDate: Date, to endDate: Date) async throws -> TaskCompletionStats {
-        let tasksSnapshot = try await db.collection(Collection.tasks.path)
+        // Use collection group queries for nested structure
+        let tasksSnapshot = try await db.collectionGroup("habits")
             .whereField("userId", isEqualTo: userId)
             .whereField("nextScheduledDate", isGreaterThanOrEqualTo: Timestamp(date: startDate))
             .whereField("nextScheduledDate", isLessThanOrEqualTo: Timestamp(date: endDate))
             .getDocuments()
-        
-        let completedSnapshot = try await db.collection(Collection.responses.path)
+
+        let completedSnapshot = try await db.collectionGroup("messages")
             .whereField("userId", isEqualTo: userId)
             .whereField("isCompleted", isEqualTo: true)
             .whereField("receivedAt", isGreaterThanOrEqualTo: Timestamp(date: startDate))
@@ -579,48 +628,34 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     // MARK: - Batch Operations
     
     func batchUpdateTasks(_ tasks: [Task]) async throws {
-        let batch = db.batch()
-        
+        // Update each task individually using nested paths
         for task in tasks {
-            let taskData = try encodeToFirestore(task)
-            let taskRef = db.collection(Collection.tasks.path).document(task.id)
-            batch.updateData(taskData, forDocument: taskRef)
+            try await updateTask(task)
         }
-        
-        try await batch.commit()
     }
-    
+
     func batchDeleteTasks(_ taskIds: [String]) async throws {
-        let batch = db.batch()
-        
+        // Delete each task individually (uses collection group query)
         for taskId in taskIds {
-            let taskRef = db.collection(Collection.tasks.path).document(taskId)
-            batch.deleteDocument(taskRef)
+            try await deleteTask(taskId)
         }
-        
-        try await batch.commit()
     }
-    
+
     func batchCreateSMSResponses(_ responses: [SMSResponse]) async throws {
-        let batch = db.batch()
-        
+        // Create each response individually using nested paths
         for response in responses {
-            let responseData = try encodeToFirestore(response)
-            let responseRef = db.collection(Collection.responses.path).document(response.id)
-            batch.setData(responseData, forDocument: responseRef)
+            try await createSMSResponse(response)
         }
-        
-        try await batch.commit()
     }
     
     // MARK: - Search and Filtering
     
     func searchTasks(query: String, userId: String) async throws -> [Task] {
-        // Placeholder implementation - Firestore doesn't support full text search natively
-        let snapshot = try await db.collection(Collection.tasks.path)
+        // Use collection group query for nested structure
+        let snapshot = try await db.collectionGroup("habits")
             .whereField("userId", isEqualTo: userId)
             .getDocuments()
-        
+
         return try snapshot.documents.compactMap { document in
             let task = try decodeFromFirestore(document.data(), as: Task.self)
             return task.title.lowercased().contains(query.lowercased()) ? task : nil
@@ -628,35 +663,35 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
     
     func getTasksByCategory(_ category: TaskCategory, userId: String) async throws -> [Task] {
-        let snapshot = try await db.collection(Collection.tasks.path)
+        let snapshot = try await db.collectionGroup("habits")
             .whereField("userId", isEqualTo: userId)
             .whereField("category", isEqualTo: category.rawValue)
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: Task.self)
         }
     }
-    
+
     func getTasksByStatus(_ status: TaskStatus, userId: String) async throws -> [Task] {
-        let snapshot = try await db.collection(Collection.tasks.path)
+        let snapshot = try await db.collectionGroup("habits")
             .whereField("userId", isEqualTo: userId)
             .whereField("status", isEqualTo: status.rawValue)
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: Task.self)
         }
     }
-    
+
     func getOverdueTasks(for userId: String) async throws -> [Task] {
         let now = Date()
-        let snapshot = try await db.collection(Collection.tasks.path)
+        let snapshot = try await db.collectionGroup("habits")
             .whereField("userId", isEqualTo: userId)
             .whereField("status", isEqualTo: TaskStatus.active.rawValue)
             .whereField("nextScheduledDate", isLessThan: Timestamp(date: now))
             .getDocuments()
-        
+
         return try snapshot.documents.map { document in
             try decodeFromFirestore(document.data(), as: Task.self)
         }
@@ -670,16 +705,16 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
     
     func getLastSyncTimestamp(for userId: String) async throws -> Date? {
-        let document = try await db.collection(Collection.users.path).document(userId).getDocument()
+        let document = try await CollectionPath.users.document(userId, in: db).getDocument()
         guard let data = document.data(),
               let timestamp = data["lastSyncTimestamp"] as? Timestamp else {
             return nil
         }
         return timestamp.dateValue()
     }
-    
+
     func updateSyncTimestamp(for userId: String, timestamp: Date) async throws {
-        try await db.collection(Collection.users.path).document(userId).updateData([
+        try await CollectionPath.users.document(userId, in: db).updateData([
             "lastSyncTimestamp": Timestamp(date: timestamp)
         ])
     }
@@ -695,7 +730,7 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
         
         return UserDataExport(
             userId: userId,
-            user: user ?? User(id: userId, email: "", fullName: "", phoneNumber: "", createdAt: Date(), isOnboardingComplete: false, subscriptionStatus: .trial, trialEndDate: nil, quizAnswers: nil),
+            user: user ?? User(id: userId, email: "", fullName: "", phoneNumber: "", createdAt: Date(), isOnboardingComplete: false, subscriptionStatus: .trial, trialEndDate: nil, quizAnswers: nil, profileCount: 0, taskCount: 0, updatedAt: Date(), lastSyncTimestamp: nil),
             profiles: profiles,
             tasks: tasks,
             responses: responses,
@@ -711,26 +746,28 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     // MARK: - Helper Methods
     
     private func updateUserProfileCount(_ userId: String) async throws {
-        let profilesSnapshot = try await db.collection(Collection.profiles.path)
-            .whereField("userId", isEqualTo: userId)
+        // Count profiles in user's nested collection
+        let profilesSnapshot = try await CollectionPath.userProfiles(userId: userId)
+            .collection(in: db)
             .getDocuments()
-        
+
         let profileCount = profilesSnapshot.documents.count
-        
-        try await db.collection(Collection.users.path).document(userId).updateData([
+
+        try await CollectionPath.users.document(userId, in: db).updateData([
             "profileCount": profileCount,
             "updatedAt": FieldValue.serverTimestamp()
         ])
     }
-    
+
     private func updateUserTaskCount(_ userId: String) async throws {
-        let tasksSnapshot = try await db.collection(Collection.tasks.path)
+        // Use collection group query to count all tasks across user's profiles
+        let tasksSnapshot = try await db.collectionGroup("habits")
             .whereField("userId", isEqualTo: userId)
             .getDocuments()
-        
+
         let taskCount = tasksSnapshot.documents.count
-        
-        try await db.collection(Collection.users.path).document(userId).updateData([
+
+        try await CollectionPath.users.document(userId, in: db).updateData([
             "taskCount": taskCount,
             "updatedAt": FieldValue.serverTimestamp()
         ])
@@ -757,6 +794,81 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
 }
 
 // Using DatabaseError from DatabaseServiceProtocol.swift
+
+// MARK: - Recursive Delete Helper
+extension FirebaseDatabaseService {
+    /// Recursively deletes a document and all its subcollections
+    /// - Parameters:
+    ///   - docRef: The document reference to delete
+    ///   - subcollections: Names of subcollections to delete (e.g., ["habits", "messages"])
+    /// - Note: Handles batch size limits (500 operations per batch)
+    private func deleteDocumentRecursively(
+        _ docRef: DocumentReference,
+        subcollections: [String]
+    ) async throws {
+        // Delete all subcollections first (depth-first traversal)
+        for collectionName in subcollections {
+            var hasMore = true
+
+            // Handle batch size limit (500 documents per query)
+            while hasMore {
+                let snapshot = try await docRef.collection(collectionName)
+                    .limit(to: 500)
+                    .getDocuments()
+
+                // If no documents, we're done with this subcollection
+                if snapshot.documents.isEmpty {
+                    hasMore = false
+                    continue
+                }
+
+                // Delete each document (may have its own subcollections)
+                for doc in snapshot.documents {
+                    // Recursively delete nested subcollections
+                    // Profiles have habits and messages, habits have no subcollections, messages have no subcollections
+                    let nestedSubcollections = collectionName == "profiles" ? ["habits", "messages"] : []
+                    try await deleteDocumentRecursively(
+                        doc.reference,
+                        subcollections: nestedSubcollections
+                    )
+                }
+
+                // Check if there are more documents (500 is max per batch)
+                hasMore = snapshot.documents.count == 500
+            }
+        }
+
+        // After all subcollections deleted, delete the document itself
+        try await docRef.delete()
+    }
+
+    /// Deletes a user and all associated data (profiles, habits, messages)
+    /// - Parameter userId: The user's document ID
+    /// - Note: Uses nested subcollections - Firestore automatically handles cascade
+    func deleteUserRecursively(_ userId: String) async throws {
+        let userRef = CollectionPath.users.document(userId, in: db)
+
+        // Delete all nested subcollections under user
+        // Order: profiles → (habits + messages nested under profiles) → gallery_events
+        try await deleteDocumentRecursively(userRef, subcollections: ["profiles", "gallery_events"])
+    }
+
+    /// Deletes a profile and all associated habits/messages
+    /// - Parameters:
+    ///   - profileId: The profile's document ID
+    ///   - userId: The user who owns this profile (for updating counts)
+    /// - Note: Uses nested subcollections - deletes habits and messages automatically
+    func deleteProfileRecursively(_ profileId: String, userId: String) async throws {
+        let profileRef = CollectionPath.userProfiles(userId: userId)
+            .document(profileId, in: db)
+
+        // Delete all nested subcollections under profile (habits and messages)
+        try await deleteDocumentRecursively(profileRef, subcollections: ["habits", "messages"])
+
+        // Update user's profile count
+        try await updateUserProfileCount(userId)
+    }
+}
 
 // MARK: - Time Range Helper
 enum FirebaseTimeRange {

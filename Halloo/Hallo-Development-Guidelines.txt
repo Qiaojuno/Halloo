@@ -1,6 +1,90 @@
 # Hallo iOS App - Development Guidelines & Patterns
-# Last Updated: 2025-09-13
+# Last Updated: 2025-10-03
 # Critical patterns and fixes for future development
+
+## RECENT LESSONS LEARNED (2025-10-03)
+
+### Profile Creation & User Document Management
+
+**Critical Pattern:** Always ensure user document exists before creating related entities
+
+```swift
+// ❌ WRONG - assumes user document exists
+func createElderlyProfile(_ profile: ElderlyProfile) async throws {
+    // ... save profile
+    try await updateUserProfileCount(profile.userId) // FAILS if user doc missing
+}
+
+// ✅ CORRECT - create user document on sign-in
+func signInWithGoogle() async throws -> AuthResult {
+    let result = try await auth.signIn(with: credential)
+    let isNewUser = result.additionalUserInfo?.isNewUser ?? false
+
+    if isNewUser {
+        // Create user document immediately
+        let userData = [
+            "id": user.id,
+            "email": user.email,
+            "profileCount": 0 // Critical for updateUserProfileCount
+        ]
+        try await db.collection("users").document(user.id).setData(userData)
+    }
+}
+```
+
+### SwiftUI ForEach ID Selection
+
+**Critical Pattern:** Always use unique, stable identifiers for ForEach, never indices
+
+```swift
+// ❌ WRONG - using index/offset as ID
+ForEach(Array(profiles.prefix(2).enumerated()), id: \.offset) { index, profile in
+    ProfileView(profile: profile)
+}
+// Problem: SwiftUI can't track changes when array is modified
+
+// ✅ CORRECT - using unique profile ID
+ForEach(Array(profiles.prefix(2).enumerated()), id: \.element.id) { index, profile in
+    ProfileView(profile: profile)
+}
+// SwiftUI properly tracks each profile by its unique ID
+```
+
+### ViewModel Initialization & Authentication
+
+**Critical Pattern:** Reload data after authentication completes
+
+```swift
+// ❌ WRONG - load profiles in init (user not authenticated yet)
+init(...) {
+    loadProfiles() // Fails silently because user is nil
+}
+
+// ✅ CORRECT - reload after authentication
+func handleSuccessfulLogin() {
+    isAuthenticated = true
+    profileViewModel.loadProfiles() // Now user is authenticated
+}
+```
+
+### Async/Await in Profile Creation
+
+**Critical Pattern:** Properly await async operations before dismissing views
+
+```swift
+// ❌ WRONG - dismisses before profile is saved
+_Concurrency.Task {
+    profileViewModel.createProfile() // Not awaited!
+    try? await Task.sleep(nanoseconds: 500_000_000)
+    onDismiss() // View closes before save completes
+}
+
+// ✅ CORRECT - await completion before dismiss
+_Concurrency.Task {
+    await profileViewModel.createProfileAsync() // Waits for completion
+    onDismiss() // Only dismiss after save succeeds
+}
+```
 
 ## CRITICAL DEVELOPMENT PATTERNS
 
@@ -118,6 +202,55 @@ func makeProfileViewModelForCanvas() -> ProfileViewModel {
 - `confirmedAt`: SMS confirmation timestamp  
 - `receivedAt`: SMS response timestamp
 - `scheduledTime`: When to send SMS reminder
+
+## COMPONENT REUSABILITY PATTERNS
+
+### Shared Components (NEW 2025-09-29)
+**Rule:** Always reuse components when possible to maintain consistency
+
+```swift
+// SharedHeaderSection - Used in all main views
+SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
+
+// FloatingPillNavigation - Unified 3-tab design
+FloatingPillNavigation(selectedTab: $selectedTab, onTabTapped: nil)
+
+// TaskRowView - Reusable task display component
+TaskRowView(task: task, profile: profile, showViewButton: false, onViewButtonTapped: nil)
+```
+
+### Animation Handling
+**Rule:** Disable animations for instant transitions
+
+```swift
+// Remove animations from view transitions
+.animation(nil)
+.transition(.identity)
+
+// Use Transaction for navigation without animation
+var transaction = Transaction()
+transaction.disablesAnimations = true
+withTransaction(transaction) {
+    // Navigation code
+}
+```
+
+### Gradient Implementation
+**Pattern:** Bottom gradient for navigation visibility
+
+```swift
+LinearGradient(
+    gradient: Gradient(colors: [
+        Color.black.opacity(0),
+        Color.black.opacity(0.15),
+        Color.black.opacity(0.25)
+    ]),
+    startPoint: .top,
+    endPoint: .bottom
+)
+.frame(height: 120)
+.allowsHitTesting(false)
+```
 
 ## FIREBASE INTEGRATION PATTERNS
 

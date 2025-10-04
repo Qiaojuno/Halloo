@@ -1,0 +1,22 @@
+{
+  "name": "halloo-firestore-migration",
+  "version": "1.0.0",
+  "description": "Firestore migration script: flat collections → nested subcollections",
+  "main": "migrate.js",
+  "scripts": {
+    "migrate:dry-run": "node migrate.js --dry-run",
+    "migrate:commit": "node migrate.js --commit",
+    "migrate:validate": "node migrate.js --validate",
+    "migrate:backup": "node migrate.js --backup"
+  },
+  "keywords": [
+    "firestore",
+    "migration",
+    "firebase"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  }
+}

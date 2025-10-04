@@ -1,20 +1,23 @@
 import Foundation
 import Firebase
 import FirebaseAuth
+import FirebaseFirestore
 import GoogleSignIn
 import AuthenticationServices
 import Combine
 
 // MARK: - Firebase Authentication Service
-class FirebaseAuthenticationService: AuthenticationServiceProtocol {
-    
+class FirebaseAuthenticationService: ObservableObject, AuthenticationServiceProtocol {
+
     // MARK: - Properties
-    private let auth = Auth.auth()
+    private lazy var auth: Auth = Auth.auth()
     private var authStateListener: AuthStateDidChangeListenerHandle?
     private let authStateSubject = CurrentValueSubject<User?, Never>(nil)
     private let authBoolSubject = CurrentValueSubject<Bool, Never>(false)
-    
+
     // MARK: - Published Properties
+    @Published var isAuthenticated: Bool = false
+
     var currentUser: AuthUser? {
         guard let firebaseUser = auth.currentUser else { return nil }
         return AuthUser(
@@ -27,10 +30,6 @@ class FirebaseAuthenticationService: AuthenticationServiceProtocol {
         )
     }
     
-    var isAuthenticated: Bool {
-        return auth.currentUser != nil
-    }
-    
     var authStatePublisher: AnyPublisher<Bool, Never> {
         authBoolSubject.eraseToAnyPublisher()
     }
@@ -41,13 +40,15 @@ class FirebaseAuthenticationService: AuthenticationServiceProtocol {
     
     // MARK: - Initialization
     init() {
-        setupAuthStateListener()
+        // Delay auth listener setup to avoid crash during initialization
+        // Will be set up when initializeAuthState() is called
+        print("🔥 FirebaseAuthenticationService: init() completed (listener not yet set up)")
     }
-    
+
     deinit {
         removeAuthStateListener()
     }
-    
+
     // MARK: - AuthenticationServiceProtocol Implementation
     
     func createAccount(email: String, password: String, fullName: String) async throws -> AuthResult {
@@ -88,21 +89,22 @@ class FirebaseAuthenticationService: AuthenticationServiceProtocol {
         guard let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential else {
             throw AuthenticationError.unknownError("Invalid Apple ID credential")
         }
-        
+
         guard let identityToken = appleIDCredential.identityToken,
               let identityTokenString = String(data: identityToken, encoding: .utf8) else {
             throw AuthenticationError.unknownError("Failed to get identity token from Apple")
         }
-        
+
         // Create Firebase credential
         let credential = OAuthProvider.appleCredential(withIDToken: identityTokenString,
                                                       rawNonce: "",
                                                       fullName: appleIDCredential.fullName)
-        
+
         // Sign in with Firebase
         let authResult = try await auth.signIn(with: credential)
         let firebaseUser = authResult.user
-        
+        let isNewUser = authResult.additionalUserInfo?.isNewUser ?? false
+
         // Update display name if provided by Apple
         if let fullName = appleIDCredential.fullName,
            let givenName = fullName.givenName,
@@ -112,51 +114,118 @@ class FirebaseAuthenticationService: AuthenticationServiceProtocol {
             changeRequest.displayName = "\(givenName) \(familyName)"
             try await changeRequest.commitChanges()
         }
-        
+
+        // CRITICAL: Ensure user document exists in Firestore
+        // This is required for profile creation (updateUserProfileCount needs it)
+        if isNewUser {
+            print("📝 Creating user document for new Apple user...")
+            let newUser = User(
+                id: firebaseUser.uid,
+                email: firebaseUser.email ?? appleIDCredential.email ?? "",
+                fullName: firebaseUser.displayName ?? "",
+                phoneNumber: "",
+                createdAt: Date(),
+                isOnboardingComplete: false,
+                subscriptionStatus: .trial,
+                trialEndDate: Calendar.current.date(byAdding: .day, value: 7, to: Date()),
+                quizAnswers: nil,
+                profileCount: 0,
+                taskCount: 0,
+                updatedAt: Date(),
+                lastSyncTimestamp: nil
+            )
+
+            // ✅ Use centralized helper to ensure schema compliance
+            try await createUserDocument(newUser)
+        }
+
         return AuthResult(
             uid: firebaseUser.uid,
             email: firebaseUser.email ?? appleIDCredential.email,
             displayName: firebaseUser.displayName,
-            isNewUser: authResult.additionalUserInfo?.isNewUser ?? false,
+            isNewUser: isNewUser,
             idToken: try await firebaseUser.getIDToken()
         )
     }
     
     func signInWithGoogle() async throws -> AuthResult {
+        print("🔐 Starting Google Sign-In flow...")
+
         // Get the app's root view controller
         guard let windowScene = await UIApplication.shared.connectedScenes.first as? UIWindowScene,
               let presentingViewController = await windowScene.windows.first?.rootViewController else {
+            print("❌ Failed to get root view controller")
             throw AuthenticationError.unknownError("Unable to get root view controller")
         }
-        
+        print("✅ Got root view controller")
+
         do {
+            print("📱 Presenting Google Sign-In...")
             // Start the Google Sign-In flow
             let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presentingViewController)
             let user = result.user
-            
+            print("✅ Google Sign-In successful - User: \(user.profile?.email ?? "unknown")")
+
             // Get the ID token and access token
             guard let idToken = user.idToken?.tokenString else {
+                print("❌ Failed to get ID token from Google")
                 throw AuthenticationError.unknownError("Failed to get ID token from Google")
             }
-            
+            print("✅ Got ID token")
+
             let accessToken = user.accessToken.tokenString
-            
+            print("✅ Got access token")
+
             // Create Firebase credential
             let credential = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
-            
+            print("✅ Created Firebase credential")
+
+            print("🔥 Signing into Firebase...")
             // Sign in with Firebase
             let authResult = try await auth.signIn(with: credential)
             let firebaseUser = authResult.user
-            
+            let isNewUser = authResult.additionalUserInfo?.isNewUser ?? false
+            print("✅ Firebase sign-in successful")
+            print("   UID: \(firebaseUser.uid)")
+            print("   Email: \(firebaseUser.email ?? "unknown")")
+            print("   Is new user: \(isNewUser)")
+
+            // CRITICAL: Ensure user document exists in Firestore
+            // This is required for profile creation (updateUserProfileCount needs it)
+            if isNewUser {
+                print("📝 Creating user document for new Google user...")
+                let newUser = User(
+                    id: firebaseUser.uid,
+                    email: firebaseUser.email ?? "",
+                    fullName: firebaseUser.displayName ?? "",
+                    phoneNumber: "",
+                    createdAt: Date(),
+                    isOnboardingComplete: false,
+                    subscriptionStatus: .trial,
+                    trialEndDate: Calendar.current.date(byAdding: .day, value: 7, to: Date()),
+                    quizAnswers: nil,
+                    profileCount: 0,
+                    taskCount: 0,
+                    updatedAt: Date(),
+                    lastSyncTimestamp: nil
+                )
+                // ✅ Use centralized helper to ensure schema compliance
+                try await createUserDocument(newUser)
+            }
+
+            print("🎉 Google Sign-In complete!")
             return AuthResult(
                 uid: firebaseUser.uid,
                 email: firebaseUser.email,
                 displayName: firebaseUser.displayName,
-                isNewUser: authResult.additionalUserInfo?.isNewUser ?? false,
+                isNewUser: isNewUser,
                 idToken: try await firebaseUser.getIDToken()
             )
-            
+
         } catch {
+            print("❌ Google Sign-In error: \(error)")
+            print("❌ Error type: \(type(of: error))")
+            print("❌ Error description: \(error.localizedDescription)")
             throw AuthenticationError.unknownError("Google Sign In failed: \(error.localizedDescription)")
         }
     }
@@ -227,6 +296,10 @@ class FirebaseAuthenticationService: AuthenticationServiceProtocol {
     }
     
     func initializeAuthState() async {
+        print("🔥 FirebaseAuthenticationService: Setting up auth state listener")
+        // Set up the auth state listener first
+        setupAuthStateListener()
+
         // Check if user is already signed in
         if let firebaseUser = auth.currentUser {
             do {
@@ -238,8 +311,7 @@ class FirebaseAuthenticationService: AuthenticationServiceProtocol {
             } catch {
                 print("❌ Error creating user from Firebase user: \(error)")
                 await MainActor.run {
-                    authStateSubject.send(
-                        nil)
+                    authStateSubject.send(nil)
                     authBoolSubject.send(false)
                 }
             }
@@ -312,22 +384,31 @@ class FirebaseAuthenticationService: AuthenticationServiceProtocol {
         authStateListener = auth.addStateDidChangeListener { [weak self] _, firebaseUser in
             _Concurrency.Task { [weak self] in
                 guard let self = self else { return }
-                
+
                 if let firebaseUser = firebaseUser {
                     do {
                         let user = try await self.createUserFromFirebaseUser(firebaseUser)
                         await MainActor.run { [weak self] in
                             self?.authStateSubject.send(user)
+                            self?.authBoolSubject.send(true)
+                            self?.isAuthenticated = true  // ✅ Update @Published property
+                            print("🔐 Auth listener: User logged in, isAuthenticated = true")
                         }
                     } catch {
                         print("❌ Error in auth state listener: \(error)")
                         await MainActor.run { [weak self] in
                             self?.authStateSubject.send(nil)
+                            self?.authBoolSubject.send(false)
+                            self?.isAuthenticated = false  // ✅ Update @Published property
+                            print("🔐 Auth listener: Error, isAuthenticated = false")
                         }
                     }
                 } else {
                     await MainActor.run { [weak self] in
                         self?.authStateSubject.send(nil)
+                        self?.authBoolSubject.send(false)
+                        self?.isAuthenticated = false  // ✅ Update @Published property
+                        print("🔐 Auth listener: User logged out, isAuthenticated = false")
                     }
                 }
             }
@@ -356,7 +437,11 @@ class FirebaseAuthenticationService: AuthenticationServiceProtocol {
                 isOnboardingComplete: data["isOnboardingComplete"] as? Bool ?? false,
                 subscriptionStatus: SubscriptionStatus(rawValue: data["subscriptionStatus"] as? String ?? "trial") ?? .trial,
                 trialEndDate: (data["trialEndDate"] as? Timestamp)?.dateValue(),
-                quizAnswers: data["quizAnswers"] as? [String: String]
+                quizAnswers: data["quizAnswers"] as? [String: String],
+                profileCount: data["profileCount"] as? Int ?? 0,
+                taskCount: data["taskCount"] as? Int ?? 0,
+                updatedAt: (data["updatedAt"] as? Timestamp)?.dateValue() ?? Date(),
+                lastSyncTimestamp: (data["lastSyncTimestamp"] as? Timestamp)?.dateValue()
             )
         } else {
             // User document doesn't exist, create User with basic info
@@ -369,7 +454,11 @@ class FirebaseAuthenticationService: AuthenticationServiceProtocol {
                 isOnboardingComplete: false,
                 subscriptionStatus: .trial,
                 trialEndDate: Calendar.current.date(byAdding: .day, value: 7, to: Date()),
-                quizAnswers: nil
+                quizAnswers: nil,
+                profileCount: 0,
+                taskCount: 0,
+                updatedAt: Date(),
+                lastSyncTimestamp: nil
             )
         }
     }
@@ -387,7 +476,11 @@ class FirebaseAuthenticationService: AuthenticationServiceProtocol {
             "subscriptionStatus": user.subscriptionStatus.rawValue,
             "isOnboardingComplete": user.isOnboardingComplete,
             "trialEndDate": user.trialEndDate ?? Date(),
-            "quizAnswers": user.quizAnswers ?? [:]
+            "quizAnswers": user.quizAnswers ?? [:],
+            "profileCount": user.profileCount,
+            "taskCount": user.taskCount,
+            "updatedAt": user.updatedAt,
+            "lastSyncTimestamp": user.lastSyncTimestamp as Any
         ]
         
         try await userRef.setData(userData)

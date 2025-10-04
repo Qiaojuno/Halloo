@@ -6,39 +6,54 @@ import Firebase
 // MARK: - Dependency Container
 final class Container: ObservableObject {
     static let shared = Container()
-    
+
     private var services: [String: Any] = [:]
+    private var singletons: [String: Any] = [:]  // Singleton instances
     private let lock = NSLock()
-    
+
     private init() {
         setupServices()
     }
     
     // MARK: - Service Registration
     private func setupServices() {
+        print("🔥 Container.setupServices() started")
+        print("🔥 FirebaseApp.app() = \(String(describing: FirebaseApp.app()))")
+
         // Check if Firebase is configured
         let useFirebaseServices = checkFirebaseConfiguration()
-        
+        print("🔥 useFirebaseServices = \(useFirebaseServices)")
+
+        // Write to file for debugging
+        let logMessage = "useFirebaseServices = \(useFirebaseServices), FirebaseApp = \(String(describing: FirebaseApp.app()))\n"
+        if let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let logFile = documentsPath.appendingPathComponent("firebase-debug.log")
+            try? logMessage.write(to: logFile, atomically: true, encoding: .utf8)
+            print("📝 Debug log written to: \(logFile.path)")
+        }
+
         // Core Services - Switch between Mock and Firebase based on configuration
         if useFirebaseServices {
             print("🔥 Using Firebase services")
-            register(AuthenticationServiceProtocol.self) { 
-                FirebaseAuthenticationService() 
+            registerSingleton(AuthenticationServiceProtocol.self) {
+                FirebaseAuthenticationService()
             }
-            
-            register(DatabaseServiceProtocol.self) {
+
+            registerSingleton(DatabaseServiceProtocol.self) {
                 FirebaseDatabaseService()
             }
         } else {
-            print("🧪 Using Mock services") 
-            register(AuthenticationServiceProtocol.self) { 
-                MockAuthenticationService() 
+            print("🧪 Using Mock services")
+            registerSingleton(AuthenticationServiceProtocol.self) {
+                MockAuthenticationService()
             }
-            
-            register(DatabaseServiceProtocol.self) {
+
+            registerSingleton(DatabaseServiceProtocol.self) {
                 MockDatabaseService()
             }
         }
+
+        print("✅ Container.setupServices() completed")
         
         // Services that remain mocked for now
         register(SMSServiceProtocol.self) {
@@ -54,56 +69,47 @@ final class Container: ObservableObject {
             MockSubscriptionService() // Keep mock for now, implement StoreKit later
         }
         
-        // Coordination Services
+        // Coordination Services - Lazy initialization to avoid blocking app startup
+        register(ErrorCoordinator.self) {
+            ErrorCoordinator()
+        }
+
         register(NotificationCoordinator.self) {
             NotificationCoordinator()
         }
-        
+
         register(DataSyncCoordinator.self) {
-            // FIXED: Direct instantiation to avoid circular dependency blocking UI thread
+            // Lazy creation - will be created when first needed
             DataSyncCoordinator(
                 databaseService: useFirebaseServices ? FirebaseDatabaseService() : MockDatabaseService(),
                 notificationCoordinator: NotificationCoordinator(),
                 errorCoordinator: ErrorCoordinator()
             )
         }
-        
-        register(ErrorCoordinator.self) {
-            ErrorCoordinator()
-        }
     }
     
     // MARK: - Firebase Configuration Check
     private func checkFirebaseConfiguration() -> Bool {
-        // TEMPORARY: Force mock services to debug UI responsiveness issue
-        print("🧪 TEMPORARILY FORCING MOCK SERVICES - Debug UI responsiveness")
-        return false
-        
-        // COMMENTED OUT - Code after return will never be executed
-        /*
         // Check if Firebase has been configured
         guard FirebaseApp.app() != nil else {
             print("⚠️ Firebase not configured - using mock services")
             return false
         }
-        */
-        
-        /*
-        // COMMENTED OUT - Code after return will never be executed
+
         // In preview/canvas mode, use mock services
         if ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS") {
             print("🎨 Running in preview mode - using mock services")
             return false
         }
-        
+
         // Check for explicit mock mode environment variable
         if ProcessInfo.processInfo.environment["USE_MOCK_SERVICES"] == "true" {
             print("🧪 Mock services explicitly requested via environment")
             return false
         }
-        
+
+        print("🔥 Firebase configured - using Firebase services")
         return true
-        */
     }
     
     // MARK: - Generic Registration
@@ -128,17 +134,34 @@ final class Container: ObservableObject {
         }
     }
     
+    // MARK: - Singleton Registration
+    private func registerSingleton<T>(_ type: T.Type, factory: @escaping () -> T) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let key = String(describing: type)
+        let instance = factory()
+        singletons[key] = instance
+        print("✅ Registered singleton: \(key)")
+    }
+
     // MARK: - Service Resolution
     func resolve<T>(_ type: T.Type) -> T {
         lock.lock()
         defer { lock.unlock() }
-        
+
         let key = String(describing: type)
-        
+
+        // Check singletons first
+        if let singleton = singletons[key] as? T {
+            return singleton
+        }
+
+        // Fall back to factory pattern for non-singletons
         guard let factory = services[key] else {
             fatalError("Service \(key) not registered")
         }
-        
+
         if let directFactory = factory as? () -> T {
             return directFactory()
         } else if let containerFactory = factory as? (Container) -> T {

@@ -90,12 +90,12 @@ extension Task: VersionedModel {
         get { return 1 }
         set { }
     }
-    
+
     var lastModified: Date {
-        get { return lastUpdatedAt ?? createdAt }
-        set { lastUpdatedAt = newValue }
+        get { return lastModifiedAt }
+        set { lastModifiedAt = newValue }
     }
-    
+
     var modifiedBy: String? {
         get { return userId }
         set { }

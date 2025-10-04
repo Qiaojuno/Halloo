@@ -92,17 +92,18 @@ struct GalleryDetailView: View {
                 .ignoresSafeArea(.container, edges: .bottom) // Extend past safe area to screen edge
             }
             
-            // Floating bottom navigation with custom dismiss behavior
+            // Floating bottom navigation with custom dismiss behavior - left-aligned
             VStack {
                 Spacer()
-                FloatingPillNavigationWithDismiss(selectedTab: $selectedTab, onTabTapped: {
-                    // Dismiss the detail view whenever any tab is tapped
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
+                HStack {
+                    FloatingPillNavigation(selectedTab: $selectedTab, onTabTapped: {
+                        // Dismiss the detail view whenever any tab is tapped
                         dismiss()
-                    }
-                })
+                    })
+                    Spacer() // Push navigation to left
+                }
+                .padding(.horizontal, 30) // More side padding from screen edges
+                .padding(.bottom, 4) // Even closer to bottom of screen
             }
         }
         .navigationBarHidden(true)
@@ -362,98 +363,6 @@ struct GalleryDetailView: View {
     }
 }
 
-
-// MARK: - Custom Floating Navigation with Dismiss
-struct FloatingPillNavigationWithDismiss: View {
-    @Binding var selectedTab: Int
-    let onTabTapped: () -> Void
-    
-    // iPhone 13 base dimensions for scaling (390x844)
-    private let iPhone13Width: CGFloat = 390
-    private let basePillWidth: CGFloat = 94
-    private let basePillHeight: CGFloat = 43
-    
-    // Calculate responsive dimensions based on screen width
-    private var pillWidth: CGFloat {
-        let screenWidth = UIScreen.main.bounds.width
-        return (basePillWidth / iPhone13Width) * screenWidth
-    }
-    
-    private var pillHeight: CGFloat {
-        let screenWidth = UIScreen.main.bounds.width
-        return (basePillHeight / iPhone13Width) * screenWidth
-    }
-    
-    private var iconSize: CGFloat {
-        let screenWidth = UIScreen.main.bounds.width
-        return (20 / iPhone13Width) * screenWidth
-    }
-    
-    private var fontSize: CGFloat {
-        let screenWidth = UIScreen.main.bounds.width
-        return (10 / iPhone13Width) * screenWidth
-    }
-    
-    var body: some View {
-        HStack {
-            Spacer() // Pushes navigation pill to right side
-            
-            HStack(spacing: pillWidth * 0.2) { // Proportional spacing
-                
-                // HOME TAB
-                VStack(spacing: 4) {
-                    Image(systemName: selectedTab == 0 ? "house.fill" : "house")
-                        .font(.system(size: iconSize))
-                        .foregroundColor(selectedTab == 0 ? .black : Color(hex: "9f9f9f"))
-                    
-                    Text("home")
-                        .font(.custom("Inter", size: fontSize))
-                        .tracking(-0.5)
-                        .foregroundColor(selectedTab == 0 ? .black : Color(hex: "9f9f9f"))
-                }
-                .onTapGesture {
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        selectedTab = 0
-                        onTabTapped() // Always dismiss when tapped
-                    }
-                }
-                
-                // GALLERY TAB
-                VStack(spacing: 4) {
-                    Image(systemName: "photo.on.rectangle")
-                        .font(.system(size: iconSize))
-                        .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f"))
-                    
-                    Text("gallery")
-                        .font(.custom("Inter", size: fontSize))
-                        .tracking(-0.5)
-                        .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f"))
-                }
-                .onTapGesture {
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        selectedTab = 1
-                        onTabTapped() // Always dismiss when tapped
-                    }
-                }
-            }
-            .frame(width: pillWidth, height: pillHeight)
-            .background(
-                RoundedRectangle(cornerRadius: pillHeight / 2)
-                    .fill(Color.white)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: pillHeight / 2)
-                    .stroke(Color(hex: "e0e0e0"), lineWidth: 1)
-            )
-            .padding(.trailing, 10)
-            .padding(.bottom, 20)
-        }
-    }
-}
 
 // MARK: - Preview Support
 #if DEBUG

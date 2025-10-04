@@ -3,20 +3,27 @@ import Combine
 
 // MARK: - Mock Authentication Service
 class MockAuthenticationService: AuthenticationServiceProtocol {
-    
+
     // MARK: - Properties
     @Published var isAuthenticated: Bool = true
     private let authStateSubject = CurrentValueSubject<Bool, Never>(true)
-    
+    // Initialize with default mock user for testing without onboarding
+    private var mockUserData: (uid: String, email: String, displayName: String)? = (
+        uid: "mock-user-123",
+        email: "test@remi.com",
+        displayName: "Test User"
+    )
+
     var currentUser: AuthUser? {
-        return isAuthenticated ? AuthUser(
-            uid: "mock-user-id",
-            email: "test@example.com",
-            displayName: "Mock User",
+        guard isAuthenticated, let userData = mockUserData else { return nil }
+        return AuthUser(
+            uid: userData.uid,
+            email: userData.email,
+            displayName: userData.displayName,
             isEmailVerified: true,
             createdAt: Date(),
             lastSignInAt: Date()
-        ) : nil
+        )
     }
     
     var authStatePublisher: AnyPublisher<Bool, Never> {
@@ -28,74 +35,89 @@ class MockAuthenticationService: AuthenticationServiceProtocol {
     func createAccount(email: String, password: String, fullName: String) async throws -> AuthResult {
         // Simulate account creation
         try await _Concurrency.Task.sleep(for: .milliseconds(500))
-        
+
+        let uid = UUID().uuidString
+        mockUserData = (uid: uid, email: email, displayName: fullName)
         isAuthenticated = true
         authStateSubject.send(true)
-        
+
         return AuthResult(
-            uid: "mock-user-\(UUID().uuidString)",
+            uid: uid,
             email: email,
             displayName: fullName,
             isNewUser: true,
-            idToken: "mock-id-token"
+            idToken: UUID().uuidString
         )
     }
     
     func signIn(email: String, password: String) async throws -> AuthResult {
         // Simulate sign in
         try await _Concurrency.Task.sleep(for: .milliseconds(500))
-        
+
+        let uid = UUID().uuidString
+        let displayName = email.components(separatedBy: "@").first ?? "User"
+        mockUserData = (uid: uid, email: email, displayName: displayName)
         isAuthenticated = true
         authStateSubject.send(true)
-        
+
         return AuthResult(
-            uid: "mock-user-existing",
+            uid: uid,
             email: email,
-            displayName: "Mock User",
+            displayName: displayName,
             isNewUser: false,
-            idToken: "mock-id-token"
+            idToken: UUID().uuidString
         )
     }
     
     func signInWithApple() async throws -> AuthResult {
         // Simulate Apple sign in
         try await _Concurrency.Task.sleep(for: .milliseconds(1000))
-        
+
+        let uid = UUID().uuidString
+        let email = "\(UUID().uuidString.prefix(8))@privaterelay.appleid.com"
+        let displayName = "Apple User"
+        mockUserData = (uid: uid, email: email, displayName: displayName)
         isAuthenticated = true
         authStateSubject.send(true)
-        
+
         return AuthResult(
-            uid: "mock-apple-user",
-            email: "apple@example.com",
-            displayName: "Apple User",
+            uid: uid,
+            email: email,
+            displayName: displayName,
             isNewUser: false,
-            idToken: "mock-apple-token"
+            idToken: UUID().uuidString
         )
     }
     
     func signInWithGoogle() async throws -> AuthResult {
         // Simulate Google sign in
         try await _Concurrency.Task.sleep(for: .milliseconds(1000))
-        
+
+        let uid = UUID().uuidString
+        let email = "\(UUID().uuidString.prefix(8))@gmail.com"
+        let displayName = "Google User"
+        mockUserData = (uid: uid, email: email, displayName: displayName)
         isAuthenticated = true
         authStateSubject.send(true)
-        
+
         return AuthResult(
-            uid: "mock-google-user",
-            email: "google@example.com",
-            displayName: "Google User",
+            uid: uid,
+            email: email,
+            displayName: displayName,
             isNewUser: false,
-            idToken: "mock-google-token"
+            idToken: UUID().uuidString
         )
     }
     
     func signOut() async throws {
+        mockUserData = nil
         isAuthenticated = false
         authStateSubject.send(false)
         print("🔐 Mock user signed out")
     }
-    
+
     func deleteAccount() async throws {
+        mockUserData = nil
         isAuthenticated = false
         authStateSubject.send(false)
         print("🔐 Mock account deleted")
@@ -118,11 +140,11 @@ class MockAuthenticationService: AuthenticationServiceProtocol {
     }
     
     func refreshAuthToken() async throws -> String {
-        return "mock-refreshed-token"
+        return UUID().uuidString
     }
-    
+
     func getIdToken() async throws -> String {
-        return "mock-current-token"
+        return UUID().uuidString
     }
     
     func sendEmailVerification() async throws {
