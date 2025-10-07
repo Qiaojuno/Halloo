@@ -245,42 +245,35 @@ final class ProfileViewModel: ObservableObject {
     /// - Relationship is properly selected for family organization
     /// - All validation errors are resolved
     var isValidForm: Bool {
+        // Simplified validation for SimplifiedProfileCreationView
+        // Only require name and phone - relationship defaults to "Family Member"
+        // Photo is optional despite the comment saying "required"
         return !profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
                !phoneNumber.isEmpty &&
                phoneNumber != "+1 " && // Must be more than just the prefix
-               !relationship.isEmpty &&
-               hasSelectedPhoto && // Picture is now required
                nameError == nil &&
-               phoneError == nil &&
-               relationshipError == nil
+               phoneError == nil
     }
     
     /// Returns missing requirements for form validation
     var missingRequirements: [String] {
         var missing: [String] = []
-        
+
         if profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             missing.append("Name")
         }
         if phoneNumber.isEmpty || phoneNumber == "+1 " {
             missing.append("Phone Number")
         }
-        if relationship.isEmpty {
-            missing.append("Relationship")
-        }
-        if !hasSelectedPhoto {
-            missing.append("Picture")
-        }
+        // Relationship and photo are optional for SimplifiedProfileCreationView
+        // They will be set to defaults if not provided
         if nameError != nil {
             missing.append("Valid Name")
         }
         if phoneError != nil {
             missing.append("Valid Phone Number")
         }
-        if relationshipError != nil {
-            missing.append("Valid Relationship")
-        }
-        
+
         return missing
     }
     
@@ -338,20 +331,32 @@ final class ProfileViewModel: ObservableObject {
         dataSyncCoordinator: DataSyncCoordinator,
         errorCoordinator: ErrorCoordinator
     ) {
+        DiagnosticLogger.enter(.vmInit, "ProfileViewModel.init", context: [
+            "authStatus": authService.isAuthenticated,
+            "userId": authService.currentUser?.uid ?? "nil"
+        ])
+
         self.databaseService = databaseService
         self.smsService = smsService
         self.authService = authService
         self.dataSyncCoordinator = dataSyncCoordinator
         self.errorCoordinator = errorCoordinator
-        
+
         // Configure elderly-appropriate validation
         setupValidation()
-        
+
         // Enable real-time family and SMS synchronization
         setupDataSync()
-        
+
+        DiagnosticLogger.info(.vmInit, "Calling loadProfiles() from init", context: [
+            "authStatus": authService.isAuthenticated,
+            "userId": authService.currentUser?.uid ?? "nil"
+        ])
+
         // Load existing profiles with confirmation status
         loadProfiles()
+
+        DiagnosticLogger.exit(.vmInit, "ProfileViewModel.init")
     }
     
     /// Convenience initializer for Canvas previews that skips automatic data loading
@@ -436,37 +441,96 @@ final class ProfileViewModel: ObservableObject {
     
     // MARK: - Data Loading
     func loadProfiles() {
+        let callId = DiagnosticLogger.generateCallId()
+        DiagnosticLogger.info(.vmLoad, "loadProfiles() called", context: [
+            "callId": callId,
+            "thread": DiagnosticLogger.threadInfo()
+        ])
+
         _Concurrency.Task {
-            await loadProfilesAsync()
+            await loadProfilesAsync(callId: callId)
         }
     }
-    
-    private func loadProfilesAsync() async {
+
+    private func loadProfilesAsync(callId: String = "UNKNOWN") async {
+        DiagnosticLogger.enter(.vmLoad, "loadProfilesAsync", context: [
+            "callId": callId,
+            "thread": DiagnosticLogger.threadInfo()
+        ])
+
         isLoading = true
         errorMessage = nil
-        
+
         do {
+            DiagnosticLogger.info(.vmLoad, "Checking authentication", context: [
+                "callId": callId,
+                "isAuthenticated": authService.isAuthenticated,
+                "userId": authService.currentUser?.uid ?? "nil"
+            ])
+
             guard let userId = authService.currentUser?.uid else {
+                DiagnosticLogger.warning(.vmLoad, "⚠️ No user authenticated, returning early", context: [
+                    "callId": callId
+                ])
                 throw ProfileError.userNotAuthenticated
             }
-            
+
+            DiagnosticLogger.info(.vmLoad, "Fetching profiles from database", context: [
+                "callId": callId,
+                "userId": userId
+            ])
+
+            let tracker = DiagnosticLogger.track(.database, "Fetch profiles", context: [
+                "callId": callId,
+                "userId": userId
+            ])
+
             let loadedProfiles = try await databaseService.getElderlyProfiles(for: userId)
-            
+
+            tracker.end(success: true, additionalContext: ["count": loadedProfiles.count])
+
+            DiagnosticLogger.success(.vmLoad, "Profiles loaded from database", context: [
+                "callId": callId,
+                "count": loadedProfiles.count
+            ])
+
             await MainActor.run {
+                DiagnosticLogger.info(.uiUpdate, "Updating profiles array", context: [
+                    "callId": callId,
+                    "oldCount": self.profiles.count,
+                    "newCount": loadedProfiles.count,
+                    "thread": DiagnosticLogger.threadInfo()
+                ])
+
                 self.profiles = loadedProfiles.sorted { $0.createdAt > $1.createdAt }
                 self.updateConfirmationStatuses()
+
+                DiagnosticLogger.success(.uiUpdate, "UI updated with profiles", context: [
+                    "callId": callId,
+                    "profileCount": self.profiles.count
+                ])
             }
-            
+
         } catch {
+            DiagnosticLogger.error(.vmLoad, "Failed to load profiles", context: [
+                "callId": callId,
+                "error": error.localizedDescription
+            ], error: error)
+
             await MainActor.run {
                 self.errorMessage = error.localizedDescription
                 self.errorCoordinator.handle(error, context: "Loading profiles")
             }
         }
-        
+
         await MainActor.run {
             self.isLoading = false
         }
+
+        DiagnosticLogger.exit(.vmLoad, "loadProfilesAsync", context: [
+            "callId": callId,
+            "finalProfileCount": profiles.count
+        ])
     }
     
     // MARK: - Profile Creation & SMS Confirmation
@@ -523,35 +587,84 @@ final class ProfileViewModel: ObservableObject {
     profile creation attempts.
     */
     func createProfileAsync() async {
+        let tracker = DiagnosticLogger.track(.asyncTask, "Create profile", context: [
+            "thread": DiagnosticLogger.threadInfo()
+        ])
+
+        // ✅ DIAGNOSTIC: Check validation state
+        print("🔍 ==================== PROFILE CREATION DEBUG ====================")
+        print("🔍 profileName: '\(profileName)'")
+        print("🔍 phoneNumber: '\(phoneNumber)'")
+        print("🔍 relationship: '\(relationship)'")
+        print("🔍 timeZone: \(timeZone.identifier)")
+        print("🔍 isEmergencyContact: \(isEmergencyContact)")
+        print("🔍 notes: '\(notes)'")
+        print("🔍 hasSelectedPhoto: \(hasSelectedPhoto)")
+        print("🔍 selectedPhotoData: \(selectedPhotoData?.count ?? 0) bytes")
+        print("🔍 nameError: \(String(describing: nameError))")
+        print("🔍 phoneError: \(String(describing: phoneError))")
+        print("🔍 relationshipError: \(String(describing: relationshipError))")
+        print("🔍 isValidForm: \(isValidForm)")
+        print("🔍 missingRequirements: \(missingRequirements)")
+        print("🔍 ================================================================")
+
         guard isValidForm else {
-            print("⚠️ Profile form validation failed")
+            print("❌ VALIDATION FAILED - Exiting createProfileAsync")
+            DiagnosticLogger.warning(.asyncTask, "Profile form validation failed", context: [
+                "profileName": profileName,
+                "phoneNumber": phoneNumber,
+                "relationship": relationship,
+                "hasSelectedPhoto": hasSelectedPhoto,
+                "missingRequirements": missingRequirements.joined(separator: ", ")
+            ])
+
+            // Show error to user
+            await MainActor.run {
+                self.errorMessage = "Missing: \(missingRequirements.joined(separator: ", "))"
+            }
+
             return
         }
 
-        isLoading = true
-        errorMessage = nil
+        print("✅ VALIDATION PASSED - Proceeding with profile creation")
+
+        await MainActor.run {
+            self.isLoading = true
+            self.errorMessage = nil
+        }
 
         do {
-            print("🔍 Checking authentication state...")
-            print("🔍 Auth service type: \(type(of: authService))")
-            print("🔍 Is authenticated: \(authService.isAuthenticated)")
-            print("🔍 Current user: \(String(describing: authService.currentUser))")
+            DiagnosticLogger.info(.asyncTask, "Checking authentication", context: [
+                "authServiceType": String(describing: type(of: authService)),
+                "isAuthenticated": authService.isAuthenticated,
+                "hasCurrentUser": authService.currentUser != nil
+            ])
 
             guard let userId = authService.currentUser?.uid else {
-                print("❌ Authentication check failed - no user ID")
+                DiagnosticLogger.error(.asyncTask, "❌ Authentication check failed - no user ID")
                 throw ProfileError.userNotAuthenticated
             }
 
-            print("✅ User authenticated with ID: \(userId)")
-            
+            DiagnosticLogger.success(.asyncTask, "User authenticated", context: ["userId": userId])
+
             // Protective limit: Max 4 profiles per family to prevent SMS overwhelming
             guard canCreateProfile else {
+                DiagnosticLogger.warning(.asyncTask, "Max profiles limit reached", context: [
+                    "currentCount": profiles.count,
+                    "maxProfiles": maxProfiles
+                ])
                 throw ProfileError.maxProfilesReached
             }
-            
+
             // Format phone number for SMS delivery compatibility
             let formattedPhone = phoneNumber.formattedPhoneNumber
-            
+
+            DiagnosticLogger.info(.asyncTask, "Creating profile object", context: [
+                "name": profileName,
+                "phone": formattedPhone,
+                "relationship": relationship
+            ])
+
             // Create profile with elderly-optimized defaults
             let profile = ElderlyProfile(
                 id: IDGenerator.profileID(phoneNumber: formattedPhone),
@@ -566,45 +679,99 @@ final class ProfileViewModel: ObservableObject {
                 createdAt: Date(),
                 lastActiveAt: Date()
             )
-            
-            print("💾 Saving profile to database...")
-            // Persist with family synchronization
-            try await databaseService.createElderlyProfile(profile)
-            print("✅ Profile saved to database successfully")
 
-            print("📡 Broadcasting profile update...")
+            DiagnosticLogger.info(.database, "Saving profile to database", context: [
+                "profileId": profile.id,
+                "userId": userId
+            ])
+
+            // Persist with family synchronization
+            let dbTracker = DiagnosticLogger.track(.database, "Create elderly profile", context: [
+                "profileId": profile.id
+            ])
+
+            do {
+                try await databaseService.createElderlyProfile(profile)
+                dbTracker.end(success: true)
+                DiagnosticLogger.success(.database, "Profile saved successfully", context: [
+                    "profileId": profile.id
+                ])
+            } catch {
+                dbTracker.end(success: false, additionalContext: ["error": error.localizedDescription])
+                DiagnosticLogger.error(.database, "Failed to save profile", context: [
+                    "profileId": profile.id
+                ], error: error)
+                throw error
+            }
+
+            DiagnosticLogger.info(.asyncTask, "Broadcasting profile update")
             // Broadcast profile creation to Dashboard and other family members
             dataSyncCoordinator.broadcastProfileUpdate(profile)
-            print("✅ Profile update broadcasted")
+            DiagnosticLogger.success(.asyncTask, "Profile update broadcasted")
 
-            print("📱 Sending confirmation SMS...")
+            DiagnosticLogger.info(.asyncTask, "Sending confirmation SMS")
             // Send SMS confirmation immediately (critical step)
-            try await sendConfirmationSMS(for: profile)
-            print("✅ SMS sent successfully")
+            do {
+                try await sendConfirmationSMS(for: profile)
+                DiagnosticLogger.success(.asyncTask, "SMS sent successfully", context: [
+                    "profileId": profile.id,
+                    "phoneNumber": profile.phoneNumber
+                ])
+            } catch {
+                DiagnosticLogger.error(.asyncTask, "Failed to send SMS", context: [
+                    "profileId": profile.id,
+                    "phoneNumber": profile.phoneNumber
+                ], error: error)
+                // Don't throw - profile created, SMS failure is recoverable
+            }
 
             await MainActor.run {
-                print("🎉 Updating local state with new profile")
+                DiagnosticLogger.info(.uiUpdate, "Updating local state", context: [
+                    "oldProfileCount": self.profiles.count,
+                    "thread": DiagnosticLogger.threadInfo()
+                ])
+
                 // Update local state for immediate family feedback
                 self.profiles.insert(profile, at: 0)
                 self.confirmationStatus[profile.id] = .sent
                 self.resetForm()
                 self.showingCreateProfile = false
-                print("✅ Profile creation complete! Total profiles: \(self.profiles.count)")
+
+                DiagnosticLogger.success(.uiUpdate, "Profile creation complete", context: [
+                    "totalProfiles": self.profiles.count,
+                    "newProfileId": profile.id
+                ])
             }
 
+            tracker.end(success: true, additionalContext: [
+                "profileId": profile.id,
+                "totalProfiles": profiles.count
+            ])
+
         } catch {
-            print("❌ Error creating profile: \(error)")
-            print("❌ Error type: \(type(of: error))")
-            print("❌ Error description: \(error.localizedDescription)")
+            DiagnosticLogger.error(.asyncTask, "❌ Profile creation failed", context: [
+                "errorType": String(describing: type(of: error)),
+                "error": error.localizedDescription
+            ], error: error)
+
             await MainActor.run {
                 // Provide family-friendly error context
                 self.errorMessage = error.localizedDescription
                 self.errorCoordinator.handle(error, context: "Creating elderly family member profile")
+
+                DiagnosticLogger.info(.uiUpdate, "Error message displayed to user", context: [
+                    "message": error.localizedDescription
+                ])
             }
+
+            tracker.end(success: false, additionalContext: [
+                "error": error.localizedDescription
+            ])
         }
-        
+
         await MainActor.run {
             self.isLoading = false
+            DiagnosticLogger.info(.uiUpdate, "Loading state cleared")
         }
     }
     

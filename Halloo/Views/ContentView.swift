@@ -12,7 +12,9 @@ struct ContentView: View {
     @State private var profileViewModel: ProfileViewModel?
     @State private var dashboardViewModel: DashboardViewModel?
     @State private var authService: FirebaseAuthenticationService?
+    @State private var isAuthenticated = false
     @State private var selectedTab = 0
+    @State private var authCancellables = Set<AnyCancellable>()
 
     // MARK: - Initialization
     init() {
@@ -34,8 +36,8 @@ struct ContentView: View {
     // MARK: - Navigation Content
     @ViewBuilder
     private var navigationContent: some View {
-        if let authService = authService, onboardingViewModel != nil {
-            if authService.isAuthenticated {
+        if onboardingViewModel != nil {
+            if isAuthenticated {
                 authenticatedContent
                     .onAppear {
                         print("✅ Showing authenticated content (dashboard)")
@@ -109,6 +111,9 @@ struct ContentView: View {
 
         print("✅ All ViewModels created successfully")
 
+        // Subscribe to auth state changes
+        setupAuthStateObserver()
+
         // Check if user is already authenticated on app launch
         _Concurrency.Task {
             // Small delay to ensure Firebase Auth is ready
@@ -117,13 +122,35 @@ struct ContentView: View {
             await MainActor.run {
                 if authService?.isAuthenticated == true {
                     print("✅ User already authenticated on app launch, going to dashboard")
+                    isAuthenticated = true
                     // Reload profiles now that user is authenticated
                     profileViewModel?.loadProfiles()
                 } else {
                     print("ℹ️ User not authenticated, showing login")
+                    isAuthenticated = false
                 }
             }
         }
+    }
+
+    private func setupAuthStateObserver() {
+        guard let authService = authService else { return }
+
+        // Subscribe to auth state publisher
+        authService.authStatePublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak authService] newAuthState in
+                print("🔐 Auth state changed: \(newAuthState)")
+                self.isAuthenticated = newAuthState
+
+                if newAuthState {
+                    print("✅ User authenticated, navigating to dashboard")
+                    self.profileViewModel?.loadProfiles()
+                } else {
+                    print("🔓 User logged out, showing login screen")
+                }
+            }
+            .store(in: &authCancellables)
     }
 
     // TEMPORARY: Safe TaskViewModel creation with detailed debugging

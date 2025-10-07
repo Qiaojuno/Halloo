@@ -21,7 +21,7 @@ struct SharedHeaderSection: View {
     @Binding var selectedProfileIndex: Int
 
     // MARK: - UI State
-    @State private var showingAccountSettings = false
+    @State private var showingAccountSettings = false   
     @State private var serviceType: String = ""
 
     // MARK: - Initialization

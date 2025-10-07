@@ -78,10 +78,48 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     // MARK: - Profile Operations
     
     func createElderlyProfile(_ profile: ElderlyProfile) async throws {
+        DiagnosticLogger.info(.profileId, "Creating profile", context: [
+            "profileId": profile.id,
+            "userId": profile.userId,
+            "phoneNumber": profile.phoneNumber
+        ])
+
+        // Check for existing profile with same phone number
+        let existingProfiles = try await CollectionPath.userProfiles(userId: profile.userId)
+            .collection(in: db)
+            .whereField("phoneNumber", isEqualTo: profile.phoneNumber)
+            .getDocuments()
+
+        if !existingProfiles.isEmpty {
+            DiagnosticLogger.warning(.profileId, "⚠️ DUPLICATE PHONE NUMBER DETECTED", context: [
+                "newProfileId": profile.id,
+                "phoneNumber": profile.phoneNumber,
+                "existingCount": existingProfiles.documents.count
+            ])
+
+            for (index, doc) in existingProfiles.documents.enumerated() {
+                let data = doc.data()
+                DiagnosticLogger.info(.profileId, "Existing profile \(index + 1)", context: [
+                    "id": doc.documentID,
+                    "name": data["name"] ?? "unknown",
+                    "phoneNumber": data["phoneNumber"] ?? "unknown"
+                ])
+            }
+        } else {
+            DiagnosticLogger.success(.profileId, "No duplicate phone numbers found", context: [
+                "phoneNumber": profile.phoneNumber
+            ])
+        }
+
         let profileData = try encodeToFirestore(profile)
         try await CollectionPath.userProfiles(userId: profile.userId)
             .document(profile.id, in: db)
             .setData(profileData)
+
+        DiagnosticLogger.success(.database, "Profile created in Firestore", context: [
+            "profileId": profile.id,
+            "userId": profile.userId
+        ])
 
         // Update user's profile count
         try await updateUserProfileCount(profile.userId)
@@ -121,6 +159,8 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
 
     func deleteElderlyProfile(_ profileId: String) async throws {
+        DiagnosticLogger.info(.schema, "Profile delete requested", context: ["profileId": profileId])
+
         // Use collection group query to find profile
         let snapshot = try await db.collectionGroup("profiles")
             .whereField("id", isEqualTo: profileId)
@@ -130,11 +170,19 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
         guard let document = snapshot.documents.first,
               let profileData = document.data() as? [String: Any],
               let userId = profileData["userId"] as? String else {
+            DiagnosticLogger.error(.schema, "Profile not found", context: ["profileId": profileId])
             throw DatabaseError.documentNotFound
         }
 
+        DiagnosticLogger.info(.schema, "Profile found, starting recursive delete", context: [
+            "profileId": profileId,
+            "userId": userId
+        ])
+
         // ✅ Use recursive helper for safe cascade delete
         try await deleteProfileRecursively(profileId, userId: userId)
+
+        DiagnosticLogger.success(.schema, "Profile deleted successfully", context: ["profileId": profileId])
     }
 
     func getConfirmedProfiles(for userId: String) async throws -> [ElderlyProfile] {
@@ -753,10 +801,11 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
 
         let profileCount = profilesSnapshot.documents.count
 
-        try await CollectionPath.users.document(userId, in: db).updateData([
+        // Use setData(merge: true) instead of updateData to create document if it doesn't exist
+        try await CollectionPath.users.document(userId, in: db).setData([
             "profileCount": profileCount,
             "updatedAt": FieldValue.serverTimestamp()
-        ])
+        ], merge: true)
     }
 
     private func updateUserTaskCount(_ userId: String) async throws {
@@ -767,10 +816,11 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
 
         let taskCount = tasksSnapshot.documents.count
 
-        try await CollectionPath.users.document(userId, in: db).updateData([
+        // Use setData(merge: true) instead of updateData to create document if it doesn't exist
+        try await CollectionPath.users.document(userId, in: db).setData([
             "taskCount": taskCount,
             "updatedAt": FieldValue.serverTimestamp()
-        ])
+        ], merge: true)
     }
     
     // MARK: - Encoding/Decoding Helpers
@@ -859,14 +909,58 @@ extension FirebaseDatabaseService {
     ///   - userId: The user who owns this profile (for updating counts)
     /// - Note: Uses nested subcollections - deletes habits and messages automatically
     func deleteProfileRecursively(_ profileId: String, userId: String) async throws {
+        let tracker = DiagnosticLogger.track(.schema, "Delete profile recursively", context: [
+            "profileId": profileId,
+            "userId": userId
+        ])
+
         let profileRef = CollectionPath.userProfiles(userId: userId)
             .document(profileId, in: db)
+
+        // Count items before deletion for verification
+        let habitsSnapshot = try await profileRef.collection("habits").getDocuments()
+        let messagesSnapshot = try await profileRef.collection("messages").getDocuments()
+
+        DiagnosticLogger.info(.schema, "Found nested data", context: [
+            "profileId": profileId,
+            "habitsCount": habitsSnapshot.documents.count,
+            "messagesCount": messagesSnapshot.documents.count,
+            "totalItems": habitsSnapshot.documents.count + messagesSnapshot.documents.count
+        ])
+
+        let totalOps = habitsSnapshot.documents.count + messagesSnapshot.documents.count + 1
+        if totalOps > 500 {
+            DiagnosticLogger.warning(.schema, "⚠️ Operations exceed batch limit", context: [
+                "totalOps": totalOps,
+                "limit": 500,
+                "willUseMultipleBatches": true
+            ])
+        }
 
         // Delete all nested subcollections under profile (habits and messages)
         try await deleteDocumentRecursively(profileRef, subcollections: ["habits", "messages"])
 
+        // Verify deletion
+        let verifyHabits = try await profileRef.collection("habits").limit(to: 1).getDocuments()
+        let verifyMessages = try await profileRef.collection("messages").limit(to: 1).getDocuments()
+
+        if !verifyHabits.isEmpty || !verifyMessages.isEmpty {
+            DiagnosticLogger.error(.schema, "❌ ORPHANED DATA DETECTED", context: [
+                "profileId": profileId,
+                "remainingHabits": verifyHabits.documents.count,
+                "remainingMessages": verifyMessages.documents.count
+            ])
+        } else {
+            DiagnosticLogger.success(.schema, "All nested data deleted", context: ["profileId": profileId])
+        }
+
         // Update user's profile count
         try await updateUserProfileCount(userId)
+
+        tracker.end(success: true, additionalContext: [
+            "deletedHabits": habitsSnapshot.documents.count,
+            "deletedMessages": messagesSnapshot.documents.count
+        ])
     }
 }
 

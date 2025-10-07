@@ -387,28 +387,52 @@ struct SimplifiedProfileCreationView: View {
     }
 
     private func handleCreateProfile() {
-        guard canProceed else { return }
+        print("🔨 ========== handleCreateProfile() CALLED ==========")
+        print("🔨 canProceed: \(canProceed)")
+
+        guard canProceed else {
+            print("❌ canProceed is FALSE - exiting early")
+            return
+        }
+
+        print("✅ canProceed is TRUE - proceeding")
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
+        print("🔨 Local form values:")
+        print("🔨   profileName: '\(profileName)'")
+        print("🔨   phoneNumber: '\(phoneNumber)'")
+        print("🔨   selectedPhoto: \(selectedPhoto != nil)")
+
+        // Set form data on ViewModel
         profileViewModel.profileName = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
         profileViewModel.phoneNumber = phoneNumber
         profileViewModel.hasSelectedPhoto = selectedPhoto != nil
 
+        // Set default relationship if not already set
+        if profileViewModel.relationship.isEmpty {
+            print("🔨 Setting default relationship: 'Family Member'")
+            profileViewModel.relationship = "Family Member"
+        }
+
         if let photo = selectedPhoto, let photoData = photo.jpegData(compressionQuality: 0.8) {
+            print("🔨 Converting photo to JPEG data: \(photoData.count) bytes")
             profileViewModel.selectedPhotoData = photoData
         }
 
+        print("🔨 ViewModel values after setting:")
+        print("🔨   profileViewModel.profileName: '\(profileViewModel.profileName)'")
+        print("🔨   profileViewModel.phoneNumber: '\(profileViewModel.phoneNumber)'")
+        print("🔨   profileViewModel.relationship: '\(profileViewModel.relationship)'")
+        print("🔨   profileViewModel.hasSelectedPhoto: \(profileViewModel.hasSelectedPhoto)")
+
         // Create profile asynchronously and WAIT for completion
         _Concurrency.Task {
-            print("🔨 SimplifiedProfileCreationView: Starting profile creation...")
-            print("🔨 Profile name: \(profileName)")
-            print("🔨 Phone number: \(phoneNumber)")
-            print("🔨 ProfileViewModel has photo: \(profileViewModel.hasSelectedPhoto)")
+            print("🔨 SimplifiedProfileCreationView: Starting async task...")
 
             // Actually wait for profile creation to complete
             await profileViewModel.createProfileAsync()
 
-            print("✅ SimplifiedProfileCreationView: Profile creation completed")
+            print("✅ SimplifiedProfileCreationView: createProfileAsync() returned")
             print("✅ ProfileViewModel.profiles.count = \(profileViewModel.profiles.count)")
 
             await MainActor.run {
