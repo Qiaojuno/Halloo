@@ -10,7 +10,6 @@ struct LoginView: View {
     @State private var isSigningIn = false
     @State private var showingError = false
     @State private var errorMessage = ""
-    @State private var debugStatus = ""
     
     var body: some View {
         GeometryReader { geometry in
@@ -106,20 +105,6 @@ struct LoginView: View {
                 }
                 .ignoresSafeArea(.all)
             )
-            .overlay(
-                VStack {
-                    if !debugStatus.isEmpty {
-                        Text(debugStatus)
-                            .font(.system(size: 12))
-                            .padding(8)
-                            .background(Color.black.opacity(0.7))
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
-                            .padding()
-                    }
-                    Spacer()
-                }
-            )
         }
         .alert("Sign In Error", isPresented: $showingError) {
             Button("OK") { }
@@ -148,10 +133,6 @@ struct LoginView: View {
     
     private func processAppleSignIn(_ authorization: ASAuthorization) async {
         do {
-            await MainActor.run {
-                debugStatus = "Starting Apple Sign-In..."
-            }
-
             let authService = container.resolve(AuthenticationServiceProtocol.self)
 
             // Cast to FirebaseAuthenticationService to access processAppleSignIn method
@@ -159,7 +140,6 @@ struct LoginView: View {
                 let result = try await firebaseAuthService.processAppleSignIn(authorization: authorization)
 
                 await MainActor.run {
-                    debugStatus = "Sign-In succeeded! Navigating to dashboard..."
                     isSigningIn = false
 
                     // Trigger navigation to dashboard via callback
@@ -167,13 +147,11 @@ struct LoginView: View {
                 }
             } else {
                 await MainActor.run {
-                    debugStatus = "Apple Sign-In not supported"
                     showError("Apple Sign In not supported with current authentication service")
                 }
             }
         } catch {
             await MainActor.run {
-                debugStatus = "Error: \(error.localizedDescription)"
                 showError("Apple Sign In failed: \(error.localizedDescription)")
             }
         }
@@ -190,15 +168,10 @@ struct LoginView: View {
     
     private func processGoogleSignIn() async {
         do {
-            await MainActor.run {
-                debugStatus = "Starting Google Sign-In..."
-            }
-
             let authService = container.resolve(AuthenticationServiceProtocol.self)
             let result = try await authService.signInWithGoogle()
 
             await MainActor.run {
-                debugStatus = "Sign-In succeeded! Navigating to dashboard..."
                 isSigningIn = false
 
                 // Trigger navigation to dashboard via callback
@@ -206,7 +179,6 @@ struct LoginView: View {
             }
         } catch {
             await MainActor.run {
-                debugStatus = "Error: \(error.localizedDescription)"
                 showError("Google Sign In failed: \(error.localizedDescription)")
             }
         }

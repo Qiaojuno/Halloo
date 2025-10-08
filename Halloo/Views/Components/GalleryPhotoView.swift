@@ -176,47 +176,55 @@ struct GalleryPhotoView: View {
     }
     
     private func textResponsePreview(for event: GalleryHistoryEvent) -> some View {
-        VStack(spacing: 0) {
-            // Top black line
-            Rectangle()
-                .fill(Color.black)
-                .frame(height: 1)
-            
-            // Message bubble area
-            VStack(spacing: 8) {
-                // Small outgoing message bubble (top)
+        ZStack {
+            // Light background
+            Color(hex: "f5f5f5")
+
+            // Middle aligned vertically
+            VStack(spacing: 6) {
+                // Outgoing message bubble (blue, top right) with 3 lines of broken up bars
                 HStack {
                     Spacer()
-                    Rectangle()
-                        .fill(Color(hex: "007AFF"))
-                        .frame(width: 40, height: 16)
-                        .cornerRadius(8)
+                    MiniSpeechBubble(
+                        textLines: [
+                            [(9, 1.5), (6, 1.5), (11, 1.5), (7, 1.5)],   // Line 1: 25% smaller
+                            [(12, 1.5), (5, 1.5), (9, 1.5)],             // Line 2: 25% smaller
+                            [(8, 1.5), (10, 1.5), (6, 1.5)]              // Line 3: 25% smaller
+                        ],
+                        isOutgoing: true,
+                        backgroundColor: Color(hex: "007AFF"),
+                        tailInset: 8
+                    )
                 }
-                .padding(.horizontal, 8)
-                
-                // Middle black line separator
-                Rectangle()
-                    .fill(Color.black)
-                    .frame(height: 0.5)
-                    .padding(.horizontal, 16)
-                
-                // Small incoming message bubble (bottom)
+                .padding(.trailing, 6)
+
+                // Incoming message bubble (gray, bottom left) with 1 line of broken up bars
                 HStack {
-                    Rectangle()
-                        .fill(Color(hex: "E5E5EA"))
-                        .frame(width: 24, height: 16)
-                        .cornerRadius(8)
+                    MiniSpeechBubble(
+                        textLines: [
+                            [(11, 1.5), (7, 1.5), (9, 1.5), (5, 1.5)]  // Line 1: 25% smaller
+                        ],
+                        isOutgoing: false,
+                        backgroundColor: Color(hex: "E5E5EA"),
+                        tailInset: 8
+                    )
                     Spacer()
                 }
-                .padding(.horizontal, 8)
+                .padding(.leading, 6)
             }
-            .padding(.vertical, 12)
-            .background(Color(hex: "f5f5f5"))
-            
-            // Bottom black line
-            Rectangle()
-                .fill(Color.black)
-                .frame(height: 1)
+
+            // Small light blue circle in bottom right
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Circle()
+                        .fill(Color(hex: "ADD8E6"))
+                        .frame(width: 16, height: 16)
+                        .padding(.trailing, 8)
+                        .padding(.bottom, 8)
+                }
+            }
         }
     }
     
@@ -236,6 +244,99 @@ struct GalleryPhotoView: View {
                     .stroke(Color.white, lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
+    }
+}
+
+// MARK: - Mini Speech Bubble for Gallery (scaled down version with BubbleWithTail)
+struct MiniSpeechBubble: View {
+    let textLines: [[(width: CGFloat, height: CGFloat)]]  // Array of lines, each line has multiple "words"
+    let isOutgoing: Bool
+    let backgroundColor: Color
+    let tailInset: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1.5) {
+            ForEach(0..<textLines.count, id: \.self) { lineIndex in
+                HStack(spacing: 1) {  // 1px space between "words"
+                    ForEach(0..<textLines[lineIndex].count, id: \.self) { wordIndex in
+                        Rectangle()
+                            .fill(Color.black)
+                            .frame(width: textLines[lineIndex][wordIndex].width,
+                                   height: textLines[lineIndex][wordIndex].height)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, isOutgoing && textLines.count > 1 ? 9 : 7)  // Taller for blue bubble with 3 lines
+        .background(
+            MiniBubbleWithTail(isOutgoing: isOutgoing, cornerRadius: 4, tailSize: 6, tailInset: tailInset)
+                .fill(backgroundColor)
+        )
+    }
+}
+
+// MARK: - Mini Bubble With Tail (customizable tail position)
+struct MiniBubbleWithTail: Shape {
+    let isOutgoing: Bool
+    let cornerRadius: CGFloat
+    let tailSize: CGFloat
+    let tailInset: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let width = rect.width
+        let height = rect.height
+
+        if isOutgoing {
+            // Outgoing bubble - tail on bottom right
+            path.move(to: CGPoint(x: cornerRadius, y: 0))
+            path.addLine(to: CGPoint(x: width - cornerRadius, y: 0))
+            path.addArc(center: CGPoint(x: width - cornerRadius, y: cornerRadius),
+                       radius: cornerRadius, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
+            path.addLine(to: CGPoint(x: width, y: height - cornerRadius))
+            path.addArc(center: CGPoint(x: width - cornerRadius, y: height - cornerRadius),
+                       radius: cornerRadius, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
+
+            // Tail closer to right edge
+            path.addLine(to: CGPoint(x: width - tailInset, y: height))
+            path.addLine(to: CGPoint(x: width - tailInset - tailSize, y: height))
+            path.addLine(to: CGPoint(x: width - tailInset, y: height + tailSize))
+            path.addLine(to: CGPoint(x: width - tailInset, y: height))
+
+            path.addLine(to: CGPoint(x: cornerRadius, y: height))
+            path.addArc(center: CGPoint(x: cornerRadius, y: height - cornerRadius),
+                       radius: cornerRadius, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+            path.addLine(to: CGPoint(x: 0, y: cornerRadius))
+            path.addArc(center: CGPoint(x: cornerRadius, y: cornerRadius),
+                       radius: cornerRadius, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+        } else {
+            // Incoming bubble - tail on bottom left
+            path.move(to: CGPoint(x: cornerRadius, y: 0))
+            path.addLine(to: CGPoint(x: width - cornerRadius, y: 0))
+            path.addArc(center: CGPoint(x: width - cornerRadius, y: cornerRadius),
+                       radius: cornerRadius, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
+            path.addLine(to: CGPoint(x: width, y: height - cornerRadius))
+            path.addArc(center: CGPoint(x: width - cornerRadius, y: height - cornerRadius),
+                       radius: cornerRadius, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
+            path.addLine(to: CGPoint(x: cornerRadius, y: height))
+            path.addArc(center: CGPoint(x: cornerRadius, y: height - cornerRadius),
+                       radius: cornerRadius, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+
+            // Tail closer to left edge
+            path.addLine(to: CGPoint(x: 0, y: height - cornerRadius))
+            path.addLine(to: CGPoint(x: tailInset, y: height))
+            path.addLine(to: CGPoint(x: tailInset + tailSize, y: height))
+            path.addLine(to: CGPoint(x: tailInset, y: height + tailSize))
+            path.addLine(to: CGPoint(x: tailInset, y: height))
+            path.addLine(to: CGPoint(x: 0, y: height - cornerRadius))
+
+            path.addLine(to: CGPoint(x: 0, y: cornerRadius))
+            path.addArc(center: CGPoint(x: cornerRadius, y: cornerRadius),
+                       radius: cornerRadius, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+        }
+
+        return path
     }
 }
 

@@ -476,20 +476,33 @@ final class DashboardViewModel: ObservableObject {
     private func loadProfiles() async {
         do {
             guard let userId = authService.currentUser?.uid else { return }
-            
+
             let loadedProfiles = try await databaseService.getElderlyProfiles(for: userId)
-            
+
+            #if DEBUG
+            print("🔍 [DashboardViewModel] Loaded \(loadedProfiles.count) profiles")
+            for (index, profile) in loadedProfiles.enumerated() {
+                print("  Profile \(index): id=\(profile.id), name=\(profile.name), status=\(profile.status)")
+            }
+            #endif
+
             await MainActor.run {
                 self.profiles = loadedProfiles
                 self.pendingConfirmations = loadedProfiles.filter { $0.status == .pendingConfirmation }
-                
+
                 // Auto-select first profile if none selected (UX improvement)
                 if self.selectedProfileId == nil && !loadedProfiles.isEmpty {
                     self.selectedProfileId = loadedProfiles[0].id
+                    #if DEBUG
+                    print("✅ [DashboardViewModel] Auto-selected profile: \(loadedProfiles[0].id)")
+                    #endif
                 }
             }
-            
+
         } catch {
+            #if DEBUG
+            print("❌ [DashboardViewModel] Failed to load profiles: \(error.localizedDescription)")
+            #endif
             await MainActor.run {
                 self.errorCoordinator.handle(error, context: "Loading profiles for dashboard")
             }
@@ -499,22 +512,54 @@ final class DashboardViewModel: ObservableObject {
     private func loadTodaysTasks() async {
         do {
             guard let userId = authService.currentUser?.uid else { return }
-            
+
             let startOfDay = Calendar.current.startOfDay(for: selectedDate)
             let _ = Calendar.current.date(byAdding: .day, value: 1, to: startOfDay)! // endOfDay for future filtering
-            
+
             let tasks = try await databaseService.getTasks(for: userId)
             let responses = try await databaseService.getSMSResponses(for: userId, date: selectedDate)
-            
+
+            #if DEBUG
+            print("🔍 [DashboardViewModel] loadTodaysTasks: Found \(tasks.count) tasks, \(responses.count) responses")
+            print("🔍 [DashboardViewModel] Current profiles.count: \(profiles.count)")
+            #endif
+
             let dashboardTasks = tasks.compactMap { task -> DashboardTask? in
-                guard task.status == .active,
-                      let profile = profiles.first(where: { $0.id == task.profileId }),
-                      profile.status == .confirmed else {
+                #if DEBUG
+                print("  📋 Checking task: '\(task.title)', status=\(task.status), profileId=\(task.profileId)")
+                #endif
+
+                guard task.status == .active else {
+                    #if DEBUG
+                    print("    ❌ FILTERED: Task status is \(task.status), not active")
+                    #endif
                     return nil
                 }
-                
+
+                guard let profile = profiles.first(where: { $0.id == task.profileId }) else {
+                    #if DEBUG
+                    print("    ❌ FILTERED: No profile found with id=\(task.profileId)")
+                    print("    Available profile IDs: \(profiles.map { $0.id })")
+                    #endif
+                    return nil
+                }
+
+                guard profile.status == .confirmed else {
+                    #if DEBUG
+                    print("    ❌ FILTERED: Profile status is \(profile.status), not confirmed")
+                    #endif
+                    return nil
+                }
+
+                #if DEBUG
+                print("    ✅ Profile matched! Checking if scheduled for \(selectedDate)")
+                #endif
+
                 // Check if task is scheduled for selected date
                 if task.isScheduledFor(date: selectedDate) {
+                    #if DEBUG
+                    print("    ✅ Task IS scheduled for today - creating DashboardTask")
+                    #endif
                     let taskResponses = responses.filter { $0.taskId == task.id }
                     let latestResponse = taskResponses.max { $0.receivedAt < $1.receivedAt }
                     
@@ -525,8 +570,13 @@ final class DashboardViewModel: ObservableObject {
                         response: latestResponse,
                         isOverdue: isTaskOverdue(task: task, scheduledTime: task.getScheduledTimeFor(date: selectedDate))
                     )
+                } else {
+                    #if DEBUG
+                    print("    ❌ FILTERED: Task NOT scheduled for \(selectedDate)")
+                    print("       Task frequency: \(task.frequency), scheduledTime: \(task.scheduledTime)")
+                    #endif
                 }
-                
+
                 return nil
             }
             

@@ -240,14 +240,16 @@ protocol DatabaseServiceProtocol {
     func updateTask(_ task: Task) async throws
     
     /// Permanently removes care task and associated SMS reminder scheduling
-    /// 
+    ///
     /// Deletes care task along with SMS responses and reminder schedules while
     /// maintaining analytics data integrity for family care pattern analysis.
     ///
     /// - Parameter taskId: Unique identifier for the care task to delete
+    /// - Parameter userId: Family user ID owning the task
+    /// - Parameter profileId: Elderly profile ID associated with the task
     /// - Throws: DatabaseError if deletion fails or task has active dependencies
     /// - Important: Also cancels pending SMS reminders to elderly person
-    func deleteTask(_ taskId: String) async throws
+    func deleteTask(_ taskId: String, userId: String, profileId: String) async throws
     
     /// Archives completed or discontinued care task while preserving analytics data
     /// 

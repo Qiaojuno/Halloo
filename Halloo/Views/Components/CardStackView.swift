@@ -35,20 +35,20 @@ struct CardStackView: View {
     }
     
     private var emptyCard: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 19.2) { // 24 × 0.8 = 19.2 (20% smaller)
             Spacer()
             Image(systemName: "paperplane.fill")
-                .font(.system(size: 80, weight: .light))
+                .font(.system(size: 64, weight: .light)) // 80 × 0.8 = 64 (20% smaller)
                 .foregroundColor(.white)
             Text("Your loved one's moments will appear\nhere as beautiful cards")
-                .font(.system(size: 18, weight: .medium))
+                .font(.system(size: 14.4, weight: .medium)) // 18 × 0.8 = 14.4 (20% smaller)
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
-                .lineSpacing(4)
+                .lineSpacing(3.2) // 4 × 0.8 = 3.2 (20% smaller)
             Spacer()
         }
         .frame(width: cardWidth, height: cardHeight)
-        .background(Color(red: 0.12, green: 0.12, blue: 0.12))
+        .background(Color(red: 0.108, green: 0.108, blue: 0.108)) // 0.12 × 0.9 = 0.108 (10% darker)
         .cornerRadius(20)
     }
     

@@ -132,10 +132,10 @@ class MockDatabaseService: DatabaseServiceProtocol {
         print("📦 Mock: Updated task '\(task.title)'")
     }
     
-    func deleteTask(_ taskId: String) async throws {
+    func deleteTask(_ taskId: String, userId: String, profileId: String) async throws {
         mockTasks.removeValue(forKey: taskId)
         mockResponses = mockResponses.filter { $0.value.taskId != taskId }
-        print("📦 Mock: Deleted task and related responses")
+        print("📦 Mock: Deleted task and related responses (userId: \(userId), profileId: \(profileId))")
     }
     
     func archiveTask(_ taskId: String) async throws {

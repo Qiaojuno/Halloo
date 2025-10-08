@@ -764,11 +764,11 @@ final class TaskViewModel: ObservableObject {
     private func deleteTaskAsync(_ task: Task) async {
         isLoading = true
         errorMessage = nil
-        
+
         do {
             try await cancelTaskNotifications(for: task)
-            try await databaseService.deleteTask(task.id)
-            
+            try await databaseService.deleteTask(task.id, userId: task.userId, profileId: task.profileId)
+
             await MainActor.run {
                 self.tasks.removeAll { $0.id == task.id }
             }

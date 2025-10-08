@@ -107,10 +107,6 @@ struct GalleryDetailView: View {
             }
         }
         .navigationBarHidden(true)
-        .onAppear {
-            print("DEBUG: GalleryDetailView appeared with currentIndex=\(currentIndex), totalEvents=\(totalEvents)")
-            print("DEBUG: hasPrevious=\(hasPrevious), hasNext=\(hasNext)")
-        }
     }
     
     // MARK: - Navigation Header with Chevrons

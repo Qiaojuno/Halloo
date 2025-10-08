@@ -34,18 +34,18 @@ struct GalleryView: View {
             // Match DashboardView structure exactly - no NavigationView wrapper
             ScrollView {
                 VStack(spacing: 0) { // Match DashboardView spacing: 0 between sections
-                    
+
                     // Header with Remi logo and user profile - using universal component
                     SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
-                    
+
                     // Gallery card - match spacing ratio with DashboardView profiles
                     VStack(alignment: .leading, spacing: 16) {
-                        // White card container (92% screen width) 
+                        // White card container (92% screen width)
                         VStack(spacing: 0) {
                             // Gallery card header with title and filter button
                             galleryCardHeader
                                 .background(Color.white)
-                            
+
                             // Photo Grid extends naturally without bottom rounding
                             photoGridContent
                                 .background(Color.white)
@@ -53,42 +53,16 @@ struct GalleryView: View {
                         .cornerRadius(10) // Round all corners
                         .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2) // Dark gray shadow
                     }
-                    
+
                     // Bottom padding to prevent content from hiding behind navigation
                     Spacer(minLength: 100)
                 }
                 .padding(.horizontal, UIScreen.main.bounds.width * 0.04) // Match DashboardView (96% width)
             }
             .background(Color(hex: "f9f9f9")) // Light gray app background
-            
-            // Floating navigation with black gradient
-            VStack {
-                Spacer()
-                
-                // Black gradient at bottom
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color.black.opacity(0),
-                        Color.black.opacity(0.15),
-                        Color.black.opacity(0.25)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 120) // Gradient height
-                .allowsHitTesting(false) // Don't block touches
-                .overlay(
-                    VStack {
-                        Spacer()
-                        HStack {
-                            FloatingPillNavigation(selectedTab: $selectedTab, onTabTapped: nil)
-                            Spacer() // Push navigation to left
-                        }
-                        .padding(.horizontal, 30) // More side padding from screen edges
-                        .padding(.bottom, 4) // Even closer to bottom of screen
-                    }
-                )
-            }
+
+            // Reusable bottom gradient navigation (no create button)
+            BottomGradientNavigation(selectedTab: $selectedTab)
         }
         .onAppear {
             initializeViewModel()
@@ -264,28 +238,47 @@ extension GalleryView {
     // Photo Grid Content Component
     private var photoGridContent: some View {
         LazyVStack(spacing: 16) {
-            ForEach(groupedEventsByDate, id: \.date) { dateGroup in
+            if groupedEventsByDate.isEmpty {
+                // Example message when no events exist
                 VStack(alignment: .leading, spacing: 8) {
-                    // Date header
+                    // Example header
                     HStack {
-                        Text(formatDateHeader(dateGroup.date))
+                        Text("Create your first Remi!")
                             .tracking(-1)
                             .font(.system(size: 15, weight: .regular))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.black)
                         Spacer()
                     }
                     .padding(.horizontal, 12)
-                    
-                    // Photo grid for this date
-                    LazyVGrid(columns: gridColumns, spacing: 4) {
-                        ForEach(dateGroup.events) { event in
-                            GalleryPhotoView.taskResponse(event: event)
-                                .onTapGesture {
-                                    selectedEventForDetail = event
-                                }
+
+                    // Example text message mini display
+                    exampleTextMessageBox
+                        .padding(.horizontal, 12)
+                }
+            } else {
+                ForEach(groupedEventsByDate, id: \.date) { dateGroup in
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Date header
+                        HStack {
+                            Text(formatDateHeader(dateGroup.date))
+                                .tracking(-1)
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundColor(.black)
+                            Spacer()
                         }
+                        .padding(.horizontal, 12)
+
+                        // Photo grid for this date
+                        LazyVGrid(columns: gridColumns, spacing: 4) {
+                            ForEach(dateGroup.events) { event in
+                                GalleryPhotoView.taskResponse(event: event)
+                                    .onTapGesture {
+                                        selectedEventForDetail = event
+                                    }
+                            }
+                        }
+                        .padding(.horizontal, 12)
                     }
-                    .padding(.horizontal, 12)
                 }
             }
         }
@@ -336,6 +329,63 @@ extension GalleryView {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM d, yyyy"
         return formatter.string(from: date)
+    }
+
+    // Example text message box (unclickable)
+    private var exampleTextMessageBox: some View {
+        ZStack {
+            // Light background
+            Color(hex: "f5f5f5")
+
+            // Middle aligned vertically
+            VStack(spacing: 6) {
+                // Outgoing message bubble (blue, top right) with 3 lines of broken up bars
+                HStack {
+                    Spacer()
+                    MiniSpeechBubble(
+                        textLines: [
+                            [(9, 1.5), (6, 1.5), (11, 1.5), (7, 1.5)],   // Line 1: 25% smaller
+                            [(12, 1.5), (5, 1.5), (9, 1.5)],             // Line 2: 25% smaller
+                            [(8, 1.5), (10, 1.5), (6, 1.5)]              // Line 3: 25% smaller
+                        ],
+                        isOutgoing: true,
+                        backgroundColor: Color(hex: "007AFF"),
+                        tailInset: 8
+                    )
+                }
+                .padding(.trailing, 6)
+
+                // Incoming message bubble (gray, bottom left) with 1 line of broken up bars
+                HStack {
+                    MiniSpeechBubble(
+                        textLines: [
+                            [(11, 1.5), (7, 1.5), (9, 1.5), (5, 1.5)]  // Line 1: 25% smaller
+                        ],
+                        isOutgoing: false,
+                        backgroundColor: Color(hex: "E5E5EA"),
+                        tailInset: 8
+                    )
+                    Spacer()
+                }
+                .padding(.leading, 6)
+            }
+
+            // Small light blue circle in bottom right
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Circle()
+                        .fill(Color(hex: "ADD8E6"))
+                        .frame(width: 16, height: 16)
+                        .padding(.trailing, 8)
+                        .padding(.bottom, 8)
+                }
+            }
+        }
+        .frame(width: 112, height: 112)
+        .cornerRadius(3)
+        .allowsHitTesting(false) // Make unclickable
     }
 }
 

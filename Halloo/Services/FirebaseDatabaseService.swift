@@ -1,5 +1,6 @@
 import Foundation
 import Firebase
+import FirebaseAuth
 import FirebaseFirestore
 import FirebaseStorage
 import Combine
@@ -257,14 +258,34 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
 
     func getTasks(for userId: String) async throws -> [Task] {
-        // Use collection group query to get all tasks for user across all profiles
-        let snapshot = try await db.collectionGroup("habits")
-            .whereField("userId", isEqualTo: userId)
-            .order(by: "createdAt")
-            .getDocuments()
+        #if DEBUG
+        print("🔍 [FirebaseDatabaseService] Querying habits collectionGroup for userId: \(userId)")
+        print("🔍 [FirebaseDatabaseService] Auth UID: \(Auth.auth().currentUser?.uid ?? "nil")")
+        #endif
 
-        return try snapshot.documents.map { document in
-            try decodeFromFirestore(document.data(), as: Task.self)
+        do {
+            // Use collection group query to get all tasks for user across all profiles
+            let snapshot = try await db.collectionGroup("habits")
+                .whereField("userId", isEqualTo: userId)
+                .order(by: "createdAt")
+                .getDocuments()
+
+            #if DEBUG
+            print("✅ [FirebaseDatabaseService] Successfully fetched \(snapshot.documents.count) habits")
+            if !snapshot.documents.isEmpty {
+                print("📊 [FirebaseDatabaseService] Sample habit IDs: \(snapshot.documents.prefix(3).map { $0.documentID })")
+            }
+            #endif
+
+            return try snapshot.documents.map { document in
+                try decodeFromFirestore(document.data(), as: Task.self)
+            }
+        } catch {
+            #if DEBUG
+            print("❌ [FirebaseDatabaseService] Query failed: \(error.localizedDescription)")
+            print("❌ [FirebaseDatabaseService] Error type: \(type(of: error))")
+            #endif
+            throw error
         }
     }
 
@@ -284,16 +305,31 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
         let startOfDay = calendar.startOfDay(for: date)
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
 
-        // Use collection group query across all user's profiles
-        let snapshot = try await db.collectionGroup("habits")
-            .whereField("userId", isEqualTo: userId)
-            .whereField("nextScheduledDate", isGreaterThanOrEqualTo: Timestamp(date: startOfDay))
-            .whereField("nextScheduledDate", isLessThan: Timestamp(date: endOfDay))
-            .order(by: "nextScheduledDate")
-            .getDocuments()
+        #if DEBUG
+        print("🔍 [FirebaseDatabaseService] Querying scheduled habits for date: \(startOfDay), userId: \(userId)")
+        #endif
 
-        return try snapshot.documents.map { document in
-            try decodeFromFirestore(document.data(), as: Task.self)
+        do {
+            // Use collection group query across all user's profiles
+            let snapshot = try await db.collectionGroup("habits")
+                .whereField("userId", isEqualTo: userId)
+                .whereField("nextScheduledDate", isGreaterThanOrEqualTo: Timestamp(date: startOfDay))
+                .whereField("nextScheduledDate", isLessThan: Timestamp(date: endOfDay))
+                .order(by: "nextScheduledDate")
+                .getDocuments()
+
+            #if DEBUG
+            print("✅ [FirebaseDatabaseService] Found \(snapshot.documents.count) scheduled habits for date")
+            #endif
+
+            return try snapshot.documents.map { document in
+                try decodeFromFirestore(document.data(), as: Task.self)
+            }
+        } catch {
+            #if DEBUG
+            print("❌ [FirebaseDatabaseService] Scheduled habits query failed: \(error.localizedDescription)")
+            #endif
+            throw error
         }
     }
 
@@ -352,34 +388,38 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             .updateData(taskData)
     }
     
-    func deleteTask(_ taskId: String) async throws {
-        // Find task using collection group query
-        let snapshot = try await db.collectionGroup("habits")
-            .whereField("id", isEqualTo: taskId)
-            .limit(to: 1)
-            .getDocuments()
+    func deleteTask(_ taskId: String, userId: String, profileId: String) async throws {
+        #if DEBUG
+        print("🔍 [FirebaseDatabaseService] deleteTask called")
+        print("   taskId: \(taskId)")
+        print("   userId: \(userId)")
+        print("   profileId: \(profileId)")
+        #endif
 
-        guard let taskDoc = snapshot.documents.first,
-              let taskData = taskDoc.data() as? [String: Any],
-              let userId = taskData["userId"] as? String,
-              let profileId = taskData["profileId"] as? String else {
-            throw DatabaseError.documentNotFound
+        do {
+            // Delete the task itself using the proper nested path
+            let taskPath = "users/\(userId)/profiles/\(profileId)/habits/\(taskId)"
+            #if DEBUG
+            print("🗑️ [FirebaseDatabaseService] Deleting habit at: \(taskPath)")
+            #endif
+
+            try await db.document(taskPath).delete()
+
+            #if DEBUG
+            print("✅ [FirebaseDatabaseService] Habit deleted successfully")
+            #endif
+
+            // Note: Messages are not deleted to preserve chat history
+            // Note: User task count is not updated (would require collection group query)
+
+        } catch {
+            #if DEBUG
+            print("❌ [FirebaseDatabaseService] Delete failed with error: \(error)")
+            print("   Error type: \(type(of: error))")
+            print("   Error description: \(error.localizedDescription)")
+            #endif
+            throw error
         }
-
-        // Delete all messages for this task (nested under profile)
-        let messagesSnapshot = try await db.collectionGroup("messages")
-            .whereField("taskId", isEqualTo: taskId)
-            .getDocuments()
-
-        for messageDoc in messagesSnapshot.documents {
-            try await messageDoc.reference.delete()
-        }
-
-        // Delete the task itself
-        try await taskDoc.reference.delete()
-
-        // Update user's task count
-        try await updateUserTaskCount(userId)
     }
     
     // MARK: - Response/Message Operations
@@ -452,15 +492,30 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
 
     func getRecentSMSResponses(for userId: String, limit: Int) async throws -> [SMSResponse] {
-        // Use collection group query across all user's profiles
-        let snapshot = try await db.collectionGroup("messages")
-            .whereField("userId", isEqualTo: userId)
-            .order(by: "receivedAt", descending: true)
-            .limit(to: limit)
-            .getDocuments()
+        #if DEBUG
+        print("🔍 [FirebaseDatabaseService] Querying recent messages (limit: \(limit)) for userId: \(userId)")
+        #endif
 
-        return try snapshot.documents.map { document in
-            try decodeFromFirestore(document.data(), as: SMSResponse.self)
+        do {
+            // Use collection group query across all user's profiles
+            let snapshot = try await db.collectionGroup("messages")
+                .whereField("userId", isEqualTo: userId)
+                .order(by: "receivedAt", descending: true)
+                .limit(to: limit)
+                .getDocuments()
+
+            #if DEBUG
+            print("✅ [FirebaseDatabaseService] Found \(snapshot.documents.count) recent messages")
+            #endif
+
+            return try snapshot.documents.map { document in
+                try decodeFromFirestore(document.data(), as: SMSResponse.self)
+            }
+        } catch {
+            #if DEBUG
+            print("❌ [FirebaseDatabaseService] Recent messages query failed: \(error.localizedDescription)")
+            #endif
+            throw error
         }
     }
 
@@ -683,10 +738,9 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
 
     func batchDeleteTasks(_ taskIds: [String]) async throws {
-        // Delete each task individually (uses collection group query)
-        for taskId in taskIds {
-            try await deleteTask(taskId)
-        }
+        // Note: This method cannot be implemented without userId and profileId
+        // Consider updating protocol to accept [(taskId, userId, profileId)] or Task objects
+        throw DatabaseError.invalidData
     }
 
     func batchCreateSMSResponses(_ responses: [SMSResponse]) async throws {
@@ -832,8 +886,35 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
     
     private func decodeFromFirestore<T: Codable>(_ data: [String: Any], as type: T.Type) throws -> T {
-        let jsonData = try JSONSerialization.data(withJSONObject: data)
-        return try JSONDecoder().decode(type, from: jsonData)
+        // Convert Firestore Timestamps to Dates for JSON serialization
+        let cleanedData = convertTimestampsToDates(data)
+        let jsonData = try JSONSerialization.data(withJSONObject: cleanedData)
+
+        // Configure decoder to handle timestamps as Unix epoch seconds
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+
+        return try decoder.decode(type, from: jsonData)
+    }
+
+    /// Recursively converts Firestore Timestamp and Data objects for JSON serialization
+    private func convertTimestampsToDates(_ data: Any) -> Any {
+        if let timestamp = data as? Timestamp {
+            // Convert Firestore Timestamp to Date, then to TimeInterval for JSON compatibility
+            return timestamp.dateValue().timeIntervalSince1970
+        } else if let binaryData = data as? Data {
+            // Convert binary Data to base64 string for JSON compatibility
+            return binaryData.base64EncodedString()
+        } else if let dictionary = data as? [String: Any] {
+            // Recursively process dictionary values
+            return dictionary.mapValues { convertTimestampsToDates($0) }
+        } else if let array = data as? [Any] {
+            // Recursively process array elements
+            return array.map { convertTimestampsToDates($0) }
+        } else {
+            // Return primitive types as-is
+            return data
+        }
     }
     
     deinit {

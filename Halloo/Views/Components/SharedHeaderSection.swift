@@ -21,8 +21,7 @@ struct SharedHeaderSection: View {
     @Binding var selectedProfileIndex: Int
 
     // MARK: - UI State
-    @State private var showingAccountSettings = false   
-    @State private var serviceType: String = ""
+    @State private var showingAccountSettings = false
 
     // MARK: - Initialization
     init(selectedProfileIndex: Binding<Int>) {
@@ -31,16 +30,6 @@ struct SharedHeaderSection: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // DEBUG: Show service type
-            Text("DB: \(serviceType)")
-                .font(.system(size: 10))
-                .foregroundColor(.red)
-                .padding(.horizontal, 26)
-                .onAppear {
-                    let dbService = container.resolve(DatabaseServiceProtocol.self)
-                    serviceType = String(describing: type(of: dbService))
-                }
-
             HStack(alignment: .center) {
                 /*
                  * MAIN LOGO: "Remi" brand text
@@ -51,7 +40,8 @@ struct SharedHeaderSection: View {
                     .font(AppFonts.poppinsMedium(size: 37.5))
                     .tracking(-3.1) // Scaled tracking from ProfileViews (-1.9 to -3.1 for larger size)
                     .foregroundColor(.black)
-            
+                    .fixedSize() // Prevent text truncation/clipping
+
             /*
              * PROFILE CIRCLES: Elderly family member selection
              * Positioned immediately after logo like original design
@@ -72,10 +62,28 @@ struct SharedHeaderSection: View {
                     }
                 }
             }
-            .padding(.leading, 16) // Add space between logo and profiles
+            .padding(.leading, 8) // Reduced from 16 to 8 (closer to logo)
             
             Spacer()
             
+            /*
+             * 🧪 DEBUG TEST DATA BUTTON: Inject test habits (DEBUG ONLY)
+             */
+            #if DEBUG
+            Button(action: {
+                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                impactFeedback.impactOccurred()
+
+                _Concurrency.Task {
+                    await injectTestData()
+                }
+            }) {
+                Image(systemName: "flask.fill")
+                    .font(.title3)
+                    .foregroundColor(.purple)
+            }
+            #endif
+
             /*
              * PROFILE SETTINGS BUTTON: Account/settings access
              * Shows account settings sheet with logout option
@@ -108,6 +116,50 @@ struct SharedHeaderSection: View {
                 .presentationDragIndicator(.visible)
         }
     }
+
+    // MARK: - Debug Test Data Injection
+    #if DEBUG
+    private func injectTestData() async {
+        let authService = container.resolve(AuthenticationServiceProtocol.self)
+        let databaseService = container.resolve(DatabaseServiceProtocol.self)
+
+        do {
+            // Get current user from AuthService
+            guard let currentUser = authService.currentUser else {
+                print("❌ No user logged in")
+                return
+            }
+
+            let profiles = try await databaseService.getElderlyProfiles(for: currentUser.uid)
+            guard let profileId = profiles.first?.id else {
+                print("❌ No profile found for this user")
+                return
+            }
+
+            print("🧪 Injecting test data for user: \(currentUser.uid), profile: \(profileId)")
+
+            let injector = TestDataInjector()
+            try await injector.addTestHabits(userId: currentUser.uid, profileId: profileId)
+
+            print("✅ Test data injection complete! Refresh the app to see changes.")
+
+            // Trigger haptic success feedback
+            await MainActor.run {
+                let successFeedback = UINotificationFeedbackGenerator()
+                successFeedback.notificationOccurred(.success)
+            }
+
+        } catch {
+            print("❌ Error injecting test data: \(error.localizedDescription)")
+
+            // Trigger haptic error feedback
+            await MainActor.run {
+                let errorFeedback = UINotificationFeedbackGenerator()
+                errorFeedback.notificationOccurred(.error)
+            }
+        }
+    }
+    #endif
 }
 
 // MARK: - Account Settings View

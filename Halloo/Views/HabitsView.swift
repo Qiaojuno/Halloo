@@ -37,7 +37,14 @@ struct HabitsView: View {
     
     /// Controls action sheet for unified create button
     @State private var showingCreateActionSheet = false
-    
+
+    /// Controls delete confirmation alert
+    @State private var showingDeleteConfirmation = false
+    @State private var habitToDelete: Task?
+
+    /// Track locally deleted habit IDs for optimistic UI updates
+    @State private var locallyDeletedHabitIds: Set<String> = []
+
     // Days of the week for display
     private let weekDays = ["S", "M", "T", "W", "T", "F", "S"]
     private let weekDayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
@@ -71,7 +78,6 @@ struct HabitsView: View {
                     .animation(nil, value: showingTaskCreation)
             }
         }
-        .animation(nil) // Disable all animations
     }
     
     private var habitsContent: some View {
@@ -80,59 +86,37 @@ struct HabitsView: View {
                 // Main content
                 ScrollView {
                     VStack(spacing: 10) { // Match DashboardView spacing
-                        
+
                         // 🏠 HEADER: App branding + account access
                         headerSection
-                        
+
                         // 📋 HABITS MANAGEMENT: All scheduled tasks with filtering and deletion
                         allScheduledTasksSection
-                        
+
                         // Bottom padding to prevent content from hiding behind navigation
                         Spacer(minLength: 100)
                     }
                     .padding(.horizontal, geometry.size.width * 0.04) // Match DashboardView
                 }
                 .background(Color(hex: "f9f9f9")) // Light gray app background
-                
-                // Bottom elements with gradient
-                VStack {
-                    Spacer()
-                    
-                    // Black gradient at bottom
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color.black.opacity(0),
-                            Color.black.opacity(0.15),
-                            Color.black.opacity(0.25)
-                        ]),
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 120) // Gradient height
-                    .allowsHitTesting(false) // Don't block touches
-                    .overlay(
-                        VStack {
-                            Spacer()
-                            // Navigation pill only - left-aligned, no + button
-                            HStack {
-                                bottomTabNavigation // Left-aligned
-                                Spacer() // Push navigation to left
-                            }
-                            .padding(.horizontal, 30) // More side padding from screen edges
-                            .padding(.bottom, 4) // Even closer to bottom of screen
-                        }
-                    )
-                }
+
+                // Reusable bottom gradient navigation (no create button)
+                BottomGradientNavigation(selectedTab: $selectedTab)
             }
         }
         .onAppear {
             loadData()
         }
-    }
-    
-    // MARK: - 🧭 Bottom Tab Navigation
-    private var bottomTabNavigation: some View {
-        FloatingPillNavigation(selectedTab: $selectedTab, onTabTapped: nil)
+        .alert("Delete Habit", isPresented: $showingDeleteConfirmation, presenting: habitToDelete) { habit in
+            Button("Cancel", role: .cancel) {
+                habitToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                confirmDeleteHabit()
+            }
+        } message: { habit in
+            Text("Are you sure you want to delete '\(habit.title)' scheduled \(formatHabitSchedule(habit: habit))?")
+        }
     }
     
     // MARK: - 🏠 Header Section
@@ -188,16 +172,16 @@ struct HabitsView: View {
                     }) {
                         Text(weekDays[dayIndex])
                             .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(selectedDays.contains(dayIndex) ? .white : Color(hex: "0D0C0C")) // White text when selected, dark when not
+                            .foregroundColor(Color(hex: "0D0C0C")) // Dark text for both states
                             .frame(width: (geometry.size.width / 7), height: 39) // Responsive width, fixed height
                             .background(
                                 Circle()
-                                    .fill(selectedDays.contains(dayIndex) ? Color(hex: "28ADFF") : Color.clear) // Blue fill when selected, clear when not
+                                    .fill(Color.clear) // Always clear background
                                     .frame(width: 39, height: 39) // Keep circle size consistent
                             )
                             .overlay(
                                 Circle()
-                                    .stroke(selectedDays.contains(dayIndex) ? Color.clear : Color(hex: "D5D5D5"), lineWidth: 1) // No stroke when selected, gray stroke when not
+                                    .stroke(selectedDays.contains(dayIndex) ? Color.black : Color(hex: "D5D5D5"), lineWidth: 1) // Black stroke when selected, gray stroke when not
                                     .frame(width: 39, height: 39) // Keep circle size consistent
                             )
                     }
@@ -221,7 +205,7 @@ struct HabitsView: View {
                     Spacer()
                 }
             } else {
-                ForEach(Array(filteredHabits.enumerated()), id: \.offset) { index, habit in
+                ForEach(filteredHabits, id: \.id) { habit in
                     HabitRowViewSimple(
                         habit: habit,
                         profile: getProfileForHabit(habit),
@@ -233,12 +217,21 @@ struct HabitsView: View {
                     .padding(.horizontal, 20) // Match dashboard completed tasks padding exactly
                     .padding(.vertical, 12) // Match dashboard completed tasks padding exactly
                     .background(Color.white) // Each habit has white background like dashboard
-                    
-                    if index < filteredHabits.count - 1 {
-                        Divider()
-                            .overlay(Color(hex: "f8f3f3"))
-                            .padding(.horizontal, 24) // Match dashboard spacing exactly
-                    }
+                    .overlay(
+                        // Divider at bottom if not last item
+                        VStack {
+                            Spacer()
+                            if habit.id != filteredHabits.last?.id {
+                                Divider()
+                                    .overlay(Color(hex: "f8f3f3"))
+                                    .padding(.horizontal, 4) // Relative padding since we're inside the padded view
+                            }
+                        }
+                    )
+                    .transition(.asymmetric(
+                        insertion: .identity,
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
                 }
             }
         }
@@ -259,6 +252,9 @@ struct HabitsView: View {
         let allTasks = viewModel.todaysTasks.map { $0.task }
 
         return allTasks.filter { habit in
+            // Exclude locally deleted habits for optimistic UI
+            guard !locallyDeletedHabitIds.contains(habit.id) else { return false }
+
             // Check if habit is scheduled for any of the selected days
             return selectedDays.contains { dayIndex in
                 let weekday = Weekday.fromIndex(dayIndex)
@@ -278,18 +274,83 @@ struct HabitsView: View {
     }
     
     private func deleteHabitFromSelectedDays(habit: Task) {
-        let selectedDayNames = selectedDays.map { weekDayNames[$0] }.joined(separator: ", ")
-        print("🗑️ Deleting habit '\(habit.title)' from selected days: \(selectedDayNames)")
-        
-        // TODO: Implement real day-specific deletion logic
-        // This would require updating the TaskViewModel to support:
-        // 1. Removing selected weekdays from habit.customDays
-        // 2. If no days left, delete entire habit
-        // 3. Update database through ViewModel
-        // 4. Refresh UI automatically through @Published properties
-        
-        // For now, just show feedback
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        // Store habit and show confirmation alert
+        habitToDelete = habit
+        showingDeleteConfirmation = true
+    }
+
+    private func confirmDeleteHabit() {
+        guard let habit = habitToDelete else { return }
+
+        print("🗑️ Deleting habit '\(habit.title)' (ID: \(habit.id))")
+
+        // Optimistic UI update: immediately remove from local state with iOS-native spring animation
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            locallyDeletedHabitIds.insert(habit.id)
+        }
+
+        // Trigger haptic feedback immediately for responsiveness
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+
+        // Perform database deletion in background
+        _Concurrency.Task {
+            do {
+                // Delete habit from database with userId and profileId
+                try await container.resolve(DatabaseServiceProtocol.self)
+                    .deleteTask(habit.id, userId: habit.userId, profileId: habit.profileId)
+
+                print("✅ Habit deleted successfully")
+
+                // Reload data to sync with server (without animation since UI already updated)
+                await MainActor.run {
+                    viewModel.loadDashboardData()
+                }
+
+            } catch {
+                print("❌ Failed to delete habit: \(error.localizedDescription)")
+
+                // Revert optimistic update on error with spring animation
+                await MainActor.run {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        locallyDeletedHabitIds.remove(habit.id)
+                    }
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                }
+            }
+        }
+
+        // Clear state
+        habitToDelete = nil
+    }
+
+    private func formatHabitSchedule(habit: Task) -> String {
+        let timeFormatter = DateFormatter()
+        timeFormatter.timeStyle = .short
+
+        let time = timeFormatter.string(from: habit.scheduledTime)
+
+        let days: String
+        switch habit.frequency {
+        case .daily:
+            days = "Every day"
+        case .weekdays:
+            days = "Weekdays (Mon-Fri)"
+        case .weekly:
+            let weekday = Calendar.current.component(.weekday, from: habit.scheduledTime)
+            let dayName = weekDayNames[weekday - 1]
+            days = "Every \(dayName)"
+        case .custom:
+            if habit.customDays.isEmpty {
+                days = "No days selected"
+            } else {
+                let dayNames = habit.customDays.map { $0.displayName }
+                days = dayNames.joined(separator: ", ")
+            }
+        case .once:
+            days = "One time"
+        }
+
+        return "at \(time) on \(days)"
     }
     
     // MARK: - ✨ Unified Create Button
@@ -343,16 +404,17 @@ struct HabitsView: View {
     // selectedProfile is already defined earlier in the file
 }
 
-// MARK: - Simplified Habit Row View Component  
+// MARK: - Simplified Habit Row View Component
 struct HabitRowViewSimple: View {
     let habit: Task
     let profile: ElderlyProfile?
     let selectedDays: Set<Int>
     let onDelete: () -> Void
-    
+
     @State private var dragOffset: CGFloat = 0
+    @State private var isDraggingHorizontally: Bool? = nil
     private let deleteButtonWidth: CGFloat = 80
-    
+
     var body: some View {
         ZStack {
             // Delete button background (red) - Single delete button
@@ -372,7 +434,7 @@ struct HabitRowViewSimple: View {
                         .background(Color.red)
                 }
             }
-            
+
             // Reuse TaskRowView from Dashboard
             TaskRowView(
                 task: habit,
@@ -385,18 +447,34 @@ struct HabitRowViewSimple: View {
             .gesture(
                 DragGesture()
                     .onChanged { value in
-                        if value.translation.width < 0 { // Only allow left swipe
+                        // Determine drag direction on first movement
+                        if isDraggingHorizontally == nil {
+                            let horizontalAmount = abs(value.translation.width)
+                            let verticalAmount = abs(value.translation.height)
+
+                            // Only treat as horizontal if horizontal movement is significantly larger
+                            isDraggingHorizontally = horizontalAmount > verticalAmount && horizontalAmount > 10
+                        }
+
+                        // Only respond to horizontal drags
+                        if isDraggingHorizontally == true && value.translation.width < 0 {
                             dragOffset = max(value.translation.width, -deleteButtonWidth)
                         }
                     }
                     .onEnded { value in
-                        withAnimation(.spring()) {
-                            if value.translation.width < -50 {
-                                dragOffset = -deleteButtonWidth
-                            } else {
-                                dragOffset = 0
+                        // Only process if it was a horizontal drag
+                        if isDraggingHorizontally == true {
+                            withAnimation(.spring()) {
+                                if value.translation.width < -50 {
+                                    dragOffset = -deleteButtonWidth
+                                } else {
+                                    dragOffset = 0
+                                }
                             }
                         }
+
+                        // Reset drag direction state
+                        isDraggingHorizontally = nil
                     }
             )
         }

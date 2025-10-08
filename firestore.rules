@@ -1,72 +1,123 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
+
     // Helper functions
     function isAuthenticated() {
       return request.auth != null;
     }
-    
+
     function isOwner(userId) {
       return request.auth.uid == userId;
     }
-    
+
     function isValidUser() {
-      return isAuthenticated() && 
-             request.auth.uid != null && 
+      return isAuthenticated() &&
+             request.auth.uid != null &&
              request.auth.uid.size() > 0;
     }
-    
-    // Users collection - users can only access their own document
+
+    // ===================================================================
+    // USER DOCUMENT & NESTED SUBCOLLECTIONS (Current App Architecture)
+    // ===================================================================
     match /users/{userId} {
       allow read, write: if isAuthenticated() && isOwner(userId);
       allow create: if isAuthenticated() && isOwner(userId) &&
                     resource == null; // Only allow creation if document doesn't exist
+
+      // Profiles subcollection - nested under users
+      match /profiles/{profileId} {
+        allow read, write: if isAuthenticated() && isOwner(userId);
+
+        // Habits subcollection - nested under profiles
+        match /habits/{habitId} {
+          allow read, write: if isAuthenticated() && isOwner(userId);
+        }
+
+        // Messages subcollection - nested under profiles
+        match /messages/{messageId} {
+          allow read, write: if isAuthenticated() && isOwner(userId);
+        }
+      }
+
+      // Legacy flat subcollections (backward compatibility)
+      match /tasks/{taskId} {
+        allow read, write: if isAuthenticated() && isOwner(userId);
+      }
+
+      match /smsResponses/{responseId} {
+        allow read, write: if isAuthenticated() && isOwner(userId);
+      }
+
+      // Gallery events subcollection
+      match /gallery_events/{eventId} {
+        allow read, write: if isAuthenticated() && isOwner(userId);
+      }
     }
-    
-    // Profiles collection - users can only access profiles they created
+
+    // ===================================================================
+    // COLLECTION GROUP QUERY PERMISSIONS
+    // Required for db.collectionGroup("habits") and db.collectionGroup("messages")
+    // PRODUCTION-SAFE: Only allows READ access, does NOT affect writes/deletes
+    // ===================================================================
+    match /{path=**}/habits/{habitId} {
+      allow read: if isAuthenticated() &&
+                     resource.data.userId == request.auth.uid;
+    }
+
+    match /{path=**}/messages/{messageId} {
+      allow read: if isAuthenticated() &&
+                     resource.data.userId == request.auth.uid;
+    }
+
+    // ===================================================================
+    // LEGACY FLAT COLLECTIONS (Backward Compatibility)
+    // These may contain old data - do NOT delete until migration complete
+    // ===================================================================
+
+    // Profiles collection (flat) - legacy data
     match /profiles/{profileId} {
-      allow read, write: if isAuthenticated() && 
+      allow read, write: if isAuthenticated() &&
                         isOwner(resource.data.userId);
-      allow create: if isAuthenticated() && 
+      allow create: if isAuthenticated() &&
                    isOwner(request.resource.data.userId) &&
                    request.resource.data.userId == request.auth.uid;
-      allow delete: if isAuthenticated() && 
+      allow delete: if isAuthenticated() &&
                    isOwner(resource.data.userId);
     }
-    
-    // Tasks collection - users can only access tasks they created
+
+    // Tasks collection (flat) - legacy data
     match /tasks/{taskId} {
-      allow read, write: if isAuthenticated() && 
+      allow read, write: if isAuthenticated() &&
                         isOwner(resource.data.userId);
-      allow create: if isAuthenticated() && 
+      allow create: if isAuthenticated() &&
                    isOwner(request.resource.data.userId) &&
                    request.resource.data.userId == request.auth.uid;
-      allow delete: if isAuthenticated() && 
+      allow delete: if isAuthenticated() &&
                    isOwner(resource.data.userId);
     }
-    
-    // Responses collection - users can only access responses they own
+
+    // Responses collection (flat) - legacy data
     match /responses/{responseId} {
-      allow read, write: if isAuthenticated() && 
+      allow read, write: if isAuthenticated() &&
                         isOwner(resource.data.userId);
-      allow create: if isAuthenticated() && 
+      allow create: if isAuthenticated() &&
                    isOwner(request.resource.data.userId) &&
                    request.resource.data.userId == request.auth.uid;
-      allow delete: if isAuthenticated() && 
+      allow delete: if isAuthenticated() &&
                    isOwner(resource.data.userId);
     }
-    
+
     // Analytics collection (if needed for cached analytics data)
     match /analytics/{userId} {
       allow read, write: if isAuthenticated() && isOwner(userId);
     }
-    
+
     // Admin collection (for future admin features)
     match /admin/{document=**} {
       allow read, write: if false; // No access for now
     }
-    
+
     // Deny all other access
     match /{document=**} {
       allow read, write: if false;

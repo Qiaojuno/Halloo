@@ -128,22 +128,24 @@ struct DashboardView: View {
                  */
                 ScrollView {
                     VStack(spacing: 10) { // Reduced spacing between cards by half
-                        
+
                         // 🏠 HEADER: App branding + account access
                         headerSection
-                        
+                            .padding(.bottom, 3.33) // Increase spacing by 1/3 (10 → 13.33)
+
                         // ✅ COMPLETED: Interactive card stack showing task evidence
                         // Replaces detailed view system with swipeable playing card stack
                         VStack(spacing: 4) {
                             cardStackSection
-                            
+
                             // 📋 TASK DETAILS: Shows current top card's habit information
                             // Only visible when there are cards in the stack
                             if currentTopCardEvent != nil {
                                 taskDetailsSection
                             }
                         }
-                        
+                        .padding(.bottom, -8.33) // Half the spacing to upcoming (3.33 - 6.67 = -3.33, halved from -6.67)
+
                         // ⏰ UPCOMING: Today's pending tasks for selected profile only
                         // Shows tasks that still need to be completed today
                         upcomingSection
@@ -154,43 +156,13 @@ struct DashboardView: View {
                     .padding(.horizontal, geometry.size.width * 0.04) // Match GalleryView (96% width)
                 }
                 .background(Color(hex: "f9f9f9")) // Light gray app background
-                
-                /*
-                 * 🧭 FLOATING BOTTOM ELEMENTS WITH GRADIENT:
-                 * Black gradient fade behind navigation elements for better visibility
-                 */
-                VStack {
-                    Spacer()
-                    
-                    // Black gradient at bottom
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color.black.opacity(0),
-                            Color.black.opacity(0.15),
-                            Color.black.opacity(0.25)
-                        ]),
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 120) // Gradient height
-                    .allowsHitTesting(false) // Don't block touches
-                    .overlay(
-                        // Navigation pill and + button on same level with spacer between
-                        VStack {
-                            Spacer()
-                            HStack {
-                                bottomTabNavigation // Left-aligned
-                                Spacer() // Space between them
-                                createHabitButton // Right-aligned
-                            }
-                            .padding(.horizontal, 30) // More side padding from screen edges
-                            .padding(.bottom, 4) // Even closer to bottom of screen
-                        }
-                    )
+
+                // Reusable bottom gradient navigation with create button
+                BottomGradientNavigation(selectedTab: $selectedTab) {
+                    createHabitButton
                 }
             }
         }
-// Removed .ignoresSafeArea to match GalleryView and prevent black bar
         .onAppear {
             /*
              * DATA LOADING & PROFILE SELECTION:
@@ -460,28 +432,28 @@ struct DashboardView: View {
          */
         VStack(spacing: 0) {
                 // Collapsible header with dynamic message and chevron
-                Button(action: {
-                    isUpcomingExpanded.toggle()
-                }) {
-                    HStack {
-                        Text(getUpcomingHeaderText())
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.black)
-                            .multilineTextAlignment(.leading)
-                        
-                        Spacer()
-                        
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(Color(hex: "9f9f9f"))
-                            .rotationEffect(.degrees(isUpcomingExpanded ? 90 : 0))
-                            .animation(.easeInOut(duration: 0.25), value: isUpcomingExpanded)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 16)
+                HStack {
+                    Text(getUpcomingHeaderText())
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(.black)
+                        .multilineTextAlignment(.leading)
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(Color(hex: "9f9f9f"))
+                        .rotationEffect(.degrees(isUpcomingExpanded ? 90 : 0))
                 }
-                .buttonStyle(PlainButtonStyle()) // Removes default button styling
-                
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+                .contentShape(Rectangle()) // Make entire header tappable
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7, blendDuration: 0)) {
+                        isUpcomingExpanded.toggle()
+                    }
+                }
+
                 // Expandable content with animation
                 VStack(spacing: 0) {
                     if viewModel.todaysUpcomingTasks.isEmpty {
@@ -507,7 +479,7 @@ struct DashboardView: View {
                                 .padding(.horizontal, 12)  // Match card title alignment
                                 .padding(.vertical, 12)
                                 .background(Color.white) // Each task has white background
-                                
+
                                 if index < viewModel.todaysUpcomingTasks.count - 1 {
                                     Divider()
                                         .overlay(Color(hex: "f8f3f3"))
@@ -524,7 +496,6 @@ struct DashboardView: View {
         .background(Color.white) // Card background
         .cornerRadius(12) // Consistent rounded corners
         .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
-        .animation(.easeInOut(duration: 0.6), value: isUpcomingExpanded)
     }
     
     // MARK: - ✅ Card Stack Section
@@ -777,11 +748,6 @@ struct DashboardView: View {
         // No bottom padding - this is the last content section
     }
     
-    // MARK: - 🧭 Bottom Tab Navigation
-    private var bottomTabNavigation: some View {
-        FloatingPillNavigation(selectedTab: $selectedTab, onTabTapped: nil)
-    }
-    
     // MARK: - ✨ Unified Create Button
     /**
      * FLOATING UNIFIED CREATE BUTTON: Bottom center call-to-action
@@ -802,11 +768,11 @@ struct DashboardView: View {
             ZStack {
                 Circle()
                     .fill(Color.black)
-                    .frame(width: 57, height: 57) // Reduced by 4 points from 61
+                    .frame(width: 57.25, height: 57.25) // 61.56 × 0.93 = 57.25 (matches navigation pill height)
                     .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2)
-                
+
                 Image(systemName: "plus")
-                    .font(.system(size: 26, weight: .medium))
+                    .font(.system(size: 26.11, weight: .medium)) // 28.08 × 0.93 = 26.11 (7% smaller)
                     .foregroundColor(.white)
             }
         }
@@ -1435,8 +1401,8 @@ struct FloatingPillNavigation: View {
     
     // iPhone 13 base dimensions for scaling (390x844)
     private let iPhone13Width: CGFloat = 390
-    private let basePillWidth: CGFloat = 140 // Shorter horizontally (was 160)
-    private let basePillHeight: CGFloat = 48 // Taller navigation bar (was 38)
+    private let basePillWidth: CGFloat = 168.74 // 181.44 × 0.93 = 168.74 (7% smaller)
+    private let basePillHeight: CGFloat = 57.25 // 61.56 × 0.93 = 57.25 (matches create button)
     
     // Calculate responsive dimensions based on screen width
     private var pillWidth: CGFloat {
@@ -1451,12 +1417,12 @@ struct FloatingPillNavigation: View {
     
     private var iconSize: CGFloat {
         let screenWidth = UIScreen.main.bounds.width
-        return (20 / iPhone13Width) * screenWidth
+        return (21.2 / iPhone13Width) * screenWidth // 22.8 × 0.93 = 21.2 (7% smaller)
     }
-    
+
     private var fontSize: CGFloat {
         let screenWidth = UIScreen.main.bounds.width
-        return (8 / iPhone13Width) * screenWidth // Smaller font for three tabs
+        return (8.84 / iPhone13Width) * screenWidth // 9.5 × 0.93 = 8.84 (7% smaller)
     }
     
     var body: some View {
@@ -1474,11 +1440,11 @@ struct FloatingPillNavigation: View {
                  * Text: "home" in small Inter font with negative tracking
                  * Color: Changes based on selectedTab state
                  */
-                VStack(spacing: 4) {
+                VStack(spacing: 2) { // Reduced from 4 to 2
                     Image(systemName: selectedTab == 0 ? "house.fill" : "house")
                         .font(.system(size: iconSize))
                         .foregroundColor(selectedTab == 0 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
-                    
+
                     Text("home")
                         .font(.custom("Inter", size: fontSize))
                         .tracking(-0.5) // Negative letter spacing to condense text
@@ -1504,11 +1470,11 @@ struct FloatingPillNavigation: View {
                  * Color: Changes based on selectedTab state
                  * Action: Updates selectedTab to switch to Habits view
                  */
-                VStack(spacing: 4) {
+                VStack(spacing: 2) { // Reduced from 4 to 2
                     Image(systemName: selectedTab == 1 ? "bookmark.fill" : "bookmark")
                         .font(.system(size: iconSize))
                         .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
-                    
+
                     Text("habits")
                         .font(.custom("Inter", size: fontSize))
                         .tracking(-0.5) // Negative letter spacing to condense text
@@ -1529,16 +1495,16 @@ struct FloatingPillNavigation: View {
                 
                 /*
                  * GALLERY TAB: Dynamic active/inactive state
-                 * Icon: photo.on.rectangle (photo archive representation)
+                 * Icon: photo.fill when active, photo when inactive (single photo representation)
                  * Text: "gallery" in small Inter font with negative tracking
                  * Color: Changes based on selectedTab state
                  * Action: Updates selectedTab to switch to Gallery view
                  */
-                VStack(spacing: 4) {
-                    Image(systemName: "photo.on.rectangle")
+                VStack(spacing: 2) { // Reduced from 4 to 2
+                    Image(systemName: selectedTab == 2 ? "photo.fill" : "photo")
                         .font(.system(size: iconSize))
                         .foregroundColor(selectedTab == 2 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
-                    
+
                     Text("gallery")
                         .font(.custom("Inter", size: fontSize))
                         .tracking(-0.5) // Negative letter spacing to condense text

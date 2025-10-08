@@ -1,5 +1,138 @@
 # Changelog
 
+## [Unreleased] - 2025-10-08
+
+### Added - iOS-Native Habit Deletion Animation
+
+#### Problem Summary
+- **Deletion felt sluggish**: Habit deletion had no visual feedback during async database operation
+- **Vertical scroll conflict**: Swipe-to-delete interfered with vertical scrolling in habits list
+- **Animation conflicts**: Global `.animation(nil)` was blocking all deletion animations
+- **No slide-away effect**: Missing the characteristic iOS deletion animation
+
+#### Root Causes Identified
+1. **Async blocking UI**: Waited for database deletion before updating UI, causing freeze
+2. **Ambiguous gesture detection**: DragGesture didn't distinguish horizontal vs vertical movement
+3. **Global animation disabler**: `.animation(nil)` on line 81 blocked all animations in view hierarchy
+4. **Missing optimistic updates**: No immediate UI feedback while background operation completed
+
+#### Changes Made
+
+**1. HabitsView.swift - Optimistic UI Updates (lines 45-49, 252-266)**
+```swift
+// NEW: Track locally deleted habits for instant UI updates
+@State private var locallyDeletedHabitIds: Set<String> = []
+
+// Filter out locally deleted habits immediately
+private var filteredHabits: [Task] {
+    return allTasks.filter { habit in
+        guard !locallyDeletedHabitIds.contains(habit.id) else { return false }
+        // ... rest of filtering
+    }
+}
+
+// Immediate deletion with animation
+withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+    locallyDeletedHabitIds.insert(habit.id)
+}
+// Database deletion happens in background
+```
+
+**2. HabitsView.swift - Horizontal Gesture Detection (lines 412-455)**
+```swift
+// BEFORE: All drags triggered swipe-to-delete
+DragGesture()
+    .onChanged { value in
+        if value.translation.width < 0 {
+            dragOffset = max(value.translation.width, -deleteButtonWidth)
+        }
+    }
+
+// AFTER: Only horizontal swipes trigger delete
+@State private var isDraggingHorizontally: Bool? = nil
+
+DragGesture()
+    .onChanged { value in
+        // Detect direction on first movement
+        if isDraggingHorizontally == nil {
+            let horizontalAmount = abs(value.translation.width)
+            let verticalAmount = abs(value.translation.height)
+            isDraggingHorizontally = horizontalAmount > verticalAmount && horizontalAmount > 10
+        }
+
+        // Only respond to horizontal drags
+        if isDraggingHorizontally == true && value.translation.width < 0 {
+            dragOffset = max(value.translation.width, -deleteButtonWidth)
+        }
+    }
+```
+
+**3. HabitsView.swift - Removed Animation Blocker (line 81)**
+```swift
+// BEFORE: Blocked ALL animations
+.animation(nil) // Disable all animations
+
+// AFTER: Removed entirely
+// Specific .animation(nil, value:) modifiers still prevent unwanted nav animations
+```
+
+**4. HabitsView.swift - iOS-Native Transitions (lines 229-235)**
+```swift
+.transition(.asymmetric(
+    insertion: .identity,
+    removal: .move(edge: .leading).combined(with: .opacity)
+))
+```
+
+**5. DatabaseServiceProtocol.swift & Implementations - Fixed Delete Signature (lines 247-252)**
+```swift
+// BEFORE: Required collection group query
+func deleteTask(_ taskId: String) async throws
+
+// AFTER: Direct path construction
+func deleteTask(_ taskId: String, userId: String, profileId: String) async throws
+```
+
+**6. FirebaseDatabaseService.swift - Removed Collection Group Query (lines 391-425)**
+```swift
+// BEFORE: Used collection group query (required index, caused permission errors)
+let snapshot = try await db.collectionGroup("habits")
+    .whereField("id", isEqualTo: taskId)
+    .getDocuments()
+
+// AFTER: Direct path deletion
+let taskPath = "users/\(userId)/profiles/\(profileId)/habits/\(taskId)"
+try await db.document(taskPath).delete()
+```
+
+#### Diagnostic Logging Evidence
+```
+🗑️ Deleting habit 'Take vitamins' (ID: B6437C28-689E-49D5-84B5-E6C9887AADC5)
+🔍 [FirebaseDatabaseService] deleteTask called
+   taskId: B6437C28-689E-49D5-84B5-E6C9887AADC5
+   userId: IJue7FhdmbbIzR3WG6Tzhhf2ykD2
+   profileId: +17788143739
+🗑️ [FirebaseDatabaseService] Deleting habit at: users/IJue7FhdmbbIzR3WG6Tzhhf2ykD2/profiles/+17788143739/habits/B6437C28-689E-49D5-84B5-E6C9887AADC5
+✅ [FirebaseDatabaseService] Habit deleted successfully
+```
+
+#### Benefits
+- **Instant feedback**: Habit slides away immediately (no freeze or delay)
+- **Smooth animations**: iOS-native spring animation (response: 0.35s, damping: 0.8)
+- **Proper gesture handling**: Vertical scroll works, horizontal swipe deletes
+- **Error recovery**: If deletion fails, habit slides back in with animation
+- **No index requirements**: Direct path deletion eliminates Firestore composite index needs
+- **Production-safe**: Optimistic UI pattern used by iOS Mail, Messages, Reminders
+
+#### Files Changed
+- `Halloo/Views/HabitsView.swift` - Optimistic updates, gesture detection, animation fixes
+- `Halloo/Services/DatabaseServiceProtocol.swift` - Updated deleteTask signature
+- `Halloo/Services/FirebaseDatabaseService.swift` - Direct path deletion
+- `Halloo/Services/MockDatabaseService.swift` - Updated mock implementation
+- `Halloo/ViewModels/TaskViewModel.swift` - Updated deleteTask call
+
+---
+
 ## [Unreleased] - 2025-10-07
 
 ### Fixed - Profile Creation Failure

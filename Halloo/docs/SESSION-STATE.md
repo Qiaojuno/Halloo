@@ -1,7 +1,7 @@
 # Session State - Halloo/Remi iOS App
-**Last updated:** 2025-10-07
-**Last commit:** `3ab5c25` - Authentication flow restructured
-**Status:** ✅ Auth working, ✅ Profile creation working, 🔄 Ready for SMS testing
+**Last updated:** 2025-10-08
+**Last commit:** (pending) - iOS-native habit deletion animation
+**Status:** ✅ Auth working, ✅ Profile creation working, ✅ Habit deletion working, 🔄 Ready for SMS testing
 
 ---
 
@@ -31,7 +31,37 @@
 
 ## ✅ COMPLETED TASKS
 
-### 1. Profile Creation Fix (DONE - 2025-10-07)
+### 1. iOS-Native Habit Deletion Animation (DONE - 2025-10-08)
+
+**Problem Fixed:**
+- Habit deletion felt sluggish with no visual feedback during async operation
+- Swipe-to-delete conflicted with vertical scrolling
+- Global `.animation(nil)` blocked all animations
+- Missing characteristic iOS slide-away deletion effect
+
+**Solution Implemented:**
+- **Optimistic UI updates**: Added `locallyDeletedHabitIds` Set to track deleting habits locally
+- **Immediate animation**: Habit slides left and fades out instantly (350ms spring) while database deletion happens in background
+- **Gesture direction detection**: DragGesture now detects horizontal vs vertical movement (10-point threshold)
+- **Removed animation blocker**: Deleted global `.animation(nil)` that was preventing all animations
+- **Direct path deletion**: Changed from collection group query to direct Firestore path construction
+- **Error recovery**: If deletion fails, habit slides back in with animation
+
+**Files Changed:**
+- `Halloo/Views/HabitsView.swift` - Optimistic updates, gesture detection, animation fixes
+- `Halloo/Services/DatabaseServiceProtocol.swift` - Updated deleteTask signature with userId/profileId
+- `Halloo/Services/FirebaseDatabaseService.swift` - Direct path deletion (no collection group query)
+- `Halloo/Services/MockDatabaseService.swift` - Updated mock to match new signature
+- `Halloo/ViewModels/TaskViewModel.swift` - Pass userId/profileId to deleteTask
+
+**Result:**
+- ✅ Instant slide-away animation (iOS-native feel)
+- ✅ Smooth upward movement of remaining habits
+- ✅ Vertical scroll works without triggering delete
+- ✅ No Firestore index requirements for deletion
+- ✅ Proper error handling with animation reversal
+
+### 2. Profile Creation Fix (DONE - 2025-10-07)
 
 **Problem Fixed:**
 - Profile creation button appeared broken (silent failures)
