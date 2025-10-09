@@ -187,9 +187,9 @@ struct GalleryPhotoView: View {
                     Spacer()
                     MiniSpeechBubble(
                         textLines: [
-                            [(9, 1.5), (6, 1.5), (11, 1.5), (7, 1.5)],   // Line 1: 25% smaller
-                            [(12, 1.5), (5, 1.5), (9, 1.5)],             // Line 2: 25% smaller
-                            [(8, 1.5), (10, 1.5), (6, 1.5)]              // Line 3: 25% smaller
+                            [(11, 1.5), (13, 1.5), (15, 1.5)],   // Line 1: 3 segments = 2 gaps
+                            [(18, 1.5), (17, 1.5)],              // Line 2: 2 segments = 1 gap
+                            [(10, 1.5), (14, 1.5), (12, 1.5)]    // Line 3: 3 segments = 2 gaps
                         ],
                         isOutgoing: true,
                         backgroundColor: Color(hex: "007AFF"),
@@ -202,7 +202,7 @@ struct GalleryPhotoView: View {
                 HStack {
                     MiniSpeechBubble(
                         textLines: [
-                            [(11, 1.5), (7, 1.5), (9, 1.5), (5, 1.5)]  // Line 1: 25% smaller
+                            [(13, 1.5), (15, 1.5), (10, 1.5)]  // Line 1: 3 segments = 2 gaps
                         ],
                         isOutgoing: false,
                         backgroundColor: Color(hex: "E5E5EA"),
@@ -213,14 +213,12 @@ struct GalleryPhotoView: View {
                 .padding(.leading, 6)
             }
 
-            // Small light blue circle in bottom right
+            // Profile avatar overlay in bottom right (same as photo squares)
             VStack {
                 Spacer()
                 HStack {
                     Spacer()
-                    Circle()
-                        .fill(Color(hex: "ADD8E6"))
-                        .frame(width: 16, height: 16)
+                    profileAvatarOverlay(for: event)
                         .padding(.trailing, 8)
                         .padding(.bottom, 8)
                 }
@@ -229,9 +227,9 @@ struct GalleryPhotoView: View {
     }
     
     private func profileAvatarOverlay(for event: GalleryHistoryEvent) -> some View {
-        // Small profile avatar overlay (20x20) in bottom-right corner
+        // Small profile avatar overlay (20x20) in bottom-right corner - clean style
         let emoji = profileEmojis[abs(event.profileId.hashValue) % profileEmojis.count]
-        
+
         return Circle()
             .fill(Color.white)
             .frame(width: 20, height: 20)
@@ -239,11 +237,6 @@ struct GalleryPhotoView: View {
                 Text(emoji)
                     .font(.system(size: 10))
             )
-            .overlay(
-                Circle()
-                    .stroke(Color.white, lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
     }
 }
 
@@ -257,8 +250,9 @@ struct MiniSpeechBubble: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1.5) {
             ForEach(0..<textLines.count, id: \.self) { lineIndex in
-                HStack(spacing: 1) {  // 1px space between "words"
+                HStack(spacing: 1) {  // 1px spacing between word segments
                     ForEach(0..<textLines[lineIndex].count, id: \.self) { wordIndex in
+                        // Text segment
                         Rectangle()
                             .fill(Color.black)
                             .frame(width: textLines[lineIndex][wordIndex].width,
@@ -268,7 +262,7 @@ struct MiniSpeechBubble: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, isOutgoing && textLines.count > 1 ? 9 : 7)  // Taller for blue bubble with 3 lines
+        .padding(.vertical, isOutgoing && textLines.count > 1 ? 9 : 7)
         .background(
             MiniBubbleWithTail(isOutgoing: isOutgoing, cornerRadius: 4, tailSize: 6, tailInset: tailInset)
                 .fill(backgroundColor)

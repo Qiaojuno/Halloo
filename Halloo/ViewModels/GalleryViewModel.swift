@@ -92,9 +92,9 @@ final class GalleryViewModel: ObservableObject {
     @Published var lastRefreshTime: Date?
     
     // MARK: - Dependencies
-    private let databaseService: DatabaseServiceProtocol
-    private let authService: AuthenticationServiceProtocol
-    private let errorCoordinator: ErrorCoordinator
+    private var databaseService: DatabaseServiceProtocol
+    private var authService: AuthenticationServiceProtocol
+    private var errorCoordinator: ErrorCoordinator
     
     // MARK: - Private Properties
     private var cancellables = Set<AnyCancellable>()
@@ -123,35 +123,39 @@ final class GalleryViewModel: ObservableObject {
     // MARK: - Public Methods
     
     /// Load gallery events for the current authenticated user
-    /// 
+    ///
     /// Fetches all gallery events (task responses, profile creation) from the database
     /// and updates the galleryEvents array. Events are sorted by creation date (newest first).
     func loadGalleryData() async {
+        print("🔥 GALLERY: loadGalleryData() called, isAuthenticated: \(authService.isAuthenticated)")
+
         guard authService.isAuthenticated else {
+            print("❌ GALLERY: Not authenticated, showing error")
             errorMessage = "Please sign in to view gallery"
             return
         }
-        
+
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            // In a real implementation, this would fetch from database
-            // For now, use mock data that matches the expected structure
+            print("🔥 GALLERY: Starting fetchGalleryEvents()")
             let events = try await fetchGalleryEvents()
-            
+
             await MainActor.run {
                 self.galleryEvents = events.sorted { $0.createdAt > $1.createdAt }
                 self.lastRefreshTime = Date()
                 self.isLoading = false
+                print("✅ GALLERY: Updated UI with \(self.galleryEvents.count) events")
             }
-            
+
         } catch {
             await MainActor.run {
                 self.errorMessage = "Failed to load gallery: \(error.localizedDescription)"
                 self.isLoading = false
+                print("❌ GALLERY: Error loading events: \(error.localizedDescription)")
             }
-            
+
             errorCoordinator.handle(error, context: "Gallery data loading")
         }
     }
@@ -167,9 +171,10 @@ final class GalleryViewModel: ObservableObject {
         authService: AuthenticationServiceProtocol,
         errorCoordinator: ErrorCoordinator
     ) {
-        // This method would update the service instances
-        // Implementation depends on specific service architecture
-        print("🔄 GalleryViewModel services updated")
+        self.databaseService = databaseService
+        self.authService = authService
+        self.errorCoordinator = errorCoordinator
+        print("🔄 GalleryViewModel services updated - now using real Firebase services")
     }
     
     /// Manual refresh trigger for pull-to-refresh functionality
@@ -180,18 +185,23 @@ final class GalleryViewModel: ObservableObject {
     // MARK: - Private Methods
     
     /// Fetch gallery events from the database service
-    /// 
+    ///
     /// - Returns: Array of GalleryHistoryEvent objects for the current user
     /// - Throws: Database errors or network errors during fetch
     private func fetchGalleryEvents() async throws -> [GalleryHistoryEvent] {
         // Return real data from database
         guard let userId = authService.currentUser?.uid else {
+            print("❌ GALLERY: No authenticated user")
             return []
         }
 
-        // TODO: Implement database method to fetch gallery events
-        // For now, return empty array until real implementation is ready
-        return []
+        print("✅ GALLERY: Fetching events for userId: \(userId)")
+
+        // Fetch gallery events from Firebase
+        let events = try await databaseService.getGalleryHistoryEvents(for: userId)
+        print("✅ GALLERY: Fetched \(events.count) events from Firebase")
+
+        return events
     }
     
     /// Periodic refresh disabled to avoid compilation issues

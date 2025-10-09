@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var onboardingViewModel: OnboardingViewModel?
     @State private var profileViewModel: ProfileViewModel?
     @State private var dashboardViewModel: DashboardViewModel?
+    @State private var galleryViewModel: GalleryViewModel?
     @State private var authService: FirebaseAuthenticationService?
     @State private var isAuthenticated = false
     @State private var selectedTab = 0
@@ -71,7 +72,9 @@ struct ContentView: View {
             Color(hex: "f9f9f9") // Consistent app background
 
             // Conditional view switching based on selectedTab
-            if let dashboardVM = dashboardViewModel, let profileVM = profileViewModel {
+            if let dashboardVM = dashboardViewModel,
+               let profileVM = profileViewModel,
+               let galleryVM = galleryViewModel {
                 if selectedTab == 0 {
                     // Dashboard Tab - Home screen
                     DashboardView(selectedTab: $selectedTab)
@@ -85,7 +88,7 @@ struct ContentView: View {
                 } else {
                     // Gallery Tab - Archive of completed habits with photos
                     GalleryView(selectedTab: $selectedTab)
-                        .inject(container: container)
+                        .environmentObject(galleryVM) // Use real Firebase services!
                         .environmentObject(profileVM)
                 }
             } else {
@@ -105,11 +108,12 @@ struct ContentView: View {
         onboardingViewModel = container.makeOnboardingViewModel()
         profileViewModel = container.makeProfileViewModel()
         dashboardViewModel = container.makeDashboardViewModel()
+        galleryViewModel = container.makeGalleryViewModel()
 
         // Store auth service reference (singleton)
         authService = container.resolve(AuthenticationServiceProtocol.self) as? FirebaseAuthenticationService
 
-        print("✅ All ViewModels created successfully")
+        print("✅ All ViewModels created successfully (including GalleryViewModel)")
 
         // Subscribe to auth state changes
         setupAuthStateObserver()

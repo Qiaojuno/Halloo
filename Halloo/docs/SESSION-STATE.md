@@ -1,7 +1,7 @@
 # Session State - Halloo/Remi iOS App
-**Last updated:** 2025-10-08
-**Last commit:** (pending) - iOS-native habit deletion animation
-**Status:** ✅ Auth working, ✅ Profile creation working, ✅ Habit deletion working, 🔄 Ready for SMS testing
+**Last updated:** 2025-10-09
+**Last commit:** (pending) - Gallery UI polish and data loading fix
+**Status:** ✅ Auth working, ✅ Profile creation working, ✅ Habit deletion working, ✅ Gallery loading working, 🔄 Ready for SMS testing
 
 ---
 
@@ -31,7 +31,32 @@
 
 ## ✅ COMPLETED TASKS
 
-### 1. iOS-Native Habit Deletion Animation (DONE - 2025-10-08)
+### 1. Gallery UI Polish & Data Loading Fix (DONE - 2025-10-09)
+
+**Problem Fixed:**
+- Gallery showed empty state despite Firebase data existing
+- GalleryViewModel initialized with Mock services, never updated to Firebase
+- Text message preview had visible gaps/breaks in speech bubbles
+- Profile avatar reverted to blue circle after git checkout
+
+**Solution Implemented:**
+- **Service injection fix**: Changed services from `private let` to `private var` in GalleryViewModel
+- **Implemented updateServices()**: Actually assigns Firebase services instead of being no-op stub
+- **Simplified speech bubble rendering**: Removed complex spacing logic, use HStack(spacing: 1) for clean gaps
+- **Restored profile avatar**: Replaced blue circle with profile emoji overlay
+
+**Files Changed:**
+- `Halloo/ViewModels/GalleryViewModel.swift` - Mutable services, real injection
+- `Halloo/Views/Components/GalleryPhotoView.swift` - Speech bubble simplification, profile avatar
+- `Halloo/Views/GalleryView.swift` - Example message box updates
+
+**Result:**
+- ✅ Gallery loads real Firebase data (not mock empty array)
+- ✅ Text segments render cleanly with 1px gaps (no visible breaks)
+- ✅ Profile emoji displays in bottom-right corner
+- ✅ Correct gap counts: Line 1 (2), Line 2 (1), Line 3 (2)
+
+### 2. iOS-Native Habit Deletion Animation (DONE - 2025-10-08)
 
 **Problem Fixed:**
 - Habit deletion felt sluggish with no visual feedback during async operation

@@ -344,9 +344,9 @@ extension GalleryView {
                     Spacer()
                     MiniSpeechBubble(
                         textLines: [
-                            [(9, 1.5), (6, 1.5), (11, 1.5), (7, 1.5)],   // Line 1: 25% smaller
-                            [(12, 1.5), (5, 1.5), (9, 1.5)],             // Line 2: 25% smaller
-                            [(8, 1.5), (10, 1.5), (6, 1.5)]              // Line 3: 25% smaller
+                            [(11, 1.5), (13, 1.5), (15, 1.5)],   // Line 1: 3 segments = 2 gaps
+                            [(18, 1.5), (17, 1.5)],              // Line 2: 2 segments = 1 gap
+                            [(10, 1.5), (14, 1.5), (12, 1.5)]    // Line 3: 3 segments = 2 gaps
                         ],
                         isOutgoing: true,
                         backgroundColor: Color(hex: "007AFF"),
@@ -359,7 +359,7 @@ extension GalleryView {
                 HStack {
                     MiniSpeechBubble(
                         textLines: [
-                            [(11, 1.5), (7, 1.5), (9, 1.5), (5, 1.5)]  // Line 1: 25% smaller
+                            [(13, 1.5), (15, 1.5), (10, 1.5)]  // Line 1: 3 segments = 2 gaps
                         ],
                         isOutgoing: false,
                         backgroundColor: Color(hex: "E5E5EA"),

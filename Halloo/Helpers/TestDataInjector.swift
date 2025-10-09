@@ -74,6 +74,32 @@ class TestDataInjector {
             .collection("messages").document(photoResponseId).setData(photoResponseData)
         print("✅ Added photo response")
 
+        // Create gallery event for photo response
+        let photoGalleryEventId = UUID().uuidString
+        let photoGalleryEvent: [String: Any] = [
+            "id": photoGalleryEventId,
+            "userId": userId,
+            "profileId": profileId,
+            "eventType": "taskResponse",
+            "createdAt": Timestamp(date: photoCompletedAt),
+            "eventData": [
+                "taskResponse": [
+                    "_0": [  // Swift enum associated value wrapper
+                        "taskId": photoHabitId,
+                        "textResponse": NSNull(),
+                        "photoData": createPlaceholderPhotoData(),
+                        "responseType": "photo",
+                        "taskTitle": "Take medication with water"
+                    ]
+                ]
+            ]
+        ]
+
+        try await db.collection("users").document(userId)
+            .collection("gallery_events").document(photoGalleryEventId)
+            .setData(photoGalleryEvent)
+        print("✅ Added photo gallery event")
+
         // 2. COMPLETED TEXT HABIT
         let textHabitId = UUID().uuidString
         let textCompletedAt = calendar.date(byAdding: .hour, value: -1, to: now)!
@@ -129,6 +155,32 @@ class TestDataInjector {
             .collection("profiles").document(profileId)
             .collection("messages").document(textResponseId).setData(textResponseData)
         print("✅ Added text response")
+
+        // Create gallery event for text response
+        let textGalleryEventId = UUID().uuidString
+        let textGalleryEvent: [String: Any] = [
+            "id": textGalleryEventId,
+            "userId": userId,
+            "profileId": profileId,
+            "eventType": "taskResponse",
+            "createdAt": Timestamp(date: textCompletedAt),
+            "eventData": [
+                "taskResponse": [
+                    "_0": [  // Swift enum associated value wrapper
+                        "taskId": textHabitId,
+                        "textResponse": "Done! Feeling refreshed 💧",
+                        "photoData": NSNull(),
+                        "responseType": "text",
+                        "taskTitle": "Drink water"
+                    ]
+                ]
+            ]
+        ]
+
+        try await db.collection("users").document(userId)
+            .collection("gallery_events").document(textGalleryEventId)
+            .setData(textGalleryEvent)
+        print("✅ Added text gallery event")
 
         // 3. UPCOMING HABIT (scheduled for later today)
         let upcomingHabitId = UUID().uuidString
@@ -194,8 +246,15 @@ class TestDataInjector {
             .collection("habits").document(lateHabitId).setData(lateHabit)
         print("✅ Added late/overdue habit")
 
-        print("\n🎉 Successfully added 4 test habits and 2 SMS responses!")
+        print("\n🎉 Successfully added test data!")
         print("📊 Summary:")
+        print("  ✅ 4 habits created")
+        print("  ✅ 2 SMS responses created")
+        print("  ✅ 2 gallery events created")
+        print("\n📸 Gallery events:")
+        print("  📷 Photo response (2 hours ago) - 'Take medication with water'")
+        print("  💬 Text response (1 hour ago) - 'Drink water'")
+        print("\n📋 Habits breakdown:")
         print("  ✅ 1 completed photo habit (2 hours ago)")
         print("  ✅ 1 completed text habit (1 hour ago)")
         print("  ⏰ 1 upcoming habit (in 3 hours)")

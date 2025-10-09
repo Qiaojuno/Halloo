@@ -30,7 +30,7 @@ struct SharedHeaderSection: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .center) {
+            HStack(alignment: .center, spacing: 0) {
                 /*
                  * MAIN LOGO: "Remi" brand text
                  * Font: Poppins Medium to match ProfileViews, scaled up for header
@@ -41,28 +41,29 @@ struct SharedHeaderSection: View {
                     .tracking(-3.1) // Scaled tracking from ProfileViews (-1.9 to -3.1 for larger size)
                     .foregroundColor(.black)
                     .fixedSize() // Prevent text truncation/clipping
+                    .layoutPriority(1) // Ensure logo gets full space before profile circles
 
-            /*
-             * PROFILE CIRCLES: Elderly family member selection
-             * Positioned immediately after logo like original design
-             * Max 2 profiles only, Size: 45x45 (standardized across app)
-             */
-            HStack(spacing: 8) {
-                ForEach(Array(profileViewModel.profiles.prefix(2).enumerated()), id: \.element.id) { index, profile in
-                    ProfileImageView(
-                        profile: profile,
-                        profileSlot: index,
-                        isSelected: selectedProfileIndex == index,
-                        size: .custom(45)
-                    )
-                    .onTapGesture {
-                        selectedProfileIndex = index
-                        // Note: selectedProfileIndex is used for local UI filtering only
-                        // ProfileViewModel doesn't need to track selection state
+                /*
+                 * PROFILE CIRCLES: Elderly family member selection
+                 * Positioned immediately after logo like original design
+                 * Max 2 profiles only, Size: 45x45 (standardized across app)
+                 */
+                HStack(spacing: 8) {
+                    ForEach(Array(profileViewModel.profiles.prefix(2).enumerated()), id: \.element.id) { index, profile in
+                        ProfileImageView(
+                            profile: profile,
+                            profileSlot: index,
+                            isSelected: selectedProfileIndex == index,
+                            size: .custom(45)
+                        )
+                        .onTapGesture {
+                            selectedProfileIndex = index
+                            // Note: selectedProfileIndex is used for local UI filtering only
+                            // ProfileViewModel doesn't need to track selection state
+                        }
                     }
                 }
-            }
-            .padding(.leading, 8) // Reduced from 16 to 8 (closer to logo)
+                .padding(.leading, 16) // Increased spacing from logo (was 8)
             
             Spacer()
             

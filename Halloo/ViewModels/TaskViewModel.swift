@@ -902,7 +902,12 @@ final class TaskViewModel: ObservableObject {
             )
             
             try await databaseService.createSMSResponse(smsResponse)
-            
+
+            // Create gallery event for task completion
+            let galleryEvent = GalleryHistoryEvent.fromSMSResponse(smsResponse)
+            try await databaseService.createGalleryHistoryEvent(galleryEvent)
+            print("✅ [TaskViewModel] Created gallery event for task completion: \(task.title)")
+
             // Update task completion count
             let updatedTask = Task(
                 id: task.id,

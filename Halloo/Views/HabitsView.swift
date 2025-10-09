@@ -412,71 +412,105 @@ struct HabitRowViewSimple: View {
     let onDelete: () -> Void
 
     @State private var dragOffset: CGFloat = 0
-    @State private var isDraggingHorizontally: Bool? = nil
+
+    // Gesture detection constants
     private let deleteButtonWidth: CGFloat = 80
+    private let minimumDragDistance: CGFloat = 25
+    private let swipeRevealThreshold: CGFloat = 50
+    private let horizontalAngleThreshold: Double = .pi / 6  // 30 degrees
 
     var body: some View {
         ZStack {
-            // Delete button background (red) - Single delete button
-            HStack {
-                Spacer()
-                Button(action: {
-                    withAnimation(.spring()) {
-                        dragOffset = 0
-                    }
-                    onDelete()
-                }) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.white)
-                        .frame(width: deleteButtonWidth)
-                        .frame(maxHeight: .infinity) // This will match the TaskRowView height exactly
-                        .background(Color.red)
+            // Delete button background
+            deleteButton
+
+            // Task row content
+            taskContent
+                .offset(x: dragOffset)
+                .simultaneousGesture(horizontalSwipeGesture)
+        }
+    }
+
+    // MARK: - Subviews
+
+    private var deleteButton: some View {
+        HStack {
+            Spacer()
+            Button(action: {
+                withAnimation(.spring()) {
+                    dragOffset = 0
+                }
+                onDelete()
+            }) {
+                Image(systemName: "trash")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white)
+                    .frame(width: deleteButtonWidth)
+                    .frame(maxHeight: .infinity)
+                    .background(Color.red)
+            }
+        }
+    }
+
+    private var taskContent: some View {
+        TaskRowView(
+            task: habit,
+            profile: profile,
+            showViewButton: false,
+            onViewButtonTapped: nil
+        )
+        .background(Color.white)
+    }
+
+    // MARK: - Gesture Handling
+
+    private var horizontalSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: minimumDragDistance)
+            .onChanged { value in
+                if isHorizontalSwipe(translation: value.translation) {
+                    updateDragOffset(translation: value.translation)
                 }
             }
+            .onEnded { value in
+                if isHorizontalSwipe(translation: value.translation) {
+                    snapToPosition(translation: value.translation)
+                } else {
+                    resetDragOffset()
+                }
+            }
+    }
 
-            // Reuse TaskRowView from Dashboard
-            TaskRowView(
-                task: habit,
-                profile: profile,
-                showViewButton: false,
-                onViewButtonTapped: nil
-            )
-            .background(Color.white)
-            .offset(x: dragOffset)
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        // Determine drag direction on first movement
-                        if isDraggingHorizontally == nil {
-                            let horizontalAmount = abs(value.translation.width)
-                            let verticalAmount = abs(value.translation.height)
+    // MARK: - Helper Methods
 
-                            // Only treat as horizontal if horizontal movement is significantly larger
-                            isDraggingHorizontally = horizontalAmount > verticalAmount && horizontalAmount > 10
-                        }
+    /// Determines if the drag gesture is primarily horizontal
+    private func isHorizontalSwipe(translation: CGSize) -> Bool {
+        let angle = atan2(abs(translation.height), abs(translation.width))
+        let isHorizontal = angle < horizontalAngleThreshold
+        let isDraggingLeft = translation.width < 0
 
-                        // Only respond to horizontal drags
-                        if isDraggingHorizontally == true && value.translation.width < 0 {
-                            dragOffset = max(value.translation.width, -deleteButtonWidth)
-                        }
-                    }
-                    .onEnded { value in
-                        // Only process if it was a horizontal drag
-                        if isDraggingHorizontally == true {
-                            withAnimation(.spring()) {
-                                if value.translation.width < -50 {
-                                    dragOffset = -deleteButtonWidth
-                                } else {
-                                    dragOffset = 0
-                                }
-                            }
-                        }
+        return isHorizontal && isDraggingLeft
+    }
 
-                        // Reset drag direction state
-                        isDraggingHorizontally = nil
-                    }
-            )
+    /// Updates drag offset during gesture
+    private func updateDragOffset(translation: CGSize) {
+        dragOffset = max(translation.width, -deleteButtonWidth)
+    }
+
+    /// Snaps to revealed or hidden position when gesture ends
+    private func snapToPosition(translation: CGSize) {
+        withAnimation(.spring()) {
+            if translation.width < -swipeRevealThreshold {
+                dragOffset = -deleteButtonWidth
+            } else {
+                dragOffset = 0
+            }
+        }
+    }
+
+    /// Resets drag offset with animation
+    private func resetDragOffset() {
+        withAnimation(.spring()) {
+            dragOffset = 0
         }
     }
 }

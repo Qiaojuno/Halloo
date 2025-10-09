@@ -29,6 +29,10 @@ struct CardStackView: View {
             stackedEvents = events
             currentTopEvent = stackedEvents.first
         }
+        .onChange(of: events) { newEvents in
+            stackedEvents = newEvents
+            currentTopEvent = newEvents.first
+        }
         .onChange(of: stackedEvents) { _ in
             currentTopEvent = stackedEvents.first
         }
@@ -195,7 +199,7 @@ struct CardStackView: View {
                             SpeechBubbleView(
                                 text: event.textResponse ?? "Completed!",
                                 isOutgoing: false,
-                                backgroundColor: Color.gray.opacity(0.2),
+                                backgroundColor: Color(red: 0.9, green: 0.9, blue: 0.9),
                                 textColor: .black
                             )
                             Spacer(minLength: 60)

@@ -109,7 +109,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var profiles: [ElderlyProfile] = []
     
     /// Recent SMS responses from elderly family members (last 10)
-    /// 
+    ///
     /// Shows families real-time engagement with care reminders:
     /// - Task completion confirmations (YES, DONE)
     /// - Photo responses for visual proof tasks
@@ -118,6 +118,20 @@ final class DashboardViewModel: ObservableObject {
     ///
     /// Updated immediately as elderly users respond to SMS reminders.
     @Published var recentResponses: [SMSResponse] = []
+
+    // MARK: - Performance Caching
+
+    /// In-memory cache for completed tasks to reduce redundant Firebase queries
+    /// Cached data expires after 5 minutes to ensure freshness while reducing network calls
+    private var cachedCompletedTasks: [DashboardTask]?
+
+    /// Timestamp when cache was last populated
+    /// Used to determine cache validity and expiration
+    private var cacheTimestamp: Date?
+
+    /// Duration in seconds that cached data remains valid (5 minutes)
+    /// Balance between performance and real-time updates
+    private let cacheValidDuration: TimeInterval = 300
     
     /// Elderly profiles awaiting SMS confirmation from family members
     /// 
@@ -313,10 +327,33 @@ final class DashboardViewModel: ObservableObject {
         return profileFilteredTasks.filter { !$0.isCompleted && !$0.isOverdue }
     }
     
-    /// Tasks that have been completed today (filtered by selected profile)  
+    /// Tasks that have been completed today (filtered by selected profile)
+    /// Uses 5-minute in-memory cache to reduce redundant computations
     var todaysCompletedTasks: [DashboardTask] {
-        let profileFilteredTasks = filterTasksBySelectedProfile(todaysTasks)
-        return profileFilteredTasks.filter { $0.isCompleted }
+        // Check if cache is valid
+        if let cached = cachedCompletedTasks,
+           let timestamp = cacheTimestamp,
+           Date().timeIntervalSince(timestamp) < cacheValidDuration {
+            #if DEBUG
+            print("💾 [Cache Hit] Using cached completed tasks (\(cached.count) tasks, age: \(Int(Date().timeIntervalSince(timestamp)))s)")
+            #endif
+            // Return cached data filtered by selected profile
+            return filterTasksBySelectedProfile(cached)
+        }
+
+        // Cache miss - compute fresh data
+        let allCompleted = todaysTasks.filter { $0.isCompleted }
+
+        #if DEBUG
+        print("🔄 [Cache Miss] Computing fresh completed tasks (\(allCompleted.count) tasks)")
+        #endif
+
+        // Update cache with unfiltered completed tasks
+        cachedCompletedTasks = allCompleted
+        cacheTimestamp = Date()
+
+        // Return profile-filtered results
+        return filterTasksBySelectedProfile(allCompleted)
     }
     
     // MARK: - Family Care Dashboard Setup
@@ -582,6 +619,10 @@ final class DashboardViewModel: ObservableObject {
             
             await MainActor.run {
                 self.todaysTasks = dashboardTasks.sorted { $0.scheduledTime < $1.scheduledTime }
+
+                // Invalidate cache when new data is loaded
+                self.cachedCompletedTasks = nil
+                self.cacheTimestamp = nil
             }
             
         } catch {
@@ -645,8 +686,18 @@ final class DashboardViewModel: ObservableObject {
             await MainActor.run {
                 self.updateDashboardSummary()
                 self.identifyOverdueTasks()
+
+                // Invalidate cache on manual refresh
+                self.invalidateCache()
             }
         }
+    }
+
+    /// Manually invalidate the completed tasks cache
+    /// Call this when you know data has changed and need fresh computation
+    func invalidateCache() {
+        cachedCompletedTasks = nil
+        cacheTimestamp = nil
     }
     
     // MARK: - Dashboard Updates
@@ -700,6 +751,9 @@ final class DashboardViewModel: ObservableObject {
             todaysTasks[taskIndex].response = response
             updateDashboardSummary()
             identifyOverdueTasks()
+
+            // Invalidate cache when task completion status changes
+            invalidateCache()
         }
         
         // Streak updates removed - no longer tracking streaks
@@ -786,12 +840,17 @@ final class DashboardViewModel: ObservableObject {
             
             // Persist completion with family synchronization
             try await databaseService.createSMSResponse(response)
-            
+
+            // Create gallery event for task completion
+            let galleryEvent = GalleryHistoryEvent.fromSMSResponse(response)
+            try await databaseService.createGalleryHistoryEvent(galleryEvent)
+            print("✅ [DashboardViewModel] Created gallery event for task completion: \(dashboardTask.task.title)")
+
             // Update task completion statistics for analytics
             var updatedTask = dashboardTask.task
             updatedTask.completionCount += 1
             updatedTask.lastCompletedAt = Date()
-            
+
             try await databaseService.updateTask(updatedTask)
             
             await MainActor.run {

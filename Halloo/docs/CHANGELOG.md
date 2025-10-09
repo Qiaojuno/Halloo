@@ -1,5 +1,86 @@
 # Changelog
 
+## [Unreleased] - 2025-10-09
+
+### Fixed - Gallery UI Polish & Data Loading
+
+#### Problem Summary
+- **Gallery empty state bug**: Gallery showed "Create your first remi" despite data existing in Firebase
+- **Text message preview styling**: Speech bubble lines had visible gaps and broken appearance
+- **Profile avatar missing**: Git revert lost previous profile emoji display work
+
+#### Root Causes Identified
+1. **Service injection failure**: `GalleryViewModel.updateServices()` was empty stub, services stayed as Mock
+2. **Immutable services**: Services declared as `private let`, couldn't be updated after initialization
+3. **Complex spacing logic**: Mixing spacing values into segment arrays, using Spacer() with ignored frame constraints
+4. **Git revert side effects**: Full file revert lost unrelated profile avatar improvements
+
+#### Changes Made
+
+**1. GalleryViewModel.swift - Fixed Service Injection (lines 95-97, 174-178)**
+```swift
+// BEFORE: Immutable services
+private let databaseService: DatabaseServiceProtocol
+func updateServices(...) {
+    print("🔄 GalleryViewModel services updated")  // No-op!
+}
+
+// AFTER: Mutable services with real injection
+private var databaseService: DatabaseServiceProtocol
+func updateServices(...) {
+    self.databaseService = databaseService
+    self.authService = authService
+    self.errorCoordinator = errorCoordinator
+}
+```
+
+**2. GalleryPhotoView.swift - Simplified Speech Bubble Rendering (lines 253-261)**
+```swift
+// Clean data structure: only text segments
+textLines: [
+    [(11, 1.5), (13, 1.5), (15, 1.5)],   // 3 segments = 2 gaps
+    [(18, 1.5), (17, 1.5)],              // 2 segments = 1 gap
+    [(10, 1.5), (14, 1.5), (12, 1.5)]    // 3 segments = 2 gaps
+]
+
+// Simple rendering with HStack spacing
+HStack(spacing: 1) {
+    ForEach(...) { wordIndex in
+        Rectangle()
+            .fill(Color.black)
+            .frame(width: ..., height: ...)
+    }
+}
+```
+
+**3. GalleryPhotoView.swift - Restored Profile Avatar (lines 216-240)**
+```swift
+// Show profile emoji instead of blue circle
+profileAvatarOverlay(for: event)
+
+// Clean flat design (no shadow, no stroke)
+Circle()
+    .fill(Color.white)
+    .overlay(Text(emoji).font(.system(size: 10)))
+```
+
+#### Result
+- ✅ Gallery loads real data from Firebase (Mock → Firebase injection works)
+- ✅ Text segments render cleanly with subtle 1px gaps
+- ✅ Correct gap counts: Line 1 (2 gaps), Line 2 (1 gap), Line 3 (2 gaps)
+- ✅ Profile emoji displays in bottom-right corner of text/photo squares
+- ✅ No visible background bleeding through text bars
+
+#### Files Changed
+- `Halloo/ViewModels/GalleryViewModel.swift` - Service injection implementation
+- `Halloo/Views/Components/GalleryPhotoView.swift` - Speech bubble rendering + profile avatar
+- `Halloo/Views/GalleryView.swift` - Example message box updates
+
+#### Documentation
+- Created `docs/sessions/SESSION-2025-10-09-GalleryUIFixes.md` with full debugging walkthrough
+
+---
+
 ## [Unreleased] - 2025-10-08
 
 ### Added - iOS-Native Habit Deletion Animation
