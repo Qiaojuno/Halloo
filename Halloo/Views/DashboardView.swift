@@ -166,9 +166,18 @@ struct DashboardView: View {
         .onAppear {
             /*
              * DATA LOADING & PROFILE SELECTION:
-             * Load dashboard data and auto-select first profile for task filtering
+             * 1. Connect DashboardViewModel to ProfileViewModel (single source of truth)
+             * 2. Load dashboard data and auto-select first profile for task filtering
              */
+            viewModel.setProfileViewModel(profileViewModel)
             loadData()
+        }
+        .onChange(of: viewModel.selectedProfileId) { newProfileId in
+            // Sync selectedProfileIndex when ViewModel auto-selects a profile
+            if let newId = newProfileId,
+               let index = profileViewModel.profiles.firstIndex(where: { $0.id == newId }) {
+                selectedProfileIndex = index
+            }
         }
         /*
          * 📱 GALLERY DETAIL VIEW:
@@ -384,12 +393,14 @@ struct DashboardView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 12)
 
-            // Profile circles
+            // Profile circles - NOW USING ProfileViewModel (single source of truth)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(Array(viewModel.profiles.enumerated()), id: \.element.id) { index, profile in
+                    ForEach(Array(profileViewModel.profiles.enumerated()), id: \.element.id) { index, profile in
                         Button(action: {
                             selectedProfileIndex = index
+                            // Update DashboardViewModel's selected profile to trigger task filtering
+                            viewModel.selectProfile(profileId: profile.id)
                         }) {
                             ProfileImageView.custom(
                                 profile: profile,
@@ -807,8 +818,9 @@ struct DashboardView: View {
      * This prevents crashes when profiles are loading or being modified
      */
     private var selectedProfile: ElderlyProfile? {
-        guard selectedProfileIndex < viewModel.profiles.count else { return nil }
-        return viewModel.profiles[selectedProfileIndex]
+        // Use ProfileViewModel as single source of truth
+        guard selectedProfileIndex < profileViewModel.profiles.count else { return nil }
+        return profileViewModel.profiles[selectedProfileIndex]
     }
     
     /**
@@ -858,7 +870,9 @@ struct TaskRowView: View {
     let profile: ElderlyProfile?
     let showViewButton: Bool
     let onViewButtonTapped: (() -> Void)?
-    
+
+    @EnvironmentObject private var profileViewModel: ProfileViewModel
+
     init(
         task: Task,
         profile: ElderlyProfile?,
@@ -870,28 +884,24 @@ struct TaskRowView: View {
         self.showViewButton = showViewButton
         self.onViewButtonTapped = onViewButtonTapped
     }
-    
+
+    // Calculate profile slot index based on position in ProfileViewModel
+    private var profileSlot: Int {
+        guard let profile = profile else { return 0 }
+        return profileViewModel.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
+    }
+
     var body: some View {
         HStack(spacing: 16) {
-            // Profile Image (smaller)
-            AsyncImage(url: URL(string: profile?.photoURL ?? "")) { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } placeholder: {
-                ZStack {
-                    // Use a light version based on profile ID hash
-                    let colorIndex = abs((profile?.id ?? "").hashValue) % 4
-                    let profileColor = [Color(hex: "B9E3FF"), Color.red, Color.green, Color.purple][colorIndex]
-                    profileColor.opacity(0.2)
-                    Text(String(profile?.name.prefix(1) ?? "").uppercased())
-                        .font(.custom("Inter", size: 14))
-                        .fontWeight(.medium)
-                        .foregroundColor(.black)
-                }
+            // Profile Image - Use unified ProfileImageView component
+            if let profile = profile {
+                ProfileImageView.custom(
+                    profile: profile,
+                    profileSlot: profileSlot,
+                    isSelected: false, // Tasks don't have selection state
+                    size: 32
+                )
             }
-            .frame(width: 32, height: 32)
-            .clipShape(Circle())
             
             // Task Details
             VStack(alignment: .leading, spacing: 2) {

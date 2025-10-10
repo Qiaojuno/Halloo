@@ -55,9 +55,12 @@ final class Container: ObservableObject {
 
         print("✅ Container.setupServices() completed")
         
-        // Services that remain mocked for now
+        // Twilio SMS Service (Production)
         register(SMSServiceProtocol.self) {
-            MockSMSService() // Keep mock for now, implement Twilio later
+            print("🔴 Container: Creating TwilioSMSService...")
+            let twilioService = TwilioSMSService()
+            print("🔴 Container: TwilioSMSService created")
+            return twilioService
         }
         
         register(NotificationServiceProtocol.self) {

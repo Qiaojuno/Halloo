@@ -105,13 +105,30 @@ struct ContentView: View {
         print("🔥 initializeViewModels called - creating ViewModels")
 
         // Create ViewModels using Container (all factory methods are @MainActor)
+        print("📝 Creating OnboardingViewModel...")
         onboardingViewModel = container.makeOnboardingViewModel()
+        print("✅ OnboardingViewModel created")
+
+        print("📝 Creating ProfileViewModel...")
         profileViewModel = container.makeProfileViewModel()
+        print("✅ ProfileViewModel created")
+
+        // Load profiles after ViewModel is fully initialized
+        profileViewModel?.loadProfiles()
+        print("✅ ProfileViewModel.loadProfiles() called")
+
+        print("📝 Creating DashboardViewModel...")
         dashboardViewModel = container.makeDashboardViewModel()
+        print("✅ DashboardViewModel created")
+
+        print("📝 Creating GalleryViewModel...")
         galleryViewModel = container.makeGalleryViewModel()
+        print("✅ GalleryViewModel created")
 
         // Store auth service reference (singleton)
+        print("📝 Resolving AuthService...")
         authService = container.resolve(AuthenticationServiceProtocol.self) as? FirebaseAuthenticationService
+        print("✅ AuthService resolved")
 
         print("✅ All ViewModels created successfully (including GalleryViewModel)")
 

@@ -18,6 +18,7 @@ struct SharedHeaderSection: View {
     // MARK: - Environment & State
     @Environment(\.container) private var container
     @EnvironmentObject private var profileViewModel: ProfileViewModel
+    @EnvironmentObject private var viewModel: DashboardViewModel
     @Binding var selectedProfileIndex: Int
 
     // MARK: - UI State
@@ -58,8 +59,8 @@ struct SharedHeaderSection: View {
                         )
                         .onTapGesture {
                             selectedProfileIndex = index
-                            // Note: selectedProfileIndex is used for local UI filtering only
-                            // ProfileViewModel doesn't need to track selection state
+                            // Update DashboardViewModel's selected profile to trigger task filtering
+                            viewModel.selectProfile(profileId: profile.id)
                         }
                     }
                 }

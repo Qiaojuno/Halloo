@@ -85,29 +85,40 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             "phoneNumber": profile.phoneNumber
         ])
 
-        // Check for existing profile with same phone number
+        // Check for existing profile with same phone number (DUPLICATE PREVENTION)
         let existingProfiles = try await CollectionPath.userProfiles(userId: profile.userId)
             .collection(in: db)
             .whereField("phoneNumber", isEqualTo: profile.phoneNumber)
             .getDocuments()
 
         if !existingProfiles.isEmpty {
-            DiagnosticLogger.warning(.profileId, "⚠️ DUPLICATE PHONE NUMBER DETECTED", context: [
+            // Log details of duplicate
+            DiagnosticLogger.error(.profileId, "❌ DUPLICATE PHONE NUMBER - BLOCKING CREATION", context: [
                 "newProfileId": profile.id,
                 "phoneNumber": profile.phoneNumber,
                 "existingCount": existingProfiles.documents.count
             ])
 
-            for (index, doc) in existingProfiles.documents.enumerated() {
-                let data = doc.data()
-                DiagnosticLogger.info(.profileId, "Existing profile \(index + 1)", context: [
-                    "id": doc.documentID,
-                    "name": data["name"] ?? "unknown",
-                    "phoneNumber": data["phoneNumber"] ?? "unknown"
-                ])
-            }
+            // Get existing profile details for error message
+            let firstDoc = existingProfiles.documents.first!
+            let existingData = firstDoc.data()
+            let existingName = existingData["name"] as? String ?? "Unknown"
+            let existingId = firstDoc.documentID
+
+            DiagnosticLogger.info(.profileId, "Existing profile details", context: [
+                "id": existingId,
+                "name": existingName,
+                "phoneNumber": profile.phoneNumber
+            ])
+
+            // Throw error to prevent duplicate creation
+            throw DatabaseError.duplicatePhoneNumber(
+                phoneNumber: profile.phoneNumber,
+                existingProfileName: existingName,
+                existingProfileId: existingId
+            )
         } else {
-            DiagnosticLogger.success(.profileId, "No duplicate phone numbers found", context: [
+            DiagnosticLogger.success(.profileId, "✅ No duplicate phone numbers found - safe to create", context: [
                 "phoneNumber": profile.phoneNumber
             ])
         }

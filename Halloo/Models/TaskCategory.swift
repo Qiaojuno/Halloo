@@ -152,3 +152,85 @@ enum TaskCategory: String, CaseIterable, Codable {
         }
     }
 }
+
+// MARK: - Quiet Hours Validation (TCPA Compliance)
+extension TaskCategory {
+    /// Allowed hour range for SMS (TCPA quiet hours compliance)
+    /// Based on category sensitivity and typical user schedules
+    var allowedHourRange: ClosedRange<Int> {
+        switch self {
+        case .medication:
+            return 6...22  // 6 AM - 10 PM (critical reminders, wider window)
+        case .health, .safety:
+            return 7...22  // 7 AM - 10 PM (important but not as urgent as meds)
+        case .meal:
+            return 6...21  // 6 AM - 9 PM (breakfast starts early, dinner ends by 9 PM)
+        case .exercise:
+            return 8...20  // 8 AM - 8 PM (avoid early morning/late evening)
+        case .hygiene:
+            return 7...21  // 7 AM - 9 PM (morning routine to evening routine)
+        case .social:
+            return 9...21  // 9 AM - 9 PM (respectful hours for social contact)
+        case .other:
+            return 8...20  // 8 AM - 8 PM (conservative default)
+        }
+    }
+
+    /// Check if a given time is allowed for SMS based on category and timezone
+    /// - Parameters:
+    ///   - date: The date/time to check
+    ///   - timezone: The timezone to evaluate (typically profile's timezone)
+    /// - Returns: True if SMS can be sent at this time
+    func isTimeAllowed(_ date: Date, in timezone: TimeZone) -> Bool {
+        var calendar = Calendar.current
+        calendar.timeZone = timezone
+
+        let hour = calendar.component(.hour, from: date)
+        return allowedHourRange.contains(hour)
+    }
+
+    /// Get next allowed send time if current time is in quiet hours
+    /// - Parameters:
+    ///   - date: Current date/time
+    ///   - timezone: Profile's timezone
+    /// - Returns: Next allowed Date, or nil if already in allowed window
+    func nextAllowedTime(after date: Date, in timezone: TimeZone) -> Date? {
+        var calendar = Calendar.current
+        calendar.timeZone = timezone
+
+        let hour = calendar.component(.hour, from: date)
+
+        // Already in allowed window
+        if allowedHourRange.contains(hour) {
+            return nil
+        }
+
+        // Before allowed window starts
+        if hour < allowedHourRange.lowerBound {
+            // Set to start of allowed window today
+            return calendar.date(bySettingHour: allowedHourRange.lowerBound, minute: 0, second: 0, of: date)
+        }
+
+        // After allowed window ends
+        // Set to start of allowed window tomorrow
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: date) {
+            return calendar.date(bySettingHour: allowedHourRange.lowerBound, minute: 0, second: 0, of: tomorrow)
+        }
+
+        return nil
+    }
+
+    /// Human-readable quiet hours description
+    var quietHoursDescription: String {
+        let startHour = allowedHourRange.lowerBound
+        let endHour = allowedHourRange.upperBound
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h a"
+
+        let startDate = Calendar.current.date(bySettingHour: startHour, minute: 0, second: 0, of: Date()) ?? Date()
+        let endDate = Calendar.current.date(bySettingHour: endHour, minute: 0, second: 0, of: Date()) ?? Date()
+
+        return "\(formatter.string(from: startDate)) - \(formatter.string(from: endDate))"
+    }
+}

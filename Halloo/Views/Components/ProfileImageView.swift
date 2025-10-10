@@ -57,27 +57,38 @@ struct ProfileImageView: View {
         Color.orange.opacity(0.6)     // Profile slot 4 - orange (for 5+ profiles)
     ]
     
-    // Grandparent emojis with diverse skin tones
-    private let profileEmojis: [String] = [
-        "👴🏻", "👵🏻", "👴🏽", "👵🏽", "👴🏿", "👵🏿"
-    ]
-    
     // MARK: - Computed Properties
+    private var hasProfilePhoto: Bool {
+        // Check if profile has a valid photo URL
+        guard let photoURL = profile.photoURL, !photoURL.isEmpty else {
+            return false
+        }
+        return true
+    }
+
+    private var profileColor: Color {
+        if profile.status != .confirmed {
+            return Color.gray.opacity(0.5) // Grayed out for unconfirmed profiles
+        }
+
+        // Always return the profile's assigned color
+        return profileColors[profileSlot % profileColors.count]
+    }
+
     private var borderColor: Color {
         if profile.status != .confirmed {
             return Color.gray.opacity(0.5) // Grayed out for unconfirmed profiles
         }
-        
-        let color = profileColors[profileSlot % profileColors.count]
-        return isSelected ? color : Color(hex: "e0e0e0")
+
+        // Show profile color border only when selected, otherwise neutral gray
+        return isSelected ? profileColor : Color(hex: "e0e0e0")
     }
-    
-    private var profileEmoji: String {
-        // Consistent emoji based on profile slot + name hash for variety
-        let emojiIndex = (profileSlot + abs(profile.name.hashValue)) % profileEmojis.count
-        return profileEmojis[emojiIndex]
+
+    private var profileInitial: String {
+        // First letter of name, uppercased
+        return String(profile.name.prefix(1)).uppercased()
     }
-    
+
     // MARK: - Body
     var body: some View {
         AsyncImage(url: URL(string: profile.photoURL ?? "")) { image in
@@ -85,11 +96,12 @@ struct ProfileImageView: View {
                 .resizable()
                 .aspectRatio(contentMode: .fill)
         } placeholder: {
-            // Placeholder with grandparent emoji
+            // Placeholder with initial letter (no emoji)
             ZStack {
-                borderColor.opacity(0.2) // Use profile color as background
-                Text(profileEmoji)
-                    .font(.system(size: size.emojiSize))
+                profileColor.opacity(0.35) // Always use profile color for background
+                Text(profileInitial)
+                    .font(.system(size: size.emojiSize, weight: .bold))
+                    .foregroundColor(.black)
             }
         }
         .frame(width: size.dimension, height: size.dimension)

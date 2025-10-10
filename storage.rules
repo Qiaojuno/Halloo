@@ -41,13 +41,24 @@ service firebase.storage {
     // User avatars
     match /users/{userId}/{fileName} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && 
-                   isOwner(userId) && 
-                   isImageFile() && 
+      allow write: if isAuthenticated() &&
+                   isOwner(userId) &&
+                   isImageFile() &&
                    isValidFileSize();
       allow delete: if isAuthenticated() && isOwner(userId);
     }
-    
+
+    // Gallery archive - archived photos older than 90 days
+    // Read-only for users (photos archived by Cloud Function)
+    match /gallery-archive/{userId}/{profileId}/{year}/{month}/{photoId} {
+      // Users can only read their own archived photos
+      allow read: if isAuthenticated() && isOwner(userId);
+
+      // Only Cloud Functions can write (via service account)
+      // Users cannot upload/delete archived photos
+      allow write: if false;
+    }
+
     // Deny all other access
     match /{allPaths=**} {
       allow read, write: if false;

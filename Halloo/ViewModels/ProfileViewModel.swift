@@ -331,32 +331,44 @@ final class ProfileViewModel: ObservableObject {
         dataSyncCoordinator: DataSyncCoordinator,
         errorCoordinator: ErrorCoordinator
     ) {
+        print("🔵 ProfileViewModel.init START")
         DiagnosticLogger.enter(.vmInit, "ProfileViewModel.init", context: [
             "authStatus": authService.isAuthenticated,
             "userId": authService.currentUser?.uid ?? "nil"
         ])
 
+        print("🔵 Assigning services...")
         self.databaseService = databaseService
+        print("🔵 databaseService assigned")
         self.smsService = smsService
+        print("🔵 smsService assigned")
         self.authService = authService
+        print("🔵 authService assigned")
         self.dataSyncCoordinator = dataSyncCoordinator
+        print("🔵 dataSyncCoordinator assigned")
         self.errorCoordinator = errorCoordinator
+        print("🔵 errorCoordinator assigned")
 
         // Configure elderly-appropriate validation
+        print("🔵 Calling setupValidation()...")
         setupValidation()
+        print("🔵 setupValidation() complete")
 
         // Enable real-time family and SMS synchronization
+        print("🔵 Calling setupDataSync()...")
         setupDataSync()
+        print("🔵 setupDataSync() complete")
 
-        DiagnosticLogger.info(.vmInit, "Calling loadProfiles() from init", context: [
+        DiagnosticLogger.info(.vmInit, "ProfileViewModel init complete - loadProfiles() will be called after initialization", context: [
             "authStatus": authService.isAuthenticated,
             "userId": authService.currentUser?.uid ?? "nil"
         ])
 
-        // Load existing profiles with confirmation status
-        loadProfiles()
+        // NOTE: loadProfiles() is called explicitly in ContentView after ViewModel creation
+        // to avoid crashes from async work during init
 
         DiagnosticLogger.exit(.vmInit, "ProfileViewModel.init")
+        print("🔵 ProfileViewModel.init COMPLETE")
     }
     
     /// Convenience initializer for Canvas previews that skips automatic data loading
@@ -656,21 +668,21 @@ final class ProfileViewModel: ObservableObject {
                 throw ProfileError.maxProfilesReached
             }
 
-            // Format phone number for SMS delivery compatibility
-            let formattedPhone = phoneNumber.formattedPhoneNumber
+            // Format phone number for SMS delivery compatibility (E.164 format for Twilio)
+            let e164Phone = phoneNumber.e164PhoneNumber
 
             DiagnosticLogger.info(.asyncTask, "Creating profile object", context: [
                 "name": profileName,
-                "phone": formattedPhone,
+                "phone": e164Phone,
                 "relationship": relationship
             ])
 
             // Create profile with elderly-optimized defaults
             let profile = ElderlyProfile(
-                id: IDGenerator.profileID(phoneNumber: formattedPhone),
+                id: IDGenerator.profileID(phoneNumber: e164Phone),
                 userId: userId,
                 name: profileName.trimmingCharacters(in: .whitespacesAndNewlines),
-                phoneNumber: formattedPhone,
+                phoneNumber: e164Phone,
                 relationship: relationship,
                 isEmergencyContact: isEmergencyContact,
                 timeZone: timeZone.identifier, // Critical for proper reminder timing
@@ -731,14 +743,14 @@ final class ProfileViewModel: ObservableObject {
                     "thread": DiagnosticLogger.threadInfo()
                 ])
 
-                // Update local state for immediate family feedback
-                self.profiles.insert(profile, at: 0)
+                // Update confirmation status and reset form
+                // NOTE: Profile will be added to local array via dataSyncCoordinator broadcast
+                // which triggers loadProfiles() - no need to manually insert here
                 self.confirmationStatus[profile.id] = .sent
                 self.resetForm()
                 self.showingCreateProfile = false
 
                 DiagnosticLogger.success(.uiUpdate, "Profile creation complete", context: [
-                    "totalProfiles": self.profiles.count,
                     "newProfileId": profile.id
                 ])
             }
@@ -793,16 +805,16 @@ final class ProfileViewModel: ObservableObject {
         
         isLoading = true
         errorMessage = nil
-        
+
         do {
-            let formattedPhone = phoneNumber.formattedPhoneNumber
-            let phoneChanged = formattedPhone != profile.phoneNumber
-            
+            let e164Phone = phoneNumber.e164PhoneNumber
+            let phoneChanged = e164Phone != profile.phoneNumber
+
             let updatedProfile = ElderlyProfile(
                 id: profile.id,
                 userId: profile.userId,
                 name: profileName.trimmingCharacters(in: .whitespacesAndNewlines),
-                phoneNumber: formattedPhone,
+                phoneNumber: e164Phone,
                 relationship: relationship,
                 isEmergencyContact: isEmergencyContact,
                 timeZone: timeZone.identifier,
@@ -982,14 +994,22 @@ final class ProfileViewModel: ObservableObject {
     sender identification to build trust.
     */
     private func sendConfirmationSMS(for profile: ElderlyProfile) async throws {
+        // TCPA-COMPLIANT CONSENT MESSAGE
+        // Required elements:
+        // ✅ Purpose of messages clearly stated
+        // ✅ Frequency disclosure ("up to 3 messages/day")
+        // ✅ Opt-out instructions (STOP keyword)
+        // ✅ Help keyword (HELP for info)
+        // ✅ Message & data rates disclosure
         let message = """
-        Hello \(profile.name)! Your family member wants to send you helpful daily reminders via text message. 
-        
-        Reply YES to confirm and start receiving reminders, or STOP to decline.
-        
+        Hello \(profile.name)! Your family member wants to send you helpful daily reminders via text.
+
+        Reply YES to receive up to 3 messages/day. Reply STOP to unsubscribe or HELP for info.
+
+        Message & data rates may apply.
         - Hallo Family Care
         """
-        
+
         let _ = try await smsService.sendSMS(
             to: profile.phoneNumber,
             message: message,
@@ -1109,7 +1129,7 @@ final class ProfileViewModel: ObservableObject {
             // Honor elderly user's decline - no reminders will be sent
             confirmationStatus[profileId] = .declined
             confirmationMessages[profileId] = "Declined. No reminders will be sent."
-            
+
             // ONBOARDING FLOW: Handle decline during onboarding
             if let onboardingProfile = onboardingProfile,
                onboardingProfile.id == profileId,
@@ -1117,9 +1137,132 @@ final class ProfileViewModel: ObservableObject {
                 // Stay on confirmation wait but update UI to show decline
                 // User can retry or cancel onboarding
             }
+
+            // TCPA COMPLIANCE: Handle STOP keyword (opt-out)
+            handleStopKeyword(for: profileId, response: response)
         }
     }
-    
+
+    /*
+    BUSINESS LOGIC: STOP Keyword Handler (TCPA Compliance)
+
+    CONTEXT: When elderly users text STOP, QUIT, UNSUBSCRIBE, or similar keywords,
+    federal TCPA regulations require immediate cessation of all SMS communication.
+    This protects elderly users from unwanted messages and ensures legal compliance.
+
+    DESIGN DECISION: Automatic opt-out with permanent record keeping
+    - Alternative 1: Confirm opt-out with family first (rejected - violates TCPA)
+    - Alternative 2: Temporary pause with re-subscription prompt (rejected - illegal)
+    - Chosen Solution: Immediate permanent opt-out with audit trail
+
+    LEGAL COMPLIANCE: This handler ensures:
+    - Opt-out processed within 1 minute (TCPA requirement)
+    - All future SMS blocked automatically
+    - Audit trail maintained (date, method, keyword used)
+    - Family notified to prevent confusion
+
+    ELDERLY RESPECT: Once someone says STOP, we respect that decision permanently.
+    Re-subscription requires explicit new consent through proper opt-in flow.
+    */
+    private func handleStopKeyword(for profileId: String, response: SMSResponse) {
+        // Check if response contains STOP keywords
+        let upperMessage = response.textResponse?.uppercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let stopKeywords = ["STOP", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "STOPALL", "REVOKE", "OPTOUT"]
+
+        guard stopKeywords.contains(upperMessage) else { return }
+
+        print("🛑 [ProfileViewModel] STOP keyword detected: '\(upperMessage)' from profile \(profileId)")
+
+        // Find and update profile
+        guard let index = profiles.firstIndex(where: { $0.id == profileId }) else {
+            print("❌ [ProfileViewModel] Profile not found for STOP handler: \(profileId)")
+            return
+        }
+
+        var updatedProfile = profiles[index]
+
+        // Mark as opted out
+        updatedProfile.optOutOfSMS(method: "STOP_KEYWORD")
+
+        // Update local state immediately (optimistic UI)
+        profiles[index] = updatedProfile
+        confirmationStatus[profileId] = .declined
+        confirmationMessages[profileId] = "⚠️ Opted out via STOP keyword. No SMS will be sent."
+
+        print("🛑 [ProfileViewModel] Profile opted out: \(updatedProfile.name) (\(updatedProfile.phoneNumber))")
+
+        // Persist to Firestore
+        _Concurrency.Task {
+            do {
+                try await databaseService.updateElderlyProfile(updatedProfile)
+                print("✅ [ProfileViewModel] Opt-out saved to Firestore")
+
+                // Broadcast update to family members
+                dataSyncCoordinator.broadcastProfileUpdate(updatedProfile)
+
+                // TODO: Send push notification to family
+                // "Grandma Rose has opted out of SMS reminders. Please contact them directly."
+
+            } catch {
+                await MainActor.run {
+                    print("❌ [ProfileViewModel] Failed to save opt-out: \(error)")
+                    errorMessage = "Failed to process opt-out: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    /*
+    BUSINESS LOGIC: Re-subscription Handler (Opt-In After Opt-Out)
+
+    CONTEXT: If an elderly user accidentally opted out or changed their mind,
+    families can request re-subscription. However, TCPA requires explicit new consent.
+
+    DESIGN DECISION: Send new opt-in SMS requiring YES response
+    - Alternative 1: Automatically re-enable (rejected - violates TCPA)
+    - Alternative 2: Allow family to re-enable directly (rejected - illegal)
+    - Chosen Solution: Send fresh consent SMS, require explicit YES reply
+
+    LEGAL COMPLIANCE: New consent must be:
+    - Explicitly requested from elderly user
+    - Clearly worded with opt-out instructions
+    - Documented with timestamp and method
+    */
+    func requestResubscription(for profile: ElderlyProfile) async throws {
+        guard profile.smsOptedOut else {
+            throw NSError(domain: "ProfileViewModel", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Profile is not opted out"
+            ])
+        }
+
+        print("📱 [ProfileViewModel] Requesting re-subscription for \(profile.name)")
+
+        // Send new opt-in request SMS
+        let message = """
+        Hello \(profile.name)! Your family would like to resume sending you helpful daily reminders via text.
+
+        Reply YES to start receiving reminders again, or STOP to stay unsubscribed.
+
+        Message & data rates may apply.
+        - Hallo Family Care
+        """
+
+        try await smsService.sendSMS(
+            to: profile.phoneNumber,
+            message: message,
+            profileId: profile.id,
+            messageType: .confirmation
+        )
+
+        // Update UI
+        await MainActor.run {
+            confirmationStatus[profile.id] = .pending
+            confirmationMessages[profile.id] = "Re-subscription request sent. Waiting for YES reply..."
+        }
+
+        print("✅ [ProfileViewModel] Re-subscription SMS sent to \(profile.phoneNumber)")
+    }
+
     // MARK: - Validation Methods
     private func validateName(_ name: String) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1139,7 +1282,7 @@ final class ProfileViewModel: ObservableObject {
         if phone.count > 3 {
             hasStartedTypingPhone = true
         }
-        
+
         // Only show validation errors after user has started typing
         if !hasStartedTypingPhone {
             phoneError = nil
@@ -1147,7 +1290,7 @@ final class ProfileViewModel: ObservableObject {
             phoneError = nil // Don't show error for empty state
         } else if !phone.isValidPhoneNumber {
             phoneError = "Please enter a valid phone number"
-        } else if profiles.contains(where: { $0.phoneNumber == phone.formattedPhoneNumber && $0.id != selectedProfile?.id }) {
+        } else if profiles.contains(where: { $0.phoneNumber == phone.e164PhoneNumber && $0.id != selectedProfile?.id }) {
             phoneError = "This phone number is already in use"
         } else {
             phoneError = nil
@@ -1388,15 +1531,15 @@ final class ProfileViewModel: ObservableObject {
             errorMessage = "Maximum profiles reached"
             return
         }
-        
-        let formattedPhone = phoneNumber.formattedPhoneNumber
-        
+
+        let e164Phone = phoneNumber.e164PhoneNumber
+
         // Create profile object but don't persist yet
         let profile = ElderlyProfile(
-            id: IDGenerator.profileID(phoneNumber: formattedPhone),
+            id: IDGenerator.profileID(phoneNumber: e164Phone),
             userId: userId,
             name: profileName.trimmingCharacters(in: .whitespacesAndNewlines),
-            phoneNumber: formattedPhone,
+            phoneNumber: e164Phone,
             relationship: relationship,
             isEmergencyContact: isEmergencyContact,
             timeZone: timeZone.identifier,

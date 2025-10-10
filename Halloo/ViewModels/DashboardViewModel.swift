@@ -102,11 +102,8 @@ final class DashboardViewModel: ObservableObject {
     /// Used by families to monitor daily care adherence across all elderly members.
     @Published var todaysTasks: [DashboardTask] = []
     
-    /// All elderly profiles managed by the current family user
-    /// 
-    /// Updated in real-time as profiles are created, confirmed, or modified.
-    /// Used for task filtering and family care organization.
-    @Published var profiles: [ElderlyProfile] = []
+    // REMOVED: profiles property - now managed solely by ProfileViewModel
+    // This eliminates duplicate state and race conditions between ViewModels
     
     /// Recent SMS responses from elderly family members (last 10)
     ///
@@ -221,7 +218,16 @@ final class DashboardViewModel: ObservableObject {
     
     /// Coordinator for elderly-care-aware error handling and family communication
     private let errorCoordinator: ErrorCoordinator
-    
+
+    /// ProfileViewModel reference for accessing profiles (single source of truth)
+    /// Dashboard reads profiles but does not manage them
+    private weak var profileViewModel: ProfileViewModel?
+
+    /// Computed property to access profiles from ProfileViewModel
+    private var profiles: [ElderlyProfile] {
+        return profileViewModel?.profiles ?? []
+    }
+
     // MARK: - Internal Dashboard Coordination Properties
     
     /// Combine cancellables for reactive dashboard data coordination
@@ -379,21 +385,68 @@ final class DashboardViewModel: ObservableObject {
         databaseService: DatabaseServiceProtocol,
         authService: AuthenticationServiceProtocol,
         dataSyncCoordinator: DataSyncCoordinator,
-        errorCoordinator: ErrorCoordinator
+        errorCoordinator: ErrorCoordinator,
+        profileViewModel: ProfileViewModel? = nil
     ) {
         self.databaseService = databaseService
         self.authService = authService
         self.dataSyncCoordinator = dataSyncCoordinator
         self.errorCoordinator = errorCoordinator
-        
+        self.profileViewModel = profileViewModel
+
         // Enable real-time family and elderly care data synchronization
         setupDataSync()
-        
+
         // Configure continuous monitoring for timely family intervention
         setupAutoRefresh()
-        
+
         // Load initial dashboard data for immediate family visibility
         loadDashboardData()
+    }
+
+    /// Set ProfileViewModel reference after initialization (for dependency injection)
+    func setProfileViewModel(_ profileViewModel: ProfileViewModel) {
+        self.profileViewModel = profileViewModel
+
+        // Auto-select first profile if available immediately
+        updateProfileSelection(from: profileViewModel.profiles)
+
+        // Subscribe to profile changes (for async loading and updates)
+        profileViewModel.$profiles
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] profiles in
+                self?.updateProfileSelection(from: profiles)
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Update profile selection and pending confirmations when profiles change
+    private func updateProfileSelection(from profiles: [ElderlyProfile]) {
+        #if DEBUG
+        print("🔄 [DashboardViewModel] updateProfileSelection called with \(profiles.count) profiles")
+        #endif
+
+        // Auto-select first profile if none selected (UX improvement)
+        if self.selectedProfileId == nil && !profiles.isEmpty {
+            self.selectedProfileId = profiles[0].id
+            #if DEBUG
+            print("✅ [DashboardViewModel] Auto-selected profile: \(profiles[0].id)")
+            #endif
+        }
+
+        // Update pending confirmations
+        self.pendingConfirmations = profiles.filter { $0.status == .pendingConfirmation }
+
+        // Reload dashboard data to re-filter tasks with new profiles
+        if !profiles.isEmpty {
+            #if DEBUG
+            print("🔄 [DashboardViewModel] Reloading dashboard data with \(profiles.count) profiles")
+            #endif
+            loadDashboardData()
+        } else {
+            // Just update UI if no profiles yet
+            self.updateDashboardSummary()
+        }
     }
     
     deinit {
@@ -402,13 +455,9 @@ final class DashboardViewModel: ObservableObject {
     
     // MARK: - Setup Methods
     private func setupDataSync() {
-        // Listen for profile updates
-        dataSyncCoordinator.profileUpdates
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.refreshProfilesData()
-            }
-            .store(in: &cancellables)
+        // NOTE: Profile updates handled by ProfileViewModel
+        // Dashboard reactively accesses profiles via computed property
+        // No need to subscribe to profile updates here
         
         // Listen for task updates
         dataSyncCoordinator.taskUpdates
@@ -491,16 +540,16 @@ final class DashboardViewModel: ObservableObject {
     private func loadDashboardDataAsync() async {
         isLoading = true
         errorMessage = nil
-        
-        // Load all dashboard components in parallel for optimal family experience
+
+        // Load dashboard components in parallel for optimal family experience
+        // NOTE: Profiles are loaded by ProfileViewModel, not DashboardViewModel
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.loadProfiles() }
             group.addTask { await self.loadTodaysTasks() }
             group.addTask { await self.loadRecentResponses() }
         }
-        
+
         // Data loading complete
-        
+
         await MainActor.run {
             // Aggregate data for family care coordination
             self.updateDashboardSummary()
@@ -510,38 +559,19 @@ final class DashboardViewModel: ObservableObject {
         }
     }
     
-    private func loadProfiles() async {
-        do {
-            guard let userId = authService.currentUser?.uid else { return }
+    // REMOVED: loadProfiles() method - profiles now loaded by ProfileViewModel only
+    // DashboardViewModel will receive profile data via ProfileViewModel injection
+    private func loadPendingConfirmations(profiles: [ElderlyProfile]) async {
+        // Extract pending confirmations from profiles passed from ProfileViewModel
+        await MainActor.run {
+            self.pendingConfirmations = profiles.filter { $0.status == .pendingConfirmation }
 
-            let loadedProfiles = try await databaseService.getElderlyProfiles(for: userId)
-
-            #if DEBUG
-            print("🔍 [DashboardViewModel] Loaded \(loadedProfiles.count) profiles")
-            for (index, profile) in loadedProfiles.enumerated() {
-                print("  Profile \(index): id=\(profile.id), name=\(profile.name), status=\(profile.status)")
-            }
-            #endif
-
-            await MainActor.run {
-                self.profiles = loadedProfiles
-                self.pendingConfirmations = loadedProfiles.filter { $0.status == .pendingConfirmation }
-
-                // Auto-select first profile if none selected (UX improvement)
-                if self.selectedProfileId == nil && !loadedProfiles.isEmpty {
-                    self.selectedProfileId = loadedProfiles[0].id
-                    #if DEBUG
-                    print("✅ [DashboardViewModel] Auto-selected profile: \(loadedProfiles[0].id)")
-                    #endif
-                }
-            }
-
-        } catch {
-            #if DEBUG
-            print("❌ [DashboardViewModel] Failed to load profiles: \(error.localizedDescription)")
-            #endif
-            await MainActor.run {
-                self.errorCoordinator.handle(error, context: "Loading profiles for dashboard")
+            // Auto-select first profile if none selected (UX improvement)
+            if self.selectedProfileId == nil && !profiles.isEmpty {
+                self.selectedProfileId = profiles[0].id
+                #if DEBUG
+                print("✅ [DashboardViewModel] Auto-selected profile: \(profiles[0].id)")
+                #endif
             }
         }
     }
@@ -671,9 +701,11 @@ final class DashboardViewModel: ObservableObject {
         }
     }
     
-    private func refreshProfilesData() {
+    // REMOVED: refreshProfilesData() - profiles refreshed by ProfileViewModel
+    // Dashboard will reactively update when ProfileViewModel.profiles changes
+    func updatePendingConfirmations(profiles: [ElderlyProfile]) {
         _Concurrency.Task {
-            await loadProfiles()
+            await loadPendingConfirmations(profiles: profiles)
             await MainActor.run {
                 self.updateDashboardSummary()
             }
@@ -759,17 +791,17 @@ final class DashboardViewModel: ObservableObject {
         // Streak updates removed - no longer tracking streaks
         
         // Handle confirmation responses
+        // NOTE: Profile confirmation updates now handled by ProfileViewModel
+        // Dashboard should observe ProfileViewModel.profiles changes reactively
         if response.isConfirmationResponse,
-           let profileId = response.profileId,
-           let profileIndex = profiles.firstIndex(where: { $0.id == profileId }) {
-            
+           let profileId = response.profileId {
+
             if response.isPositiveConfirmation {
-                profiles[profileIndex].status = .confirmed
-                profiles[profileIndex].confirmedAt = response.receivedAt
-                
-                // Remove from pending confirmations
+                // ProfileViewModel owns profile updates
+                // Dashboard observes changes via computed property
+                // Remove from pending confirmations after ProfileViewModel updates
                 pendingConfirmations.removeAll { $0.id == profileId }
-                
+
                 updateDashboardSummary()
             }
         }

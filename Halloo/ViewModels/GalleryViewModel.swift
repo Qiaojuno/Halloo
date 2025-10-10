@@ -18,6 +18,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import FirebaseStorage
 
 /// Gallery management for elderly care photo history and family memories
 ///
@@ -86,11 +87,21 @@ final class GalleryViewModel: ObservableObject {
     @Published var galleryEvents: [GalleryHistoryEvent] = []
     
     /// Timestamp of last successful gallery data refresh
-    /// 
+    ///
     /// Used to display "last updated" information to families and
     /// determine when next refresh cycle should occur.
     @Published var lastRefreshTime: Date?
-    
+
+    /// Archived photos from Cloud Storage (older than 90 days)
+    ///
+    /// Photos that have been archived after 90-day retention period.
+    /// Text data has been deleted, only photos remain in Cloud Storage.
+    /// Organized by user/profile/year/month for efficient loading.
+    @Published var archivedPhotos: [ArchivedPhoto] = []
+
+    /// Loading state for archived photos from Cloud Storage
+    @Published var isLoadingArchive = false
+
     // MARK: - Dependencies
     private var databaseService: DatabaseServiceProtocol
     private var authService: AuthenticationServiceProtocol
@@ -207,6 +218,119 @@ final class GalleryViewModel: ObservableObject {
     /// Periodic refresh disabled to avoid compilation issues
     private func setupPeriodicRefresh() {
         // TODO: Implement periodic refresh when Swift compiler issue is resolved
+    }
+
+    // MARK: - Archived Photos
+
+    /// Load archived photos from Cloud Storage (photos older than 90 days)
+    ///
+    /// After the 90-day retention period, text data is deleted but photos are
+    /// archived to Cloud Storage. This method loads those archived photos.
+    ///
+    /// Photos are organized in Cloud Storage by:
+    /// - gallery-archive/{userId}/{profileId}/{year}/{month}/{photoId}.jpg
+    ///
+    /// - Important: Only loads photos for the current authenticated user
+    /// - Note: Photos are sorted by archived date (newest first)
+    func loadArchivedPhotos() async {
+        print("📦 GALLERY: Loading archived photos from Cloud Storage")
+
+        isLoadingArchive = true
+
+        do {
+            guard let userId = authService.currentUser?.uid else {
+                print("❌ GALLERY: No authenticated user for archived photos")
+                await MainActor.run {
+                    self.isLoadingArchive = false
+                }
+                return
+            }
+
+            let storage = Storage.storage()
+            let archiveRef = storage.reference().child("gallery-archive/\(userId)")
+
+            print("📂 GALLERY: Listing archived photos at: gallery-archive/\(userId)")
+
+            // List all items under user's archive folder
+            let result = try await archiveRef.listAll()
+
+            print("📊 GALLERY: Found \(result.items.count) archived photo files")
+
+            var photos: [ArchivedPhoto] = []
+
+            // Process each archived photo
+            for item in result.items {
+                do {
+                    // Get download URL
+                    let url = try await item.downloadURL()
+
+                    // Get metadata
+                    let metadata = try await item.getMetadata()
+
+                    // Extract archived date from metadata
+                    let archivedAtString = metadata.customMetadata?["archivedAt"] ?? ""
+                    let archivedAt = ISO8601DateFormatter().date(from: archivedAtString) ?? Date()
+
+                    // Extract profile ID from metadata
+                    let profileId = metadata.customMetadata?["profileId"] ?? ""
+
+                    // Extract original creation date
+                    let originalCreatedAtString = metadata.customMetadata?["originalCreatedAt"] ?? ""
+                    let originalCreatedAt = ISO8601DateFormatter().date(from: originalCreatedAtString)
+
+                    photos.append(ArchivedPhoto(
+                        id: item.name,
+                        url: url,
+                        archivedAt: archivedAt,
+                        originalCreatedAt: originalCreatedAt,
+                        profileId: profileId
+                    ))
+
+                    print("✅ GALLERY: Loaded archived photo: \(item.name)")
+
+                } catch {
+                    print("❌ GALLERY: Failed to load archived photo \(item.name): \(error)")
+                    continue
+                }
+            }
+
+            // Sort by original creation date (newest first)
+            let sortedPhotos = photos.sorted {
+                ($0.originalCreatedAt ?? $0.archivedAt) > ($1.originalCreatedAt ?? $1.archivedAt)
+            }
+
+            await MainActor.run {
+                self.archivedPhotos = sortedPhotos
+                self.isLoadingArchive = false
+            }
+
+            print("🎉 GALLERY: Loaded \(sortedPhotos.count) archived photos successfully")
+
+        } catch {
+            print("❌ GALLERY: Failed to load archived photos: \(error)")
+            await MainActor.run {
+                self.isLoadingArchive = false
+                self.errorMessage = "Failed to load archived photos"
+            }
+        }
+    }
+}
+
+// MARK: - Archived Photo Model
+
+/// Represents a photo archived to Cloud Storage after 90-day retention period
+struct ArchivedPhoto: Identifiable, Codable {
+    let id: String
+    let url: URL
+    let archivedAt: Date
+    let originalCreatedAt: Date?
+    let profileId: String
+
+    var formattedDate: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: originalCreatedAt ?? archivedAt)
     }
 }
 

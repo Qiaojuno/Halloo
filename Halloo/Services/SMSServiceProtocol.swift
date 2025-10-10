@@ -157,17 +157,7 @@ protocol SMSServiceProtocol {
     /// - Returns: Gentle follow-up message with help options and support tone
     /// - Important: Follow-up messages should be supportive, not demanding
     func getFollowUpMessage(for task: Task, profile: ElderlyProfile) -> String
-    
-    /// Generates helpful instructions message for elderly users needing SMS guidance
-    /// 
-    /// Creates clear, simple instructions explaining how to respond to care
-    /// reminders, what responses are accepted, and how to get additional help
-    /// if needed, tailored for elderly technology comfort levels.
-    ///
-    /// - Returns: Comprehensive help message with simple response instructions
-    /// - Note: Help message should be concise but complete for elderly understanding
-    func getHelpMessage() -> String
-    
+
     /// Generates warm welcome message for newly confirmed elderly profiles
     /// 
     /// Creates friendly introduction message that welcomes elderly users to

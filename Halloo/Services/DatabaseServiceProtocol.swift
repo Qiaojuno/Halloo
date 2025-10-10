@@ -537,6 +537,7 @@ enum DatabaseError: LocalizedError {
     case syncFailed
     case exportFailed
     case importFailed
+    case duplicatePhoneNumber(phoneNumber: String, existingProfileName: String, existingProfileId: String)
     case unknownError(String)
     
     var errorDescription: String? {
@@ -565,6 +566,8 @@ enum DatabaseError: LocalizedError {
             return "Failed to export your data. Please try again later."
         case .importFailed:
             return "Failed to import data. Please check the data format and try again."
+        case .duplicatePhoneNumber(let phoneNumber, let existingProfileName, _):
+            return "This phone number (\(phoneNumber)) is already used by '\(existingProfileName)'. Each phone number can only be used once."
         case .unknownError(let message):
             return "Database error: \(message)"
         }
@@ -586,6 +589,8 @@ enum DatabaseError: LocalizedError {
             return "Check your input and try again."
         case .syncFailed:
             return "Try closing and reopening the app to force a sync."
+        case .duplicatePhoneNumber(_, let existingProfileName, _):
+            return "Edit the existing profile '\(existingProfileName)' or use a different phone number."
         default:
             return "Please try again later or contact support if the problem persists."
         }

@@ -107,6 +107,13 @@ struct HabitsView: View {
         .onAppear {
             loadData()
         }
+        .onChange(of: viewModel.selectedProfileId) { newProfileId in
+            // Sync selectedProfileIndex when ViewModel auto-selects a profile
+            if let newId = newProfileId,
+               let index = profileViewModel.profiles.firstIndex(where: { $0.id == newId }) {
+                selectedProfileIndex = index
+            }
+        }
         .alert("Delete Habit", isPresented: $showingDeleteConfirmation, presenting: habitToDelete) { habit in
             Button("Cancel", role: .cancel) {
                 habitToDelete = nil
@@ -240,10 +247,10 @@ struct HabitsView: View {
     
     // MARK: - Computed Properties
     
-    /// Selected profile accessor
+    /// Selected profile accessor - Use ProfileViewModel as single source of truth
     private var selectedProfile: ElderlyProfile? {
-        guard selectedProfileIndex < viewModel.profiles.count else { return nil }
-        return viewModel.profiles[selectedProfileIndex]
+        guard selectedProfileIndex < profileViewModel.profiles.count else { return nil }
+        return profileViewModel.profiles[selectedProfileIndex]
     }
     
     /// Filtered habits based on selected profile and days
@@ -254,6 +261,10 @@ struct HabitsView: View {
         return allTasks.filter { habit in
             // Exclude locally deleted habits for optimistic UI
             guard !locallyDeletedHabitIds.contains(habit.id) else { return false }
+
+            // Filter by selected profile (match DashboardView behavior)
+            guard let selectedProfileId = viewModel.selectedProfileId else { return false }
+            guard habit.profileId == selectedProfileId else { return false }
 
             // Check if habit is scheduled for any of the selected days
             return selectedDays.contains { dayIndex in
@@ -270,7 +281,8 @@ struct HabitsView: View {
     }
     
     private func getProfileForHabit(_ habit: Task) -> ElderlyProfile? {
-        return viewModel.profiles.first { $0.id == habit.profileId }
+        // Use ProfileViewModel as single source of truth
+        return profileViewModel.profiles.first { $0.id == habit.profileId }
     }
     
     private func deleteHabitFromSelectedDays(habit: Task) {
@@ -411,6 +423,7 @@ struct HabitRowViewSimple: View {
     let selectedDays: Set<Int>
     let onDelete: () -> Void
 
+    @EnvironmentObject private var profileViewModel: ProfileViewModel
     @State private var dragOffset: CGFloat = 0
 
     // Gesture detection constants

@@ -77,12 +77,8 @@ class MockSMSService: SMSServiceProtocol {
         return "Hi \(profile.name), checking in on: \(task.title). Reply DONE if completed."
     }
     
-    func getHelpMessage() -> String {
-        return "Need help? Reply HELP or call your family member."
-    }
-    
     func getWelcomeMessage(for profile: ElderlyProfile) -> String {
-        return "Welcome to Hallo, \(profile.name)! Your family set up reminders to help you stay connected."
+        return "Welcome to Remi, \(profile.name)! Your family set up reminders to help you stay connected."
     }
     
     func checkDeliveryStatus(messageId: String) async throws -> SMSDeliveryStatus {

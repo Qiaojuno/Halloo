@@ -7,16 +7,17 @@ struct GalleryView: View {
     // MARK: - Environment & Dependencies
     @Environment(\.container) private var container
     @StateObject private var viewModel: GalleryViewModel
-    
+    @EnvironmentObject private var profileViewModel: ProfileViewModel
+
     // MARK: - Navigation State
     /// Tab selection binding from parent ContentView for floating pill navigation
     @Binding var selectedTab: Int
-    
+
     // MARK: - State
     @State private var selectedFilter: GalleryFilter = .all
     @State private var selectedEventForDetail: GalleryHistoryEvent?
     @State private var showingFilterDropdown = false
-    @State private var selectedProfileIndex: Int = 0
+    @State private var showingAccountSettings = false
     
     // MARK: - Initialization
     init(selectedTab: Binding<Int>) {
@@ -35,8 +36,8 @@ struct GalleryView: View {
             ScrollView {
                 VStack(spacing: 0) { // Match DashboardView spacing: 0 between sections
 
-                    // Header with Remi logo and user profile - using universal component
-                    SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
+                    // Header with Remi logo and settings (no profile selection needed for Gallery)
+                    galleryHeaderSection
 
                     // Gallery card - match spacing ratio with DashboardView profiles
                     VStack(alignment: .leading, spacing: 16) {
@@ -70,6 +71,7 @@ struct GalleryView: View {
         }
         .task {
             await viewModel.loadGalleryData()
+            await viewModel.loadArchivedPhotos()
         }
         .fullScreenCover(item: $selectedEventForDetail) { event in
             let currentIndex = viewModel.galleryEvents.firstIndex(where: { $0.id == event.id }) ?? 0
@@ -181,14 +183,64 @@ struct GalleryView: View {
     private func navigateToNext(from currentEvent: GalleryHistoryEvent) {
         guard let currentIndex = viewModel.galleryEvents.firstIndex(where: { $0.id == currentEvent.id }),
               currentIndex < viewModel.galleryEvents.count - 1 else { return }
-        
+
         let nextEvent = viewModel.galleryEvents[currentIndex + 1]
         selectedEventForDetail = nextEvent
+    }
+
+    /// Get profile initial letter for display in gallery
+    /// Looks up profile by ID and returns first letter of name
+    private func getProfileInitial(for profileId: String) -> String? {
+        guard let profile = profileViewModel.profiles.first(where: { $0.id == profileId }) else {
+            return nil
+        }
+        return String(profile.name.prefix(1)).uppercased()
+    }
+
+    /// Get profile slot index for color coding
+    /// Looks up profile by ID and returns its index in the profiles array
+    private func getProfileSlot(for profileId: String) -> Int? {
+        guard let index = profileViewModel.profiles.firstIndex(where: { $0.id == profileId }) else {
+            return nil
+        }
+        return index
     }
 }
 
 // MARK: - Helper Extensions
 extension GalleryView {
+    // Simple header with just logo and settings (no profile selection)
+    private var galleryHeaderSection: some View {
+        HStack(alignment: .center, spacing: 0) {
+            Text("Remi")
+                .font(AppFonts.poppinsMedium(size: 37.5))
+                .tracking(-3.1)
+                .foregroundColor(.black)
+                .fixedSize()
+                .layoutPriority(1)
+
+            Spacer()
+
+            Button(action: {
+                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                impactFeedback.impactOccurred()
+                showingAccountSettings = true
+            }) {
+                Image(systemName: "person")
+                    .font(.title2)
+                    .foregroundColor(.black)
+            }
+        }
+        .padding(.horizontal, 26)
+        .padding(.top, 20)
+        .padding(.bottom, 10)
+        .sheet(isPresented: $showingAccountSettings) {
+            AccountSettingsView()
+                .presentationDetents([.height(200)])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
     // Gallery Card Header Component
     private var galleryCardHeader: some View {
         HStack {
@@ -271,10 +323,85 @@ extension GalleryView {
                         // Photo grid for this date
                         LazyVGrid(columns: gridColumns, spacing: 4) {
                             ForEach(dateGroup.events) { event in
-                                GalleryPhotoView.taskResponse(event: event)
-                                    .onTapGesture {
-                                        selectedEventForDetail = event
+                                GalleryPhotoView.taskResponse(
+                                    event: event,
+                                    profileInitial: getProfileInitial(for: event.profileId),
+                                    profileSlot: getProfileSlot(for: event.profileId)
+                                )
+                                .onTapGesture {
+                                    selectedEventForDetail = event
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                    }
+                }
+            }
+
+            // Archived Memories Section (photos older than 90 days)
+            if !viewModel.archivedPhotos.isEmpty || viewModel.isLoadingArchive {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Section header
+                    HStack {
+                        Text("Archived Memories (90+ days)")
+                            .tracking(-1)
+                            .font(.system(size: 15, weight: .regular))
+                            .foregroundColor(Color(hex: "9f9f9f"))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+
+                    if viewModel.isLoadingArchive {
+                        // Loading indicator
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle())
+                            Spacer()
+                        }
+                        .padding(.vertical, 20)
+                    } else if viewModel.archivedPhotos.isEmpty {
+                        // Empty state
+                        Text("No archived photos yet")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color(hex: "9f9f9f"))
+                            .padding(.horizontal, 12)
+                    } else {
+                        // Archived photo grid
+                        LazyVGrid(columns: gridColumns, spacing: 4) {
+                            ForEach(viewModel.archivedPhotos) { photo in
+                                AsyncImage(url: photo.url) { phase in
+                                    switch phase {
+                                    case .empty:
+                                        Rectangle()
+                                            .fill(Color(hex: "f0f0f0"))
+                                            .aspectRatio(1, contentMode: .fill)
+                                            .overlay(
+                                                ProgressView()
+                                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "9f9f9f")))
+                                            )
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(maxWidth: .infinity)
+                                            .aspectRatio(1, contentMode: .fill)
+                                            .clipped()
+                                            .cornerRadius(3)
+                                    case .failure:
+                                        Rectangle()
+                                            .fill(Color(hex: "f0f0f0"))
+                                            .aspectRatio(1, contentMode: .fill)
+                                            .overlay(
+                                                Image(systemName: "photo")
+                                                    .foregroundColor(Color(hex: "9f9f9f"))
+                                            )
+                                    @unknown default:
+                                        EmptyView()
                                     }
+                                }
+                                .cornerRadius(3)
                             }
                         }
                         .padding(.horizontal, 12)

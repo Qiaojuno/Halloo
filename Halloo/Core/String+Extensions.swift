@@ -39,7 +39,7 @@ extension String {
     
     var formattedPhoneNumber: String {
         let cleaned = phoneNumberDigitsOnly
-        
+
         // Handle different phone number lengths
         switch cleaned.count {
         case 10:
@@ -48,18 +48,49 @@ extension String {
             let exchange = String(cleaned.dropFirst(3).prefix(3))
             let number = String(cleaned.dropFirst(6))
             return "(\(areaCode)) \(exchange)-\(number)"
-            
+
         case 11 where cleaned.hasPrefix("1"):
             // US/Canada with country code: +1 (555) 123-4567
             let withoutCountryCode = String(cleaned.dropFirst())
             return "+1 " + withoutCountryCode.formattedPhoneNumber
-            
+
         default:
             // International format: +XX XXX XXX XXXX
             if cleaned.count > 10 {
                 return "+\(cleaned)"
             } else {
                 return cleaned
+            }
+        }
+    }
+
+    /// E.164 format phone number for Twilio SMS (e.g., +17788143739)
+    ///
+    /// Converts any phone number format to E.164 standard required by Twilio.
+    /// This format has no spaces, dashes, or parentheses - just + and digits.
+    var e164PhoneNumber: String {
+        let cleaned = phoneNumberDigitsOnly
+
+        // Handle different phone number lengths
+        switch cleaned.count {
+        case 10:
+            // US/Canada 10-digit number → add +1 country code
+            return "+1\(cleaned)"
+
+        case 11 where cleaned.hasPrefix("1"):
+            // Already has country code 1 → just add +
+            return "+\(cleaned)"
+
+        default:
+            // International or other format → just add + if needed
+            if cleaned.count > 10 {
+                return "+\(cleaned)"
+            } else if cleaned.count == 10 {
+                // Assume US/Canada if exactly 10 digits
+                return "+1\(cleaned)"
+            } else {
+                // Invalid or too short
+                return "+\(cleaned)"
             }
         }
     }

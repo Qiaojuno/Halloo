@@ -19,6 +19,19 @@ struct User: Codable, Identifiable, Hashable {
     var updatedAt: Date
     var lastSyncTimestamp: Date?
 
+    // MARK: - SMS Quota Management (Billing & Usage Tracking)
+    /// Maximum SMS allowed per month (based on subscription tier)
+    var smsQuotaLimit: Int
+
+    /// SMS used in current billing period
+    var smsQuotaUsed: Int
+
+    /// Start of current SMS quota period
+    var smsQuotaPeriodStart: Date
+
+    /// End of current SMS quota period (quota resets after this date)
+    var smsQuotaPeriodEnd: Date
+
     init(
         id: String,
         email: String,
@@ -32,7 +45,11 @@ struct User: Codable, Identifiable, Hashable {
         profileCount: Int = 0,
         taskCount: Int = 0,
         updatedAt: Date = Date(),
-        lastSyncTimestamp: Date? = nil
+        lastSyncTimestamp: Date? = nil,
+        smsQuotaLimit: Int = 50,
+        smsQuotaUsed: Int = 0,
+        smsQuotaPeriodStart: Date = Date(),
+        smsQuotaPeriodEnd: Date = Calendar.current.date(byAdding: .month, value: 1, to: Date()) ?? Date()
     ) {
         self.id = id
         self.email = email
@@ -47,6 +64,10 @@ struct User: Codable, Identifiable, Hashable {
         self.taskCount = taskCount
         self.updatedAt = updatedAt
         self.lastSyncTimestamp = lastSyncTimestamp
+        self.smsQuotaLimit = smsQuotaLimit
+        self.smsQuotaUsed = smsQuotaUsed
+        self.smsQuotaPeriodStart = smsQuotaPeriodStart
+        self.smsQuotaPeriodEnd = smsQuotaPeriodEnd
     }
 
     // MARK: - Custom Codable Implementation with Diagnostic Logging
@@ -55,6 +76,7 @@ struct User: Codable, Identifiable, Hashable {
         case id, email, fullName, phoneNumber, createdAt
         case isOnboardingComplete, subscriptionStatus, trialEndDate, quizAnswers
         case profileCount, taskCount, updatedAt, lastSyncTimestamp
+        case smsQuotaLimit, smsQuotaUsed, smsQuotaPeriodStart, smsQuotaPeriodEnd
     }
 
     init(from decoder: Decoder) throws {
@@ -105,11 +127,33 @@ struct User: Codable, Identifiable, Hashable {
             lastSyncTimestamp = try? container.decodeIfPresent(Date.self, forKey: .lastSyncTimestamp)
         }
 
+        // SMS Quota fields with defaults (for backward compatibility)
+        smsQuotaLimit = (try? container.decodeIfPresent(Int.self, forKey: .smsQuotaLimit)) ?? 50
+        smsQuotaUsed = (try? container.decodeIfPresent(Int.self, forKey: .smsQuotaUsed)) ?? 0
+
+        // Quota period dates
+        if let timestamp = try? container.decode(Timestamp.self, forKey: .smsQuotaPeriodStart) {
+            smsQuotaPeriodStart = timestamp.dateValue()
+        } else if let date = try? container.decode(Date.self, forKey: .smsQuotaPeriodStart) {
+            smsQuotaPeriodStart = date
+        } else {
+            smsQuotaPeriodStart = Date()
+        }
+
+        if let timestamp = try? container.decode(Timestamp.self, forKey: .smsQuotaPeriodEnd) {
+            smsQuotaPeriodEnd = timestamp.dateValue()
+        } else if let date = try? container.decode(Date.self, forKey: .smsQuotaPeriodEnd) {
+            smsQuotaPeriodEnd = date
+        } else {
+            smsQuotaPeriodEnd = Calendar.current.date(byAdding: .month, value: 1, to: Date()) ?? Date()
+        }
+
         DiagnosticLogger.success(.userModel, "User decoded successfully", context: [
             "userId": id,
             "email": email,
             "profileCount": profileCount,
-            "taskCount": taskCount
+            "taskCount": taskCount,
+            "smsQuota": "\(smsQuotaUsed)/\(smsQuotaLimit)"
         ])
     }
 
@@ -131,11 +175,16 @@ struct User: Codable, Identifiable, Hashable {
         try container.encode(taskCount, forKey: .taskCount)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encodeIfPresent(lastSyncTimestamp, forKey: .lastSyncTimestamp)
+        try container.encode(smsQuotaLimit, forKey: .smsQuotaLimit)
+        try container.encode(smsQuotaUsed, forKey: .smsQuotaUsed)
+        try container.encode(smsQuotaPeriodStart, forKey: .smsQuotaPeriodStart)
+        try container.encode(smsQuotaPeriodEnd, forKey: .smsQuotaPeriodEnd)
 
         DiagnosticLogger.debug(.userModel, "User encoded", context: [
             "userId": id,
             "profileCount": profileCount,
-            "taskCount": taskCount
+            "taskCount": taskCount,
+            "smsQuota": "\(smsQuotaUsed)/\(smsQuotaLimit)"
         ])
     }
 }
@@ -147,7 +196,7 @@ extension User {
         guard let trialEnd = trialEndDate else { return false }
         return Date() < trialEnd
     }
-    
+
     var isSubscriptionActive: Bool {
         switch subscriptionStatus {
         case .active:
@@ -158,7 +207,7 @@ extension User {
             return false
         }
     }
-    
+
     var subscriptionDisplayText: String {
         switch subscriptionStatus {
         case .trial:
@@ -174,5 +223,62 @@ extension User {
         case .cancelled:
             return "Subscription Cancelled"
         }
+    }
+
+    // MARK: - SMS Quota Helpers
+
+    /// Remaining SMS in current quota period
+    var smsQuotaRemaining: Int {
+        return max(0, smsQuotaLimit - smsQuotaUsed)
+    }
+
+    /// Percentage of quota used (0.0 to 1.0)
+    var smsQuotaPercentUsed: Double {
+        guard smsQuotaLimit > 0 else { return 0 }
+        return min(1.0, Double(smsQuotaUsed) / Double(smsQuotaLimit))
+    }
+
+    /// Is quota near limit? (80%+ used)
+    var isSMSQuotaNearLimit: Bool {
+        return smsQuotaPercentUsed >= 0.8
+    }
+
+    /// Is quota exceeded?
+    var isSMSQuotaExceeded: Bool {
+        return smsQuotaUsed >= smsQuotaLimit
+    }
+
+    /// Days until quota resets
+    var daysUntilQuotaReset: Int {
+        return Calendar.current.dateComponents([.day], from: Date(), to: smsQuotaPeriodEnd).day ?? 0
+    }
+
+    /// Has quota period expired? (needs reset)
+    var needsQuotaReset: Bool {
+        return Date() > smsQuotaPeriodEnd
+    }
+
+    /// Get quota limit based on subscription status
+    static func quotaForSubscription(_ status: SubscriptionStatus) -> Int {
+        switch status {
+        case .trial:
+            return 50 // Free trial: 50 SMS/month
+        case .active:
+            return 500 // Paid starter: 500 SMS/month (can be tiered later)
+        case .expired, .cancelled:
+            return 0 // No SMS for expired accounts
+        }
+    }
+
+    /// Increment SMS usage (call after sending each SMS)
+    mutating func incrementSMSUsage() {
+        smsQuotaUsed += 1
+    }
+
+    /// Reset quota for new period
+    mutating func resetSMSQuota() {
+        smsQuotaUsed = 0
+        smsQuotaPeriodStart = Date()
+        smsQuotaPeriodEnd = Calendar.current.date(byAdding: .month, value: 1, to: Date()) ?? Date()
     }
 }

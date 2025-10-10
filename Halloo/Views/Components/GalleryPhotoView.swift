@@ -14,40 +14,53 @@ struct GalleryPhotoView: View {
     let event: GalleryHistoryEvent?
     let mockPhoto: MockPhoto?
     let type: PhotoDisplayType
-    
+    let profileInitial: String? // Optional profile initial to display (e.g., "G" for "Grandma")
+    let profileSlot: Int? // Optional profile slot for color coding (0-4)
+
     // MARK: - Photo Display Types
     enum PhotoDisplayType {
         case taskResponse    // Task response photos with overlay
         case profilePhoto    // Profile photos (clean, no overlay)
         case preview         // Mock/preview photos for development
     }
-    
+
     // MARK: - Convenience Initializers
-    
-    /// Task response photo display
-    static func taskResponse(event: GalleryHistoryEvent) -> GalleryPhotoView {
-        GalleryPhotoView(event: event, mockPhoto: nil, type: .taskResponse)
+
+    /// Task response photo display with optional profile initial and color
+    static func taskResponse(event: GalleryHistoryEvent, profileInitial: String? = nil, profileSlot: Int? = nil) -> GalleryPhotoView {
+        GalleryPhotoView(event: event, mockPhoto: nil, type: .taskResponse, profileInitial: profileInitial, profileSlot: profileSlot)
     }
     
-    /// Profile photo display  
-    static func profilePhoto(event: GalleryHistoryEvent) -> GalleryPhotoView {
-        GalleryPhotoView(event: event, mockPhoto: nil, type: .profilePhoto)
+    /// Profile photo display with optional profile initial and color
+    static func profilePhoto(event: GalleryHistoryEvent, profileInitial: String? = nil, profileSlot: Int? = nil) -> GalleryPhotoView {
+        GalleryPhotoView(event: event, mockPhoto: nil, type: .profilePhoto, profileInitial: profileInitial, profileSlot: profileSlot)
     }
-    
+
     /// Preview/mock photo display
     static func preview(mockPhoto: MockPhoto) -> GalleryPhotoView {
-        GalleryPhotoView(event: nil, mockPhoto: mockPhoto, type: .preview)
+        GalleryPhotoView(event: nil, mockPhoto: mockPhoto, type: .preview, profileInitial: nil, profileSlot: nil)
     }
     
     // MARK: - Configuration
     private let photoSize: CGFloat = 112 // Standard gallery photo size
     private let cornerRadius: CGFloat = 3 // Figma spec
-    
-    // Profile emojis for consistency across all photo types
-    private let profileEmojis = [
-        "👴🏻", "👵🏻", "👨🏻", "👩🏻", "👴🏽", "👵🏽", 
-        "👴🏿", "👵🏿", "🧓🏻", "🧓🏽", "🧓🏿"
+
+    // Profile colors (same as ProfileImageView)
+    private let profileColors: [Color] = [
+        Color(hex: "B9E3FF"),         // Profile slot 0 - light blue
+        Color.red.opacity(0.6),       // Profile slot 1 - red
+        Color.green.opacity(0.6),     // Profile slot 2 - green
+        Color.purple.opacity(0.6),    // Profile slot 3 - purple
+        Color.orange.opacity(0.6)     // Profile slot 4 - orange
     ]
+
+    // Get profile color based on slot
+    private var profileColor: Color {
+        guard let slot = profileSlot else {
+            return Color(hex: "B9E3FF") // Default to light blue
+        }
+        return profileColors[slot % profileColors.count]
+    }
     
     // MARK: - Body
     var body: some View {
@@ -113,8 +126,8 @@ struct GalleryPhotoView: View {
                 loadingPlaceholder
             }
             } else {
-                // Emoji fallback for profile photos
-                emojiPlaceholder(for: event)
+                // Initial letter fallback for profile photos
+                initialPlaceholder(for: event)
             }
         } else {
             placeholderPhoto
@@ -164,14 +177,23 @@ struct GalleryPhotoView: View {
             )
     }
     
-    private func emojiPlaceholder(for event: GalleryHistoryEvent) -> some View {
-        let emoji = profileEmojis[abs(event.profileId.hashValue) % profileEmojis.count]
-        
+    private func initialPlaceholder(for event: GalleryHistoryEvent) -> some View {
+        // Use provided profileInitial if available, otherwise use first letter of profileId
+        let initial: String
+        if let profileInitial = profileInitial {
+            initial = profileInitial
+        } else {
+            // Fallback: Skip non-letter characters in profileId (e.g., "+" in phone numbers)
+            let letters = event.profileId.filter { $0.isLetter }
+            initial = String(letters.prefix(1)).uppercased()
+        }
+
         return Rectangle()
             .fill(Color(hex: "f0f0f0"))
             .overlay(
-                Text(emoji)
-                    .font(.system(size: 48))
+                Text(initial.isEmpty ? "?" : initial)
+                    .font(.system(size: 48, weight: .bold))
+                    .foregroundColor(.black)
             )
     }
     
@@ -227,15 +249,24 @@ struct GalleryPhotoView: View {
     }
     
     private func profileAvatarOverlay(for event: GalleryHistoryEvent) -> some View {
-        // Small profile avatar overlay (20x20) in bottom-right corner - clean style
-        let emoji = profileEmojis[abs(event.profileId.hashValue) % profileEmojis.count]
+        // Small profile avatar overlay (20x20) in bottom-right corner
+        // Use provided profileInitial if available, otherwise use first letter of profileId
+        let initial: String
+        if let profileInitial = profileInitial {
+            initial = profileInitial
+        } else {
+            // Fallback: Skip non-letter characters in profileId (e.g., "+" in phone numbers)
+            let letters = event.profileId.filter { $0.isLetter }
+            initial = String(letters.prefix(1)).uppercased()
+        }
 
         return Circle()
-            .fill(Color.white)
+            .fill(profileColor.opacity(0.35)) // Use profile color with 35% opacity (same as ProfileImageView)
             .frame(width: 20, height: 20)
             .overlay(
-                Text(emoji)
-                    .font(.system(size: 10))
+                Text(initial.isEmpty ? "?" : initial)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.black)
             )
     }
 }

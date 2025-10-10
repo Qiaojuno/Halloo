@@ -1,7 +1,7 @@
 # Session State - Halloo/Remi iOS App
 **Last updated:** 2025-10-09
-**Last commit:** (pending) - Gallery UI polish and data loading fix
-**Status:** ✅ Auth working, ✅ Profile creation working, ✅ Habit deletion working, ✅ Gallery loading working, 🔄 Ready for SMS testing
+**Last commit:** (pending) - Twilio SMS Integration in progress
+**Status:** ✅ Auth working, ✅ Profile creation working, ✅ Habit deletion working, ✅ Gallery loading working, ✅ Schema migration complete, ✅ ID generation standardized, ✅ User model synchronized, 🚧 Twilio SMS integration Phase 1
 
 ---
 
@@ -30,6 +30,45 @@
 ---
 
 ## ✅ COMPLETED TASKS
+
+### 0. Infrastructure Verification (DONE - 2025-10-09)
+
+**Verified by automated agents:**
+
+#### A. Firebase Schema Migration ✅ COMPLETE
+- **Status:** All production code uses nested subcollection architecture
+- **Evidence:** FirebaseDatabaseService.swift uses CollectionPath enum with nested paths
+- **Profile Operations:** `/users/{uid}/profiles/{pid}` ✅
+- **Habit Operations:** `/users/{uid}/profiles/{pid}/habits/{hid}` ✅
+- **Message Operations:** `/users/{uid}/profiles/{pid}/messages/{mid}` ✅
+- **Recursive Delete:** Properly cascades through all subcollections ✅
+- **Security Rules:** Support nested structure with automatic scoping ✅
+- **Collection Group Queries:** Filter by userId with composite indexes ✅
+
+#### B. ID Generation Strategy ✅ STANDARDIZED
+- **Status:** Centralized IDGenerator.swift utility with comprehensive documentation
+- **User IDs:** Firebase Auth UID (pass-through) ✅
+- **Profile IDs:** Normalized phone number in E.164 format (prevents duplicates) ✅
+- **Habit IDs:** UUID (unique per creation) ✅
+- **Message IDs:** Twilio SID or UUID fallback ✅
+- **Phone Normalization:** Robust E.164 conversion with validation ✅
+- **No Violations:** All production code uses IDGenerator methods ✅
+
+#### C. User Model Field Synchronization ✅ COMPLETE
+- **Status:** All 14 fields synchronized between User.swift and Firestore
+- **Model Fields:** id, email, fullName, phoneNumber, createdAt, isOnboardingComplete, subscriptionStatus, trialEndDate, quizAnswers, profileCount, taskCount, updatedAt, lastSyncTimestamp ✅
+- **Firestore Writes:** All fields properly written during creation and updates ✅
+- **Timestamp Handling:** Custom Codable implementation handles both Firestore Timestamp and Swift Date ✅
+- **Auto-calculated Fields:** profileCount, taskCount, updatedAt maintained correctly ✅
+- **No Missing Fields:** Complete synchronization verified ✅
+
+**Files Verified:**
+- `Halloo/Services/FirebaseDatabaseService.swift` - Nested paths implementation
+- `Halloo/Core/IDGenerator.swift` - Centralized ID generation with documentation
+- `Halloo/Models/User.swift` - Complete field definitions with custom Codable
+- `Halloo/Services/FirebaseAuthenticationService.swift` - User creation with all fields
+- `firestore.rules` - Nested structure security rules
+- `firestore.indexes.json` - Collection group composite indexes
 
 ### 1. Gallery UI Polish & Data Loading Fix (DONE - 2025-10-09)
 
@@ -210,10 +249,28 @@ See: `sessions/SESSION-2025-10-03-ProfileCreationFix.md` for detailed investigat
 
 ---
 
+## 🔄 CURRENT WORK: Twilio SMS Integration (Phase 1)
+
+### Status: 🚧 In Progress
+**Planning Document:** `docs/TWILIO-INTEGRATION-PLAN.md`
+
+**Phase 1 Tasks (8-12 hours):**
+- [ ] Add opt-out fields to ElderlyProfile model
+- [ ] Add SMS quota fields to User model
+- [ ] Create TwilioSMSService.swift (production implementation)
+- [ ] Implement STOP keyword handler in ProfileViewModel
+- [ ] Update consent message with TCPA compliance
+- [ ] Block duplicate phone numbers in FirebaseDatabaseService
+- [ ] Add quiet hours validation to TaskCategory
+
+**See:** `docs/TWILIO-INTEGRATION-PLAN.md` for full roadmap
+
+---
+
 ## 🔄 NEXT STEPS (In Priority Order)
 
-### TASK 1: Test SMS Confirmation Flow ✅ READY
-**Status:** Profile created (greyed out, pending confirmation)
+### TASK 1: Complete Twilio Integration Phase 1
+**Status:** In progress (see above)
 
 1. Check elderly user's phone for SMS
 2. Verify confirmation message sent
@@ -256,26 +313,29 @@ Verify data is in correct nested structure:
 
 ---
 
-## 📊 SCHEMA MIGRATION
+## 📊 SCHEMA MIGRATION ✅ COMPLETE
 
-**Current (Flat):**
-```
-/users/{userId}
-/profiles/{profileId}
-/tasks/{taskId}
-/gallery/{eventId}
-```
-
-**Target (Nested):**
+**Current Schema (Nested - CORRECT):**
 ```
 /users/{userId}
   /profiles/{profileId}
-    /tasks/{taskId}
+    /habits/{taskId}
     /messages/{messageId}
-  /gallery/{eventId}
+  /gallery_events/{eventId}
 ```
 
-**Why:** Better data organization, automatic cleanup, improved query performance
+**Migration Status:**
+- ✅ All production code uses nested paths via CollectionPath enum
+- ✅ Recursive delete implemented for cascade operations
+- ✅ Collection group queries properly filter by userId
+- ✅ Security rules support nested structure
+- ✅ Composite indexes configured for collection group queries
+- ⚠️ Legacy test script `add_test_habits.swift` uses old flat paths (not production code)
+
+**Benefits Achieved:**
+- ✅ Native Firestore cascade delete support
+- ✅ Simpler security rules with automatic scoping
+- ✅ Better data organization and query performance
 
 ---
 
@@ -326,12 +386,21 @@ Verify data is in correct nested structure:
    - DatabaseServiceProtocol = singleton
    - **DO NOT modify Container registration**
 
-3. **Migration is One-Way**
-   - Always run dry-run first
-   - Requires real data to test
-   - No rollback after commit
+3. **ID Generation Rules** ✅ ENFORCED
+   - User IDs: Always use Firebase Auth UID (never generate)
+   - Profile IDs: Use `IDGenerator.profileID(phoneNumber:)` (E.164 format)
+   - Habit IDs: Use `IDGenerator.habitID()` (UUID)
+   - Message IDs: Use `IDGenerator.messageID(twilioSID:)` (Twilio SID or UUID)
+   - **DO NOT use `UUID().uuidString` directly in production code**
 
-4. **Debug UI Available**
+4. **Schema Structure** ✅ ENFORCED
+   - All Firestore paths MUST use nested structure
+   - Use `CollectionPath` enum, never hardcode paths
+   - Profiles: `/users/{uid}/profiles/{pid}`
+   - Habits: `/users/{uid}/profiles/{pid}/habits/{hid}`
+   - Messages: `/users/{uid}/profiles/{pid}/messages/{mid}`
+
+5. **Debug UI Available**
    - Shows: "DB: FirebaseDatabaseService" in header
    - Error messages displayed
    - Profile count visible
