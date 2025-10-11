@@ -59,12 +59,12 @@ class MockDatabaseService: DatabaseServiceProtocol {
         print("📦 Mock: Updated profile for \(profile.name)")
     }
     
-    func deleteElderlyProfile(_ profileId: String) async throws {
+    func deleteElderlyProfile(_ profileId: String, userId: String) async throws {
         mockProfiles.removeValue(forKey: profileId)
         // Clean up related tasks and responses
         mockTasks = mockTasks.filter { $0.value.profileId != profileId }
         mockResponses = mockResponses.filter { $0.value.profileId != profileId }
-        print("📦 Mock: Deleted profile and related data")
+        print("📦 Mock: Deleted profile and related data for userId: \(userId)")
     }
     
     func getConfirmedProfiles(for userId: String) async throws -> [ElderlyProfile] {
@@ -208,9 +208,14 @@ class MockDatabaseService: DatabaseServiceProtocol {
     // MARK: - Photo Storage Operations
     func uploadPhoto(_ photoData: Data, for responseId: String) async throws -> String {
         // Return a dynamic mock URL using the responseId
-        return "mock://storage/\(responseId)/\(UUID().uuidString).jpg"
+        return "mock://storage/responses/\(responseId)/\(UUID().uuidString).jpg"
     }
-    
+
+    func uploadProfilePhoto(_ photoData: Data, for profileId: String) async throws -> String {
+        // Return a dynamic mock URL using the profileId
+        return "mock://storage/profiles/\(profileId)/\(UUID().uuidString).jpg"
+    }
+
     func deletePhoto(at url: String) async throws {
         print("📦 Mock: Deleted photo at \(url)")
     }

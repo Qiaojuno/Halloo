@@ -3,6 +3,27 @@ import Combine
 import SuperwallKit
 import Firebase
 
+// MARK: - Environment Keys
+private struct IsScrollDisabledKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+private struct IsDraggingKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+extension EnvironmentValues {
+    var isScrollDisabled: Bool {
+        get { self[IsScrollDisabledKey.self] }
+        set { self[IsScrollDisabledKey.self] = newValue }
+    }
+
+    var isDragging: Bool {
+        get { self[IsDraggingKey.self] }
+        set { self[IsDraggingKey.self] = newValue }
+    }
+}
+
 struct ContentView: View {
     // MARK: - Environment
     @Environment(\.container) private var container
@@ -15,6 +36,14 @@ struct ContentView: View {
     @State private var authService: FirebaseAuthenticationService?
     @State private var isAuthenticated = false
     @State private var selectedTab = 0
+    @State private var previousTab = 0  // Track previous tab for Habits (middle) transition direction
+    @State private var transitionDirection: Int = 1  // Unused - kept for backward compatibility with bindings
+    @State private var selectedProfileIndex = 0  // Shared profile selection for header
+    @State private var isTransitioning = false  // Lock to prevent animation overlap during rapid tab switches
+    @GestureState private var dragOffset: CGFloat = 0  // Real-time drag tracking for interactive swipe
+    @State private var isHorizontalDragging = false  // Track if user is actively horizontal swiping
+    @State private var horizontalGestureMomentum = false  // Prioritize horizontal after recent tab switch
+
     @State private var authCancellables = Set<AnyCancellable>()
 
     // MARK: - Initialization
@@ -40,9 +69,6 @@ struct ContentView: View {
         if onboardingViewModel != nil {
             if isAuthenticated {
                 authenticatedContent
-                    .onAppear {
-                        print("✅ Showing authenticated content (dashboard)")
-                    }
             } else {
                 LoginView(onAuthenticationSuccess: {
                     // Auth state will be updated by the listener automatically
@@ -50,9 +76,6 @@ struct ContentView: View {
                     profileViewModel?.loadProfiles()
                 })
                 .environmentObject(onboardingViewModel!)
-                .onAppear {
-                    print("📱 Showing login screen")
-                }
             }
         } else {
             LoadingView()
@@ -67,70 +90,246 @@ struct ContentView: View {
     
     // MARK: - Main App Flow
     private var mainAppFlow: some View {
-        // Custom navigation without TabView to eliminate black box completely
+        // Layered architecture: static chrome + animated content
         ZStack {
-            Color(hex: "f9f9f9") // Consistent app background
+            // LAYER 0: Background (static, never animates)
+            Color(hex: "f9f9f9")
+                .ignoresSafeArea()
 
-            // Conditional view switching based on selectedTab
+            // LAYER 1-10: Transitioning content (animated with asymmetric slide)
             if let dashboardVM = dashboardViewModel,
                let profileVM = profileViewModel,
                let galleryVM = galleryViewModel {
-                if selectedTab == 0 {
-                    // Dashboard Tab - Home screen
-                    DashboardView(selectedTab: $selectedTab)
+
+                ZStack {
+                    // Dashboard Tab - Home screen (content only) - LEFTMOST
+                    DashboardView(selectedTab: $selectedTab, showHeader: false, showNav: false)
                         .environmentObject(dashboardVM)
                         .environmentObject(profileVM)
-                } else if selectedTab == 1 {
-                    // Habits Tab - Habit management screen
-                    HabitsView(selectedTab: $selectedTab)
+                        .environment(\.isScrollDisabled, isHorizontalDragging)
+                        .environment(\.isDragging, dragOffset != 0)
+                        .offset(x: tabOffset(for: 0))
+                        .zIndex(selectedTab == 0 ? 1 : 0)
+
+                    // Habits Tab - Habit management screen (content only) - MIDDLE
+                    HabitsView(selectedTab: $selectedTab, showHeader: false, showNav: false)
                         .environmentObject(dashboardVM) // Share same instance for real-time data sync
                         .environmentObject(profileVM)
-                } else {
-                    // Gallery Tab - Archive of completed habits with photos
-                    GalleryView(selectedTab: $selectedTab)
+                        .environment(\.isScrollDisabled, isHorizontalDragging)
+                        .environment(\.isDragging, dragOffset != 0)
+                        .offset(x: tabOffset(for: 1))
+                        .zIndex(selectedTab == 1 ? 1 : 0)
+
+                    // Gallery Tab - Archive of completed habits with photos (content only) - RIGHTMOST
+                    GalleryView(selectedTab: $selectedTab, showHeader: false, showNav: false)
                         .environmentObject(galleryVM) // Use real Firebase services!
                         .environmentObject(profileVM)
+                        .environment(\.isScrollDisabled, isHorizontalDragging)
+                        .environment(\.isDragging, dragOffset != 0)
+                        .offset(x: tabOffset(for: 2))
+                        .zIndex(selectedTab == 2 ? 1 : 0)
+}
+                .onChange(of: selectedTab) { oldValue, newValue in
+                    // Lock transitions
+                    isTransitioning = true
+
+                    // Enable horizontal gesture momentum for next 0.8 seconds (increased from 0.6s)
+                    horizontalGestureMomentum = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        horizontalGestureMomentum = false
+                    }
+
+                    // Update previousTab for Habits transition direction
+                    previousTab = oldValue
+
+                    // Unlock quickly - just enough to prevent double-taps (150ms)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        isTransitioning = false
+                    }
                 }
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: selectedTab)
+                .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.85), value: dragOffset)
+                .gesture(
+                    DragGesture(minimumDistance: 20)
+                        .updating($dragOffset) { value, state, _ in
+                            // Prevent drag during animation
+                            guard !isTransitioning else { return }
+
+                            // Only enable horizontal swipe if gesture is more horizontal than vertical
+                            let horizontalDistance = abs(value.translation.width)
+                            let verticalDistance = abs(value.translation.height)
+
+                            // GESTURE PRIORITY SYSTEM:
+                            // - Momentum mode (0.8s after tab switch): Horizontal EXTREMELY favored (vertical must be 6x more)
+                            // - Normal mode: Horizontal very strongly favored (vertical must be 3.5x more)
+                            let verticalThreshold: CGFloat = horizontalGestureMomentum ? 6.0 : 3.5
+
+                            // Horizontal wins unless vertical is significantly more
+                            guard verticalDistance < horizontalDistance * verticalThreshold else { return }
+
+                            // Prevent swiping beyond boundaries
+                            let swipeDirection = value.translation.width > 0 ? "right" : "left"
+                            if selectedTab == 0 && swipeDirection == "right" {
+                                // Can't swipe right from Dashboard (leftmost)
+                                return
+                            }
+                            if selectedTab == 2 && swipeDirection == "left" {
+                                // Can't swipe left from Gallery (rightmost)
+                                return
+                            }
+
+                            // Mark that horizontal dragging is active (disables vertical scroll)
+                            if !isHorizontalDragging {
+                                isHorizontalDragging = true
+                            }
+
+                            // Update drag offset in real-time for interactive scrubbing
+                            state = value.translation.width
+                        }
+                        .onEnded { value in
+                            // Prevent tab change during animation
+                            guard !isTransitioning else {
+                                // Re-enable vertical scrolling if blocked during animation
+                                isHorizontalDragging = false
+                                return
+                            }
+
+                            let horizontalDistance = value.translation.width
+                            let verticalDistance = abs(value.translation.height)
+                            let velocity = value.predictedEndTranslation.width - value.translation.width
+
+                            // Use same momentum-aware threshold as .updating
+                            let verticalThreshold: CGFloat = horizontalGestureMomentum ? 6.0 : 3.5
+                            guard verticalDistance < abs(horizontalDistance) * verticalThreshold else { return }
+
+                            // Calculate if swipe should trigger tab change
+                            // Fast swipe: Very low threshold - even moderate-speed swipes trigger
+                            // Slow swipe: Only truly lazy swipes need to drag the full distance
+                            let fastVelocityThreshold: CGFloat = 100  // Super low - most swipes are "fast"
+                            let slowDistanceThreshold: CGFloat = 120  // Only lazy swipes hit this
+
+                            let isFastSwipe = abs(velocity) > fastVelocityThreshold
+                            let isSlowDrag = abs(horizontalDistance) > slowDistanceThreshold
+
+                            let shouldChangeTab = isFastSwipe || isSlowDrag
+
+                            // Swipe left = move forward (next tab)
+                            if horizontalDistance < 0 && shouldChangeTab {
+                                if selectedTab < 2 {
+                                    previousTab = selectedTab
+                                    selectedTab += 1
+
+                                    // Delay re-enabling vertical scroll briefly (200ms)
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                                        isHorizontalDragging = false
+                                    }
+                                } else {
+                                    // No tab change, re-enable immediately
+                                    isHorizontalDragging = false
+                                }
+                            }
+                            // Swipe right = move backward (previous tab)
+                            else if horizontalDistance > 0 && shouldChangeTab {
+                                if selectedTab > 0 {
+                                    previousTab = selectedTab
+                                    selectedTab -= 1
+
+                                    // Delay re-enabling vertical scroll briefly (200ms)
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                                        isHorizontalDragging = false
+                                    }
+                                } else {
+                                    // No tab change, re-enable immediately
+                                    isHorizontalDragging = false
+                                }
+                            }
+                            // If didn't meet threshold, snap back - re-enable scroll immediately
+                            else {
+                                isHorizontalDragging = false
+                            }
+                        }
+                )
+
+                // LAYER 100: Static chrome (header + nav, never animates)
+                VStack(spacing: 0) {
+                    // Header at top (profile circles + Remi logo + settings)
+                    SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
+                        .environmentObject(dashboardVM)
+                        .environmentObject(profileVM)
+                        .background(Color(hex: "f9f9f9").opacity(0)) // Transparent background
+
+                    Spacer()
+
+                    // Navigation at bottom (pill + optional create button)
+                    if selectedTab == 0 {
+                        // Dashboard: show create button
+                        BottomGradientNavigation(selectedTab: $selectedTab, previousTab: $previousTab, transitionDirection: $transitionDirection, isTransitioning: $isTransitioning) {
+                            createHabitButton
+                        }
+                    } else {
+                        // Habits/Gallery: no create button
+                        BottomGradientNavigation(selectedTab: $selectedTab, previousTab: $previousTab, transitionDirection: $transitionDirection, isTransitioning: $isTransitioning)
+                    }
+                }
+                .zIndex(100) // Always on top
+
             } else {
                 // Loading state while ViewModel is being created
                 LoadingView()
             }
         }
-        // No longer need onAppear since we're not using TabView
+    }
+
+    // MARK: - Create Button (for Dashboard only)
+    private var createHabitButton: some View {
+        Button(action: {
+            // Haptic feedback for create action
+            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+            impactFeedback.impactOccurred()
+
+            // Create habit action - would show creation flow
+        }) {
+            ZStack {
+                Circle()
+                    .fill(Color.black)
+                    .frame(width: 57.25, height: 57.25)
+                    .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2)
+
+                Image(systemName: "plus")
+                    .font(.system(size: 26.11, weight: .medium))
+                    .foregroundColor(.white)
+            }
+        }
+    }
+
+    // MARK: - Offset Helper
+    /// Calculates horizontal offset for each tab based on position and drag state
+    /// Dashboard (0) = LEFT, Habits (1) = MIDDLE, Gallery (2) = RIGHT
+    private func tabOffset(for tab: Int) -> CGFloat {
+        let screenWidth = UIScreen.main.bounds.width
+
+        // Base position offset (where tab lives when selected)
+        let baseOffset = CGFloat(tab - selectedTab) * screenWidth
+
+        // Add interactive drag offset
+        return baseOffset + dragOffset
     }
     
     // MARK: - Initialization Methods
     @MainActor
     private func initializeViewModels() {
-        print("🔥 initializeViewModels called - creating ViewModels")
-
         // Create ViewModels using Container (all factory methods are @MainActor)
-        print("📝 Creating OnboardingViewModel...")
         onboardingViewModel = container.makeOnboardingViewModel()
-        print("✅ OnboardingViewModel created")
-
-        print("📝 Creating ProfileViewModel...")
         profileViewModel = container.makeProfileViewModel()
-        print("✅ ProfileViewModel created")
 
         // Load profiles after ViewModel is fully initialized
         profileViewModel?.loadProfiles()
-        print("✅ ProfileViewModel.loadProfiles() called")
 
-        print("📝 Creating DashboardViewModel...")
         dashboardViewModel = container.makeDashboardViewModel()
-        print("✅ DashboardViewModel created")
-
-        print("📝 Creating GalleryViewModel...")
         galleryViewModel = container.makeGalleryViewModel()
-        print("✅ GalleryViewModel created")
 
         // Store auth service reference (singleton)
-        print("📝 Resolving AuthService...")
         authService = container.resolve(AuthenticationServiceProtocol.self) as? FirebaseAuthenticationService
-        print("✅ AuthService resolved")
-
-        print("✅ All ViewModels created successfully (including GalleryViewModel)")
 
         // Subscribe to auth state changes
         setupAuthStateObserver()
@@ -142,12 +341,10 @@ struct ContentView: View {
 
             await MainActor.run {
                 if authService?.isAuthenticated == true {
-                    print("✅ User already authenticated on app launch, going to dashboard")
                     isAuthenticated = true
                     // Reload profiles now that user is authenticated
                     profileViewModel?.loadProfiles()
                 } else {
-                    print("ℹ️ User not authenticated, showing login")
                     isAuthenticated = false
                 }
             }
@@ -161,14 +358,10 @@ struct ContentView: View {
         authService.authStatePublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak authService] newAuthState in
-                print("🔐 Auth state changed: \(newAuthState)")
                 self.isAuthenticated = newAuthState
 
                 if newAuthState {
-                    print("✅ User authenticated, navigating to dashboard")
                     self.profileViewModel?.loadProfiles()
-                } else {
-                    print("🔓 User logged out, showing login screen")
                 }
             }
             .store(in: &authCancellables)
@@ -176,33 +369,13 @@ struct ContentView: View {
 
     // TEMPORARY: Safe TaskViewModel creation with detailed debugging
     private func safeTaskViewModel() -> TaskViewModel? {
-        print("🔥 Attempting to create TaskViewModel...")
-        
-        print("🔥 Step 1: Resolving DatabaseService...")
         let dbService = container.resolve(DatabaseServiceProtocol.self)
-        print("🔥 Step 1: DatabaseService resolved = \(type(of: dbService))")
-        
-        print("🔥 Step 2: Resolving SMSService...")
         let smsService = container.resolve(SMSServiceProtocol.self)
-        print("🔥 Step 2: SMSService resolved = \(type(of: smsService))")
-        
-        print("🔥 Step 3: Resolving NotificationService...")
         let notificationService = container.resolve(NotificationServiceProtocol.self)
-        print("🔥 Step 3: NotificationService resolved = \(type(of: notificationService))")
-        
-        print("🔥 Step 4: Resolving AuthService...")
         let authService = container.resolve(AuthenticationServiceProtocol.self)
-        print("🔥 Step 4: AuthService resolved = \(type(of: authService))")
-        
-        print("🔥 Step 5: Resolving DataSyncCoordinator...")
         let dataSyncCoordinator = container.resolve(DataSyncCoordinator.self)
-        print("🔥 Step 5: DataSyncCoordinator resolved = \(type(of: dataSyncCoordinator))")
-        
-        print("🔥 Step 6: Resolving ErrorCoordinator...")
         let errorCoordinator = container.resolve(ErrorCoordinator.self)
-        print("🔥 Step 6: ErrorCoordinator resolved = \(type(of: errorCoordinator))")
-        
-        print("🔥 Step 7: Creating TaskViewModel with all dependencies...")
+
         let viewModel = TaskViewModel(
             databaseService: dbService,
             smsService: smsService,
@@ -211,56 +384,17 @@ struct ContentView: View {
             dataSyncCoordinator: dataSyncCoordinator,
             errorCoordinator: errorCoordinator
         )
-        print("🔥 Step 7: TaskViewModel created successfully!")
-        
+
         return viewModel
     }
     
     // MARK: - Event Handlers
     private func handleOnboardingCompletion(_ isComplete: Bool) {
-        print("🔐 Onboarding completion changed to: \(isComplete)")
-        
         if isComplete {
             // User completed onboarding, reset tab selection
             selectedTab = 0
         }
     }
-    
-    // MARK: - Firebase Testing (DEBUG ONLY)
-    #if DEBUG
-    private func testFirebaseIntegration() {
-        print("🧪 FIREBASE INTEGRATION TEST STARTING...")
-        
-        // Test 1: Check which services are loaded
-        let authService = container.resolve(AuthenticationServiceProtocol.self)
-        let dbService = container.resolve(DatabaseServiceProtocol.self)
-        
-        print("🔥 Auth Service: \(type(of: authService))")
-        print("🔥 Database Service: \(type(of: dbService))")
-        
-        // Test 2: Try creating a test account
-        DispatchQueue.main.async {
-            _Concurrency.Task {
-                do {
-                    print("🧪 Attempting to create test Firebase account...")
-                    let result = try await authService.createAccount(
-                        email: "test@firebase.remi.com", 
-                        password: "TestPassword123",
-                        fullName: "Firebase Test User"
-                    )
-                    print("✅ Firebase account created! UID: \(result.uid)")
-                    
-                    // Test 3: Try signing out
-                    try await authService.signOut()
-                    print("✅ Firebase sign out successful!")
-                    
-                } catch {
-                    print("❌ Firebase test failed: \(error)")
-                }
-            }
-        }
-    }
-    #endif
     
     
     // MARK: - UI Configuration

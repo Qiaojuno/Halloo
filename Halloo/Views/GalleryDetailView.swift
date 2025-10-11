@@ -19,19 +19,22 @@ struct GalleryDetailView: View {
     // MARK: - Properties
     let event: GalleryHistoryEvent
     @Binding var selectedTab: Int
+    @Binding var previousTab: Int
+    @Binding var transitionDirection: Int
+    @Binding var isTransitioning: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.container) private var container
-    
+
     // Navigation state
     let currentIndex: Int
     let totalEvents: Int
     let onPrevious: () -> Void
     let onNext: () -> Void
-    
+
     // Computed navigation availability
     private var hasPrevious: Bool { currentIndex > 0 }
     private var hasNext: Bool { currentIndex < totalEvents - 1 }
-    
+
     // Profile selection state for header
     @State private var selectedProfileIndex: Int = 0
     
@@ -39,6 +42,9 @@ struct GalleryDetailView: View {
     init(
         event: GalleryHistoryEvent,
         selectedTab: Binding<Int>,
+        previousTab: Binding<Int>,
+        transitionDirection: Binding<Int>,
+        isTransitioning: Binding<Bool>,
         currentIndex: Int = 0,
         totalEvents: Int = 1,
         onPrevious: @escaping () -> Void = {},
@@ -46,6 +52,9 @@ struct GalleryDetailView: View {
     ) {
         self.event = event
         self._selectedTab = selectedTab
+        self._previousTab = previousTab
+        self._transitionDirection = transitionDirection
+        self._isTransitioning = isTransitioning
         self.currentIndex = currentIndex
         self.totalEvents = totalEvents
         self.onPrevious = onPrevious
@@ -96,7 +105,7 @@ struct GalleryDetailView: View {
             VStack {
                 Spacer()
                 HStack {
-                    FloatingPillNavigation(selectedTab: $selectedTab, onTabTapped: {
+                    FloatingPillNavigation(selectedTab: $selectedTab, previousTab: $previousTab, transitionDirection: $transitionDirection, isTransitioning: $isTransitioning, onTabTapped: {
                         // Dismiss the detail view whenever any tab is tapped
                         dismiss()
                     })
@@ -309,7 +318,7 @@ struct GalleryDetailView: View {
             } else {
                 // Emoji fallback as full-size photo
                 Rectangle()
-                    .fill(profileColor.opacity(0.2))
+                    .fill(profileColor) // Full opacity background
                     .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.width)
                     .overlay(
                         Text(profileEmoji)
@@ -331,9 +340,9 @@ struct GalleryDetailView: View {
     private var profileColor: Color {
         let colors: [Color] = [
             Color(hex: "B9E3FF"),         // Blue
-            Color.red.opacity(0.6),       // Red  
-            Color.green.opacity(0.6),     // Green
-            Color.purple.opacity(0.6)     // Purple
+            Color.red,                    // Red
+            Color.green,                  // Green
+            Color.purple                  // Purple
         ]
         return colors[event.profileSlot % colors.count]
     }

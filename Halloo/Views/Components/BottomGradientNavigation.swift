@@ -14,20 +14,26 @@ import SwiftUI
  * - Non-interactive gradient (doesn't block touches)
  *
  * USAGE:
- * - Dashboard: BottomGradientNavigation(selectedTab: $tab, createButton: createHabitButton)
- * - Habits/Gallery: BottomGradientNavigation(selectedTab: $tab)
+ * - Dashboard: BottomGradientNavigation(selectedTab: $tab, previousTab: $previousTab, transitionDirection: $transitionDirection, createButton: createHabitButton)
+ * - Habits/Gallery: BottomGradientNavigation(selectedTab: $tab, previousTab: $previousTab, transitionDirection: $transitionDirection)
  */
 struct BottomGradientNavigation<CreateButton: View>: View {
 
     // MARK: - Properties
     @Binding var selectedTab: Int
+    @Binding var previousTab: Int
+    @Binding var transitionDirection: Int
+    @Binding var isTransitioning: Bool
     let createButton: CreateButton?
 
     // MARK: - Initializers
 
     /// Full initializer with optional create button
-    init(selectedTab: Binding<Int>, @ViewBuilder createButton: () -> CreateButton) {
+    init(selectedTab: Binding<Int>, previousTab: Binding<Int>, transitionDirection: Binding<Int>, isTransitioning: Binding<Bool>, @ViewBuilder createButton: () -> CreateButton) {
         self._selectedTab = selectedTab
+        self._previousTab = previousTab
+        self._transitionDirection = transitionDirection
+        self._isTransitioning = isTransitioning
         self.createButton = createButton()
     }
 
@@ -52,7 +58,7 @@ struct BottomGradientNavigation<CreateButton: View>: View {
                     Spacer()
                     HStack(spacing: 0) { // No alignment needed - both elements same height
                         // Navigation pill (left-aligned)
-                        FloatingPillNavigation(selectedTab: $selectedTab, onTabTapped: nil)
+                        FloatingPillNavigation(selectedTab: $selectedTab, previousTab: $previousTab, transitionDirection: $transitionDirection, isTransitioning: $isTransitioning, onTabTapped: nil)
                             .padding(.leading, 30) // Fixed left padding
 
                         Spacer()
@@ -75,8 +81,11 @@ struct BottomGradientNavigation<CreateButton: View>: View {
 
 extension BottomGradientNavigation where CreateButton == EmptyView {
     /// Convenience initializer for views without create button (Habits, Gallery)
-    init(selectedTab: Binding<Int>) {
+    init(selectedTab: Binding<Int>, previousTab: Binding<Int>, transitionDirection: Binding<Int>, isTransitioning: Binding<Bool>) {
         self._selectedTab = selectedTab
+        self._previousTab = previousTab
+        self._transitionDirection = transitionDirection
+        self._isTransitioning = isTransitioning
         self.createButton = nil
     }
 }

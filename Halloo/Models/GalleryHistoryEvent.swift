@@ -225,7 +225,17 @@ extension GalleryHistoryEvent {
         formatter.timeStyle = .short
         return formatter.string(from: createdAt)
     }
-    
+
+    var responseMethod: String {
+        switch eventData {
+        case .taskResponse(let data):
+            // Default to SMS if no specific type
+            return "With SMS"
+        case .profileCreated(_):
+            return "With SMS"
+        }
+    }
+
     // Create gallery event from SMS response
     static func fromSMSResponse(
         _ response: SMSResponse,

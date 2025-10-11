@@ -670,16 +670,48 @@ final class ProfileViewModel: ObservableObject {
 
             // Format phone number for SMS delivery compatibility (E.164 format for Twilio)
             let e164Phone = phoneNumber.e164PhoneNumber
+            let profileId = IDGenerator.profileID(phoneNumber: e164Phone)
+
+            // Upload profile photo if provided
+            var photoURLString: String? = nil
+            print("📸 Checking for photo upload - selectedPhotoData: \(selectedPhotoData?.count ?? 0) bytes")
+            if let photoData = selectedPhotoData {
+                print("📸 ✅ Photo data exists, starting upload...")
+                DiagnosticLogger.info(.asyncTask, "Uploading profile photo", context: [
+                    "profileId": profileId,
+                    "photoSize": photoData.count
+                ])
+
+                do {
+                    print("📸 Calling databaseService.uploadProfilePhoto()...")
+                    photoURLString = try await databaseService.uploadProfilePhoto(photoData, for: profileId)
+                    print("📸 ✅ Photo upload SUCCESS - URL: \(photoURLString ?? "nil")")
+                    DiagnosticLogger.success(.asyncTask, "Profile photo uploaded", context: [
+                        "profileId": profileId,
+                        "photoURL": photoURLString ?? "nil"
+                    ])
+                } catch {
+                    print("📸 ❌ Photo upload FAILED - error: \(error.localizedDescription)")
+                    DiagnosticLogger.error(.asyncTask, "Failed to upload profile photo", context: [
+                        "profileId": profileId,
+                        "error": error.localizedDescription
+                    ], error: error)
+                    // Continue without photo - it will fall back to initial letter
+                }
+            } else {
+                print("📸 ❌ No photo data to upload (selectedPhotoData is nil)")
+            }
 
             DiagnosticLogger.info(.asyncTask, "Creating profile object", context: [
                 "name": profileName,
                 "phone": e164Phone,
-                "relationship": relationship
+                "relationship": relationship,
+                "hasPhoto": photoURLString != nil
             ])
 
             // Create profile with elderly-optimized defaults
             let profile = ElderlyProfile(
-                id: IDGenerator.profileID(phoneNumber: e164Phone),
+                id: profileId,
                 userId: userId,
                 name: profileName.trimmingCharacters(in: .whitespacesAndNewlines),
                 phoneNumber: e164Phone,
@@ -687,6 +719,7 @@ final class ProfileViewModel: ObservableObject {
                 isEmergencyContact: isEmergencyContact,
                 timeZone: timeZone.identifier, // Critical for proper reminder timing
                 notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+                photoURL: photoURLString,
                 status: .pendingConfirmation, // Requires SMS confirmation before activation
                 createdAt: Date(),
                 lastActiveAt: Date()
@@ -867,27 +900,29 @@ final class ProfileViewModel: ObservableObject {
     }
     
     private func deleteProfileAsync(_ profile: ElderlyProfile) async {
-        isLoading = true
-        errorMessage = nil
-        
+        // ✅ OPTIMISTIC UI UPDATE: Remove from UI immediately (before async deletion)
+        await MainActor.run {
+            print("🎬 [ProfileViewModel] Optimistic delete - removing '\(profile.name)' from UI immediately")
+            self.profiles.removeAll { $0.id == profile.id }
+            self.confirmationStatus.removeValue(forKey: profile.id)
+            self.confirmationMessages.removeValue(forKey: profile.id)
+        }
+
+        // 🔥 Background deletion (5+ seconds for nested data)
         do {
-            try await databaseService.deleteElderlyProfile(profile.id)
-            
-            await MainActor.run {
-                self.profiles.removeAll { $0.id == profile.id }
-                self.confirmationStatus.removeValue(forKey: profile.id)
-                self.confirmationMessages.removeValue(forKey: profile.id)
-            }
-            
+            print("🗑️ [ProfileViewModel] Starting background deletion for '\(profile.name)'...")
+            try await databaseService.deleteElderlyProfile(profile.id, userId: profile.userId)
+            print("✅ [ProfileViewModel] Background deletion completed for '\(profile.name)'")
+
         } catch {
+            // ❌ ERROR RECOVERY: If deletion fails, restore profile to UI
             await MainActor.run {
-                self.errorMessage = error.localizedDescription
+                print("❌ [ProfileViewModel] Deletion failed - restoring '\(profile.name)' to UI")
+                self.profiles.append(profile)
+                self.profiles.sort { $0.createdAt > $1.createdAt } // Maintain sort order
+                self.errorMessage = "Failed to delete profile: \(error.localizedDescription)"
                 self.errorCoordinator.handle(error, context: "Deleting profile")
             }
-        }
-        
-        await MainActor.run {
-            self.isLoading = false
         }
     }
     

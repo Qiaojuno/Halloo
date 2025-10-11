@@ -138,10 +138,7 @@ final class GalleryViewModel: ObservableObject {
     /// Fetches all gallery events (task responses, profile creation) from the database
     /// and updates the galleryEvents array. Events are sorted by creation date (newest first).
     func loadGalleryData() async {
-        print("🔥 GALLERY: loadGalleryData() called, isAuthenticated: \(authService.isAuthenticated)")
-
         guard authService.isAuthenticated else {
-            print("❌ GALLERY: Not authenticated, showing error")
             errorMessage = "Please sign in to view gallery"
             return
         }
@@ -150,21 +147,18 @@ final class GalleryViewModel: ObservableObject {
         errorMessage = nil
 
         do {
-            print("🔥 GALLERY: Starting fetchGalleryEvents()")
             let events = try await fetchGalleryEvents()
 
             await MainActor.run {
                 self.galleryEvents = events.sorted { $0.createdAt > $1.createdAt }
                 self.lastRefreshTime = Date()
                 self.isLoading = false
-                print("✅ GALLERY: Updated UI with \(self.galleryEvents.count) events")
             }
 
         } catch {
             await MainActor.run {
                 self.errorMessage = "Failed to load gallery: \(error.localizedDescription)"
                 self.isLoading = false
-                print("❌ GALLERY: Error loading events: \(error.localizedDescription)")
             }
 
             errorCoordinator.handle(error, context: "Gallery data loading")
@@ -172,7 +166,7 @@ final class GalleryViewModel: ObservableObject {
     }
     
     /// Update service dependencies (used when switching between mock and production services)
-    /// 
+    ///
     /// - Parameters:
     ///   - databaseService: New database service instance
     ///   - authService: New authentication service instance
@@ -185,7 +179,6 @@ final class GalleryViewModel: ObservableObject {
         self.databaseService = databaseService
         self.authService = authService
         self.errorCoordinator = errorCoordinator
-        print("🔄 GalleryViewModel services updated - now using real Firebase services")
     }
     
     /// Manual refresh trigger for pull-to-refresh functionality
@@ -202,15 +195,11 @@ final class GalleryViewModel: ObservableObject {
     private func fetchGalleryEvents() async throws -> [GalleryHistoryEvent] {
         // Return real data from database
         guard let userId = authService.currentUser?.uid else {
-            print("❌ GALLERY: No authenticated user")
             return []
         }
 
-        print("✅ GALLERY: Fetching events for userId: \(userId)")
-
         // Fetch gallery events from Firebase
         let events = try await databaseService.getGalleryHistoryEvents(for: userId)
-        print("✅ GALLERY: Fetched \(events.count) events from Firebase")
 
         return events
     }
@@ -233,13 +222,10 @@ final class GalleryViewModel: ObservableObject {
     /// - Important: Only loads photos for the current authenticated user
     /// - Note: Photos are sorted by archived date (newest first)
     func loadArchivedPhotos() async {
-        print("📦 GALLERY: Loading archived photos from Cloud Storage")
-
         isLoadingArchive = true
 
         do {
             guard let userId = authService.currentUser?.uid else {
-                print("❌ GALLERY: No authenticated user for archived photos")
                 await MainActor.run {
                     self.isLoadingArchive = false
                 }
@@ -249,12 +235,8 @@ final class GalleryViewModel: ObservableObject {
             let storage = Storage.storage()
             let archiveRef = storage.reference().child("gallery-archive/\(userId)")
 
-            print("📂 GALLERY: Listing archived photos at: gallery-archive/\(userId)")
-
             // List all items under user's archive folder
             let result = try await archiveRef.listAll()
-
-            print("📊 GALLERY: Found \(result.items.count) archived photo files")
 
             var photos: [ArchivedPhoto] = []
 
@@ -286,10 +268,8 @@ final class GalleryViewModel: ObservableObject {
                         profileId: profileId
                     ))
 
-                    print("✅ GALLERY: Loaded archived photo: \(item.name)")
-
                 } catch {
-                    print("❌ GALLERY: Failed to load archived photo \(item.name): \(error)")
+                    print("❌ [GalleryViewModel] Failed to load archived photo: \(error)")
                     continue
                 }
             }
@@ -304,13 +284,25 @@ final class GalleryViewModel: ObservableObject {
                 self.isLoadingArchive = false
             }
 
-            print("🎉 GALLERY: Loaded \(sortedPhotos.count) archived photos successfully")
-
         } catch {
-            print("❌ GALLERY: Failed to load archived photos: \(error)")
-            await MainActor.run {
-                self.isLoadingArchive = false
-                self.errorMessage = "Failed to load archived photos"
+            // Check if error is 404 (archive folder doesn't exist yet - expected for new users)
+            let storageError = error as NSError
+            let is404 = storageError.code == 404 ||
+                       storageError.userInfo["ResponseErrorCode"] as? Int == 404 ||
+                       storageError.localizedDescription.contains("Not Found")
+
+            if is404 {
+                await MainActor.run {
+                    self.archivedPhotos = []
+                    self.isLoadingArchive = false
+                    // Don't set errorMessage for expected empty state
+                }
+            } else {
+                print("❌ [GalleryViewModel] Failed to load archived photos: \(error)")
+                await MainActor.run {
+                    self.isLoadingArchive = false
+                    self.errorMessage = "Failed to load archived photos"
+                }
             }
         }
     }

@@ -340,19 +340,12 @@ final class DashboardViewModel: ObservableObject {
         if let cached = cachedCompletedTasks,
            let timestamp = cacheTimestamp,
            Date().timeIntervalSince(timestamp) < cacheValidDuration {
-            #if DEBUG
-            print("💾 [Cache Hit] Using cached completed tasks (\(cached.count) tasks, age: \(Int(Date().timeIntervalSince(timestamp)))s)")
-            #endif
             // Return cached data filtered by selected profile
             return filterTasksBySelectedProfile(cached)
         }
 
         // Cache miss - compute fresh data
         let allCompleted = todaysTasks.filter { $0.isCompleted }
-
-        #if DEBUG
-        print("🔄 [Cache Miss] Computing fresh completed tasks (\(allCompleted.count) tasks)")
-        #endif
 
         // Update cache with unfiltered completed tasks
         cachedCompletedTasks = allCompleted
@@ -422,16 +415,9 @@ final class DashboardViewModel: ObservableObject {
 
     /// Update profile selection and pending confirmations when profiles change
     private func updateProfileSelection(from profiles: [ElderlyProfile]) {
-        #if DEBUG
-        print("🔄 [DashboardViewModel] updateProfileSelection called with \(profiles.count) profiles")
-        #endif
-
         // Auto-select first profile if none selected (UX improvement)
         if self.selectedProfileId == nil && !profiles.isEmpty {
             self.selectedProfileId = profiles[0].id
-            #if DEBUG
-            print("✅ [DashboardViewModel] Auto-selected profile: \(profiles[0].id)")
-            #endif
         }
 
         // Update pending confirmations
@@ -439,9 +425,6 @@ final class DashboardViewModel: ObservableObject {
 
         // Reload dashboard data to re-filter tasks with new profiles
         if !profiles.isEmpty {
-            #if DEBUG
-            print("🔄 [DashboardViewModel] Reloading dashboard data with \(profiles.count) profiles")
-            #endif
             loadDashboardData()
         } else {
             // Just update UI if no profiles yet
@@ -569,9 +552,6 @@ final class DashboardViewModel: ObservableObject {
             // Auto-select first profile if none selected (UX improvement)
             if self.selectedProfileId == nil && !profiles.isEmpty {
                 self.selectedProfileId = profiles[0].id
-                #if DEBUG
-                print("✅ [DashboardViewModel] Auto-selected profile: \(profiles[0].id)")
-                #endif
             }
         }
     }
@@ -586,50 +566,24 @@ final class DashboardViewModel: ObservableObject {
             let tasks = try await databaseService.getTasks(for: userId)
             let responses = try await databaseService.getSMSResponses(for: userId, date: selectedDate)
 
-            #if DEBUG
-            print("🔍 [DashboardViewModel] loadTodaysTasks: Found \(tasks.count) tasks, \(responses.count) responses")
-            print("🔍 [DashboardViewModel] Current profiles.count: \(profiles.count)")
-            #endif
-
             let dashboardTasks = tasks.compactMap { task -> DashboardTask? in
-                #if DEBUG
-                print("  📋 Checking task: '\(task.title)', status=\(task.status), profileId=\(task.profileId)")
-                #endif
-
                 guard task.status == .active else {
-                    #if DEBUG
-                    print("    ❌ FILTERED: Task status is \(task.status), not active")
-                    #endif
                     return nil
                 }
 
                 guard let profile = profiles.first(where: { $0.id == task.profileId }) else {
-                    #if DEBUG
-                    print("    ❌ FILTERED: No profile found with id=\(task.profileId)")
-                    print("    Available profile IDs: \(profiles.map { $0.id })")
-                    #endif
                     return nil
                 }
 
                 guard profile.status == .confirmed else {
-                    #if DEBUG
-                    print("    ❌ FILTERED: Profile status is \(profile.status), not confirmed")
-                    #endif
                     return nil
                 }
 
-                #if DEBUG
-                print("    ✅ Profile matched! Checking if scheduled for \(selectedDate)")
-                #endif
-
                 // Check if task is scheduled for selected date
                 if task.isScheduledFor(date: selectedDate) {
-                    #if DEBUG
-                    print("    ✅ Task IS scheduled for today - creating DashboardTask")
-                    #endif
                     let taskResponses = responses.filter { $0.taskId == task.id }
                     let latestResponse = taskResponses.max { $0.receivedAt < $1.receivedAt }
-                    
+
                     return DashboardTask(
                         task: task,
                         profile: profile,
@@ -637,16 +591,11 @@ final class DashboardViewModel: ObservableObject {
                         response: latestResponse,
                         isOverdue: isTaskOverdue(task: task, scheduledTime: task.getScheduledTimeFor(date: selectedDate))
                     )
-                } else {
-                    #if DEBUG
-                    print("    ❌ FILTERED: Task NOT scheduled for \(selectedDate)")
-                    print("       Task frequency: \(task.frequency), scheduledTime: \(task.scheduledTime)")
-                    #endif
                 }
 
                 return nil
             }
-            
+
             await MainActor.run {
                 self.todaysTasks = dashboardTasks.sorted { $0.scheduledTime < $1.scheduledTime }
 
@@ -654,7 +603,7 @@ final class DashboardViewModel: ObservableObject {
                 self.cachedCompletedTasks = nil
                 self.cacheTimestamp = nil
             }
-            
+
         } catch {
             await MainActor.run {
                 self.errorCoordinator.handle(error, context: "Loading today's tasks")
@@ -876,7 +825,6 @@ final class DashboardViewModel: ObservableObject {
             // Create gallery event for task completion
             let galleryEvent = GalleryHistoryEvent.fromSMSResponse(response)
             try await databaseService.createGalleryHistoryEvent(galleryEvent)
-            print("✅ [DashboardViewModel] Created gallery event for task completion: \(dashboardTask.task.title)")
 
             // Update task completion statistics for analytics
             var updatedTask = dashboardTask.task

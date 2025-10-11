@@ -116,26 +116,30 @@ struct SpeechBubbleView: View {
     let isOutgoing: Bool
     let backgroundColor: Color
     let textColor: Color
-    
-    // Dynamic sizing constraints
-    private let minWidth: CGFloat = 60
+    var maxWidth: CGFloat? = nil  // Optional override for custom layouts (e.g., cards)
+    var scale: CGFloat = 1.0  // Optional scale factor for proportional sizing
+
+    // Dynamic sizing constraints (scaled proportionally)
+    private var minWidth: CGFloat { 60 * scale }
     private let maxWidthPercent: CGFloat = 0.8
-    private let cornerRadius: CGFloat = 18
-    private let padding: CGFloat = 16
-    private let tailSize: CGFloat = 15 // Bigger triangles
-    
+    private var cornerRadius: CGFloat { 12 * scale }  // Increased from 9 to 12
+    private var padding: CGFloat { 16 * scale }
+    private var tailSize: CGFloat { 15 * scale }
+    private var fontSize: CGFloat { 18 * scale }
+    private var verticalPadding: CGFloat { 9 * scale }  // Reduced from 12 to 9 (3pt reduction per side)
+
     var body: some View {
         Text(text)
-            .font(.system(size: 18, weight: .regular)) // Elderly-friendly 18pt minimum
+            .font(.system(size: fontSize, weight: .regular))
             .foregroundColor(textColor)
             .padding(.horizontal, padding)
-            .padding(.vertical, 12)
+            .padding(.vertical, verticalPadding)
             .background(
                 BubbleWithTail(isOutgoing: isOutgoing, cornerRadius: cornerRadius, tailSize: tailSize)
                     .fill(backgroundColor)
             )
             .frame(minWidth: minWidth)
-            .frame(maxWidth: UIScreen.main.bounds.width * maxWidthPercent, alignment: isOutgoing ? .trailing : .leading)
+            .frame(maxWidth: maxWidth ?? (UIScreen.main.bounds.width * maxWidthPercent), alignment: isOutgoing ? .trailing : .leading)
     }
 }
 

@@ -36,6 +36,16 @@ struct SimplifiedProfileCreationView: View {
         .sheet(isPresented: $showImagePicker) {
             ImagePicker(image: $selectedPhoto, sourceType: imageSourceType)
         }
+        .onChange(of: selectedPhoto) { oldValue, newValue in
+            if let photo = newValue {
+                print("📷 selectedPhoto CHANGED - new photo size: \(photo.size)")
+            } else {
+                print("📷 selectedPhoto CHANGED - photo is now NIL")
+            }
+        }
+        .onChange(of: showImagePicker) { oldValue, newValue in
+            print("📷 showImagePicker changed: \(oldValue) -> \(newValue)")
+        }
         .alert("Profile Creation Error", isPresented: .constant(profileViewModel.errorMessage != nil)) {
             Button("OK") {
                 profileViewModel.errorMessage = nil
@@ -417,6 +427,15 @@ struct SimplifiedProfileCreationView: View {
         if let photo = selectedPhoto, let photoData = photo.jpegData(compressionQuality: 0.8) {
             print("🔨 Converting photo to JPEG data: \(photoData.count) bytes")
             profileViewModel.selectedPhotoData = photoData
+            print("🔨 Photo data SET on ViewModel: \(profileViewModel.selectedPhotoData?.count ?? 0) bytes")
+        } else {
+            print("🔨 No photo selected or conversion failed")
+            print("🔨   selectedPhoto exists: \(selectedPhoto != nil)")
+            if let photo = selectedPhoto {
+                print("🔨   Photo size: \(photo.size)")
+                let jpegData = photo.jpegData(compressionQuality: 0.8)
+                print("🔨   JPEG conversion result: \(jpegData?.count ?? 0) bytes")
+            }
         }
 
         print("🔨 ViewModel values after setting:")
@@ -424,6 +443,7 @@ struct SimplifiedProfileCreationView: View {
         print("🔨   profileViewModel.phoneNumber: '\(profileViewModel.phoneNumber)'")
         print("🔨   profileViewModel.relationship: '\(profileViewModel.relationship)'")
         print("🔨   profileViewModel.hasSelectedPhoto: \(profileViewModel.hasSelectedPhoto)")
+        print("🔨   profileViewModel.selectedPhotoData: \(profileViewModel.selectedPhotoData?.count ?? 0) bytes")
 
         // Create profile asynchronously and WAIT for completion
         _Concurrency.Task {
@@ -470,13 +490,19 @@ struct ImagePicker: UIViewControllerRepresentable {
         }
 
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+            print("🖼️ ImagePicker: didFinishPickingMedia called")
             if let image = info[.originalImage] as? UIImage {
+                print("🖼️ ImagePicker: Image found - size: \(image.size)")
                 parent.image = image
+                print("🖼️ ImagePicker: Image SET on parent.image")
+            } else {
+                print("🖼️ ImagePicker: ❌ No image found in info dictionary")
             }
             parent.presentationMode.wrappedValue.dismiss()
         }
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            print("🖼️ ImagePicker: User cancelled")
             parent.presentationMode.wrappedValue.dismiss()
         }
     }

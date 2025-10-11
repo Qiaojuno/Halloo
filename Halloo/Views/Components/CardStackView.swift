@@ -116,7 +116,7 @@ struct CardStackView: View {
     }
     
     // MARK: - Card Positioning Helpers
-    
+
     private func getCardScale(for index: Int) -> CGFloat {
         switch index {
         case 0: return 1.0      // Front card: full size
@@ -124,7 +124,7 @@ struct CardStackView: View {
         default: return 0.50    // Cards 3+: 50% size
         }
     }
-    
+
     private func getCardXOffset(for index: Int) -> CGFloat {
         switch index {
         case 1: return -8       // Card 1: left fan
@@ -132,28 +132,29 @@ struct CardStackView: View {
         default: return CGFloat(index % 2 == 0 ? -4 : 4)  // Cards 3+: minimal fan
         }
     }
-    
+
     private func getCardYOffset(for index: Int) -> CGFloat {
         switch index {
-        case 1, 2: return CGFloat(-index * 12)  // Cards 1&2: raised much higher
+        case 1: return -24      // Card 1: raised higher for more peek
+        case 2: return -34      // Card 2: raised even higher
         default: return CGFloat(-index * 2)     // Cards 3+: minimal offset
         }
     }
-    
+
     private func getCardRotation(for index: Int) -> Double {
         switch index {
-        case 1: return -5       // Card 1: left tilt
-        case 2: return 4        // Card 2: right tilt
+        case 1: return -4.75    // Card 1: left tilt (5% less: -5 × 0.95)
+        case 2: return 3.61     // Card 2: right tilt (another 5% less: 3.8 × 0.95)
         default: return Double(index % 2 == 0 ? -2 : 2)  // Cards 3+: minimal tilt
         }
     }
     
     private func cardView(for event: GalleryHistoryEvent, cardIndex: Int) -> some View {
         // Calculate progressive lightening for text cards only
-        let baseColor: Double = 0.12
+        let baseColor: Double = 0.08  // Darker: reduced from 0.12 to 0.08
         let lighteningAmount = event.hasPhoto ? 0.0 : Double(cardIndex) * 0.05
-        let cardColor = Color(red: baseColor + lighteningAmount, 
-                             green: baseColor + lighteningAmount, 
+        let cardColor = Color(red: baseColor + lighteningAmount,
+                             green: baseColor + lighteningAmount,
                              blue: baseColor + lighteningAmount)
         
         return ZStack {
@@ -163,13 +164,13 @@ struct CardStackView: View {
                 // Header
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Done for today")
+                        Text("Done for today: \(stackedEvents.count)")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundColor(.white)
-                        
-                        Text("Today")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(.white.opacity(0.8))
+
+                        Text(event.responseMethod)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.white)
                     }
                     .padding(.leading, 20)
                     .padding(.top, 20)
@@ -184,25 +185,29 @@ struct CardStackView: View {
                         .font(.system(size: 60, weight: .light))
                         .foregroundColor(.white.opacity(0.6))
                 } else {
-                    VStack(spacing: 24) {
+                    VStack(spacing: 18) {  // Reduced from 24 to 18
                         HStack {
-                            Spacer(minLength: 60)
+                            Spacer(minLength: 0)
                             SpeechBubbleView(
                                 text: "Reminder: \(event.title). Please confirm when completed.",
                                 isOutgoing: true,
                                 backgroundColor: Color.blue,
-                                textColor: .white
+                                textColor: .white,
+                                maxWidth: 287,  // Blue bubble: 95% of content area (302pt × 0.95)
+                                scale: 0.85  // 15% reduction: text 15.3pt, corners 15.3pt, tail 12.75pt
                             )
                         }
-                        
+
                         HStack {
                             SpeechBubbleView(
                                 text: event.textResponse ?? "Completed!",
                                 isOutgoing: false,
                                 backgroundColor: Color(red: 0.9, green: 0.9, blue: 0.9),
-                                textColor: .black
+                                textColor: .black,
+                                maxWidth: 242,  // Grey bubble: 80% of content area (302pt × 0.8)
+                                scale: 0.85  // 15% reduction: text 15.3pt, corners 15.3pt, tail 12.75pt
                             )
-                            Spacer(minLength: 60)
+                            Spacer(minLength: 0)
                         }
                     }
                     .padding(.horizontal, 16)

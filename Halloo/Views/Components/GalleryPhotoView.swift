@@ -48,10 +48,10 @@ struct GalleryPhotoView: View {
     // Profile colors (same as ProfileImageView)
     private let profileColors: [Color] = [
         Color(hex: "B9E3FF"),         // Profile slot 0 - light blue
-        Color.red.opacity(0.6),       // Profile slot 1 - red
-        Color.green.opacity(0.6),     // Profile slot 2 - green
-        Color.purple.opacity(0.6),    // Profile slot 3 - purple
-        Color.orange.opacity(0.6)     // Profile slot 4 - orange
+        Color.red,                    // Profile slot 1 - red
+        Color.green,                  // Profile slot 2 - green
+        Color.purple,                 // Profile slot 3 - purple
+        Color.orange                  // Profile slot 4 - orange
     ]
 
     // Get profile color based on slot
@@ -145,13 +145,16 @@ struct GalleryPhotoView: View {
     private var overlayContent: some View {
         if let event = event, event.photoData != nil {
             // Profile avatar overlay (bottom-right corner) - only for photos with data
-            VStack {
-                Spacer()
-                HStack {
+            // AND only if profile still exists (not orphaned)
+            if profileInitial != nil {
+                VStack {
                     Spacer()
-                    profileAvatarOverlay(for: event)
-                        .padding(.trailing, 8)
-                        .padding(.bottom, 8)
+                    HStack {
+                        Spacer()
+                        profileAvatarOverlay(for: event)
+                            .padding(.trailing, 8)
+                            .padding(.bottom, 8)
+                    }
                 }
             }
         }
@@ -199,8 +202,8 @@ struct GalleryPhotoView: View {
     
     private func textResponsePreview(for event: GalleryHistoryEvent) -> some View {
         ZStack {
-            // Light background
-            Color(hex: "f5f5f5")
+            // Dark background (match card stack empty card)
+            Color(red: 0.08, green: 0.08, blue: 0.08)
 
             // Middle aligned vertically
             VStack(spacing: 6) {
@@ -235,14 +238,16 @@ struct GalleryPhotoView: View {
                 .padding(.leading, 6)
             }
 
-            // Profile avatar overlay in bottom right (same as photo squares)
-            VStack {
-                Spacer()
-                HStack {
+            // Profile avatar overlay in bottom right (only if profile still exists)
+            if profileInitial != nil {
+                VStack {
                     Spacer()
-                    profileAvatarOverlay(for: event)
-                        .padding(.trailing, 8)
-                        .padding(.bottom, 8)
+                    HStack {
+                        Spacer()
+                        profileAvatarOverlay(for: event)
+                            .padding(.trailing, 8)
+                            .padding(.bottom, 8)
+                    }
                 }
             }
         }
@@ -261,7 +266,7 @@ struct GalleryPhotoView: View {
         }
 
         return Circle()
-            .fill(profileColor.opacity(0.35)) // Use profile color with 35% opacity (same as ProfileImageView)
+            .fill(profileColor) // Use profile color with full opacity
             .frame(width: 20, height: 20)
             .overlay(
                 Text(initial.isEmpty ? "?" : initial)
@@ -283,9 +288,9 @@ struct MiniSpeechBubble: View {
             ForEach(0..<textLines.count, id: \.self) { lineIndex in
                 HStack(spacing: 1) {  // 1px spacing between word segments
                     ForEach(0..<textLines[lineIndex].count, id: \.self) { wordIndex in
-                        // Text segment
+                        // Text segment - white for blue bubble (outgoing), black for grey bubble (incoming)
                         Rectangle()
-                            .fill(Color.black)
+                            .fill(isOutgoing ? Color.white : Color.black)
                             .frame(width: textLines[lineIndex][wordIndex].width,
                                    height: textLines[lineIndex][wordIndex].height)
                     }

@@ -153,7 +153,7 @@ protocol DatabaseServiceProtocol {
     /// - Parameter profileId: Unique identifier for the elderly profile to delete
     /// - Throws: DatabaseError if deletion fails or profile has active dependencies
     /// - Warning: Cascading deletion removes all care coordination history for this elderly person
-    func deleteElderlyProfile(_ profileId: String) async throws
+    func deleteElderlyProfile(_ profileId: String, userId: String) async throws
     
     /// Retrieves all confirmed elderly profiles for a specific family user
     /// 
@@ -365,9 +365,9 @@ protocol DatabaseServiceProtocol {
     func deleteSMSResponse(_ responseId: String) async throws
     
     // MARK: - Gallery History Event Operations
-    
+
     /// Creates a gallery history event for tracking profile creation and task completion milestones
-    /// 
+    ///
     /// Records significant events in the family care coordination history, including profile
     /// confirmations and task completions, for display in the gallery timeline.
     ///
@@ -375,9 +375,9 @@ protocol DatabaseServiceProtocol {
     /// - Throws: DatabaseError if event creation fails
     /// - Important: Gallery events provide families with visual timeline of care milestones
     func createGalleryHistoryEvent(_ event: GalleryHistoryEvent) async throws
-    
+
     /// Retrieves all gallery history events for a specific family user
-    /// 
+    ///
     /// Loads complete timeline of care milestones including profile creations and
     /// task completions for family gallery display and coordination history.
     ///
@@ -385,7 +385,39 @@ protocol DatabaseServiceProtocol {
     /// - Returns: Array of gallery history events sorted by creation date
     /// - Throws: DatabaseError if data retrieval fails
     func getGalleryHistoryEvents(for userId: String) async throws -> [GalleryHistoryEvent]
-    
+
+    // MARK: - Photo Storage Operations
+
+    /// Uploads photo data for SMS response and returns download URL
+    ///
+    /// Stores photo attachment from elderly SMS response in Firebase Storage
+    /// and returns the public download URL for display in gallery and response views.
+    ///
+    /// - Parameter photoData: JPEG image data to upload
+    /// - Parameter responseId: Unique identifier for the SMS response
+    /// - Returns: Public download URL for the uploaded photo
+    /// - Throws: DatabaseError if photo upload fails
+    func uploadPhoto(_ photoData: Data, for responseId: String) async throws -> String
+
+    /// Uploads profile photo and returns download URL
+    ///
+    /// Stores elderly profile photo in Firebase Storage and returns the public
+    /// download URL for display in profile views and gallery.
+    ///
+    /// - Parameter photoData: JPEG image data to upload
+    /// - Parameter profileId: Unique identifier for the elderly profile
+    /// - Returns: Public download URL for the uploaded photo
+    /// - Throws: DatabaseError if photo upload fails
+    func uploadProfilePhoto(_ photoData: Data, for profileId: String) async throws -> String
+
+    /// Deletes photo from Firebase Storage
+    ///
+    /// Removes photo file from storage using the download URL.
+    ///
+    /// - Parameter url: Download URL of the photo to delete
+    /// - Throws: DatabaseError if photo deletion fails
+    func deletePhoto(at url: String) async throws
+
     // MARK: - Analytics and Reporting
     func getTaskCompletionStats(for userId: String, from startDate: Date, to endDate: Date) async throws -> TaskCompletionStats
     func getProfileAnalytics(for profileId: String, userId: String) async throws -> ProfileAnalytics

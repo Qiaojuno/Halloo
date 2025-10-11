@@ -6,6 +6,7 @@ import SwiftUI
 struct GalleryView: View {
     // MARK: - Environment & Dependencies
     @Environment(\.container) private var container
+    @Environment(\.isScrollDisabled) private var isScrollDisabled
     @StateObject private var viewModel: GalleryViewModel
     @EnvironmentObject private var profileViewModel: ProfileViewModel
 
@@ -13,15 +14,26 @@ struct GalleryView: View {
     /// Tab selection binding from parent ContentView for floating pill navigation
     @Binding var selectedTab: Int
 
+    /// Controls whether to show header (false when rendered in ContentView's layered architecture)
+    var showHeader: Bool = true
+
+    /// Controls whether to show bottom navigation (false when rendered in ContentView's layered architecture)
+    var showNav: Bool = true
+
     // MARK: - State
     @State private var selectedFilter: GalleryFilter = .all
     @State private var selectedEventForDetail: GalleryHistoryEvent?
     @State private var showingFilterDropdown = false
     @State private var showingAccountSettings = false
+    @State private var previousTab: Int = 0
+    @State private var transitionDirection: Int = 1
+    @State private var isTransitioning: Bool = false
     
     // MARK: - Initialization
-    init(selectedTab: Binding<Int>) {
+    init(selectedTab: Binding<Int>, showHeader: Bool = true, showNav: Bool = true) {
         self._selectedTab = selectedTab
+        self.showHeader = showHeader
+        self.showNav = showNav
         // Initialize with placeholder - will be properly set in onAppear
         _viewModel = StateObject(wrappedValue: GalleryViewModel(
             databaseService: MockDatabaseService(),
@@ -36,8 +48,10 @@ struct GalleryView: View {
             ScrollView {
                 VStack(spacing: 0) { // Match DashboardView spacing: 0 between sections
 
-                    // Header with Remi logo and settings (no profile selection needed for Gallery)
-                    galleryHeaderSection
+                    // Header with Remi logo and settings (no profile selection needed for Gallery) (conditionally rendered)
+                    if showHeader {
+                        galleryHeaderSection
+                    }
 
                     // Gallery card - match spacing ratio with DashboardView profiles
                     VStack(alignment: .leading, spacing: 16) {
@@ -54,47 +68,27 @@ struct GalleryView: View {
                         .cornerRadius(10) // Round all corners
                         .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2) // Dark gray shadow
                     }
+                    .padding(.top, showHeader ? 0 : 100) // Add top padding when header is hidden (static header height)
 
                     // Bottom padding to prevent content from hiding behind navigation
                     Spacer(minLength: 100)
                 }
                 .padding(.horizontal, UIScreen.main.bounds.width * 0.04) // Match DashboardView (96% width)
             }
+            .scrollDisabled(isScrollDisabled)
             .background(Color(hex: "f9f9f9")) // Light gray app background
 
-            // Reusable bottom gradient navigation (no create button)
-            BottomGradientNavigation(selectedTab: $selectedTab)
+            // Reusable bottom gradient navigation (no create button) (conditionally rendered)
+            if showNav {
+                BottomGradientNavigation(selectedTab: $selectedTab, previousTab: $previousTab, transitionDirection: $transitionDirection, isTransitioning: $isTransitioning)
+            }
         }
         .onAppear {
             initializeViewModel()
-            print("🔥 GalleryView onAppear - Gallery events: \(viewModel.galleryEvents.count)")
         }
         .task {
             await viewModel.loadGalleryData()
             await viewModel.loadArchivedPhotos()
-        }
-        .fullScreenCover(item: $selectedEventForDetail) { event in
-            let currentIndex = viewModel.galleryEvents.firstIndex(where: { $0.id == event.id }) ?? 0
-            let totalEvents = viewModel.galleryEvents.count
-            
-            GalleryDetailView(
-                event: event, 
-                selectedTab: $selectedTab,
-                currentIndex: currentIndex,
-                totalEvents: totalEvents,
-                onPrevious: {
-                    navigateToPrevious(from: event)
-                },
-                onNext: {
-                    navigateToNext(from: event)
-                }
-            )
-            .inject(container: container)
-            .animation(.none) // Remove all animations completely
-            .transition(.identity) // No transition effect
-            .onAppear {
-                print("🔥 GalleryDetailView showing for event: \(event.id)")
-            }
         }
         .overlay(
             // Clean dropdown overlay positioned below filter button
@@ -107,11 +101,11 @@ struct GalleryView: View {
                                 showingFilterDropdown = false
                             }
                         }
-                    
+
                     VStack {
                         HStack {
                             Spacer()
-                            
+
                             // Filter dropdown positioned below the filter button
                             VStack(spacing: 0) {
                                 ForEach(GalleryFilter.allCases, id: \.self) { filter in
@@ -126,7 +120,7 @@ struct GalleryView: View {
                                                 .font(.system(size: 14, weight: .medium))
                                                 .foregroundColor(selectedFilter == filter ? Color(hex: "007AFF") : Color(hex: "6f6f6f"))
                                             Spacer()
-                                            
+
                                             if selectedFilter == filter {
                                                 Image(systemName: "checkmark")
                                                     .font(.system(size: 12, weight: .medium))
@@ -137,7 +131,7 @@ struct GalleryView: View {
                                         .padding(.vertical, 12)
                                         .background(Color.white)
                                     }
-                                    
+
                                     if filter != GalleryFilter.allCases.last {
                                         Divider()
                                             .background(Color(hex: "e0e0e0"))
@@ -151,13 +145,35 @@ struct GalleryView: View {
                             .padding(.trailing, 16) // Align with filter button
                         }
                         .padding(.top, 90) // Position below header section
-                        
+
                         Spacer()
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 }
             }
         )
+        .fullScreenCover(item: $selectedEventForDetail) { event in
+            let currentIndex = viewModel.galleryEvents.firstIndex(where: { $0.id == event.id }) ?? 0
+            let totalEvents = viewModel.galleryEvents.count
+
+            GalleryDetailView(
+                event: event,
+                selectedTab: $selectedTab,
+                previousTab: $previousTab,
+                transitionDirection: $transitionDirection,
+                isTransitioning: $isTransitioning,
+                currentIndex: currentIndex,
+                totalEvents: totalEvents,
+                onPrevious: {
+                    navigateToPrevious(from: event)
+                },
+                onNext: {
+                    navigateToNext(from: event)
+                }
+            )
+            .inject(container: container)
+            .transition(.identity) // No transition effect for gallery detail
+        }
     }
     
     // Rest of implementation continues...
@@ -244,14 +260,14 @@ extension GalleryView {
     // Gallery Card Header Component
     private var galleryCardHeader: some View {
         HStack {
-            // TASK GALLERY title (left aligned)
-            Text("TASK GALLERY")
+            // Task Gallery title (left aligned)
+            Text("Task Gallery")
                 .tracking(-1)
-                .font(.system(size: 15, weight: .bold))
+                .font(AppFonts.poppinsMedium(size: 15))
                 .foregroundColor(Color(hex: "9f9f9f"))
-            
+
             Spacer()
-            
+
             // Filter button with hamburger icon (right aligned)
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -262,7 +278,7 @@ extension GalleryView {
                     Text(selectedFilter.rawValue)
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(Color(hex: "6f6f6f"))  // Dark grey
-                    
+
                     // Hamburger icon (3 lines)
                     VStack(spacing: 2) {
                         Rectangle()
@@ -291,22 +307,33 @@ extension GalleryView {
     private var photoGridContent: some View {
         LazyVStack(spacing: 16) {
             if groupedEventsByDate.isEmpty {
-                // Example message when no events exist
-                VStack(alignment: .leading, spacing: 8) {
-                    // Example header
-                    HStack {
-                        Text("Create your first Remi!")
-                            .tracking(-1)
-                            .font(.system(size: 15, weight: .regular))
-                            .foregroundColor(.black)
+                // Empty state: Black card in first grid position [content][empty][empty]
+                LazyVGrid(columns: gridColumns, spacing: 4) {
+                    // First column: Empty state card
+                    VStack(spacing: 8) {
+                        Spacer()
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundColor(.white)
+                        Text("Make your first\nreminder ~")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(2)
                         Spacer()
                     }
-                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(1, contentMode: .fit)
+                    .background(Color(red: 0.08, green: 0.08, blue: 0.08))
+                    .cornerRadius(3)
 
-                    // Example text message mini display
-                    exampleTextMessageBox
-                        .padding(.horizontal, 12)
+                    // Second and third columns: Empty (invisible placeholders)
+                    Color.clear
+                        .aspectRatio(1, contentMode: .fit)
+                    Color.clear
+                        .aspectRatio(1, contentMode: .fit)
                 }
+                .padding(.horizontal, 12)
             } else {
                 ForEach(groupedEventsByDate, id: \.date) { dateGroup in
                     VStack(alignment: .leading, spacing: 8) {
@@ -315,7 +342,7 @@ extension GalleryView {
                             Text(formatDateHeader(dateGroup.date))
                                 .tracking(-1)
                                 .font(.system(size: 15, weight: .regular))
-                                .foregroundColor(.black)
+                                .foregroundColor(Color(hex: "9f9f9f"))  // Dark grey
                             Spacer()
                         }
                         .padding(.horizontal, 12)

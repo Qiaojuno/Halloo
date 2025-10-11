@@ -170,28 +170,13 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             .updateData(profileData)
     }
 
-    func deleteElderlyProfile(_ profileId: String) async throws {
-        DiagnosticLogger.info(.schema, "Profile delete requested", context: ["profileId": profileId])
-
-        // Use collection group query to find profile
-        let snapshot = try await db.collectionGroup("profiles")
-            .whereField("id", isEqualTo: profileId)
-            .limit(to: 1)
-            .getDocuments()
-
-        guard let document = snapshot.documents.first,
-              let profileData = document.data() as? [String: Any],
-              let userId = profileData["userId"] as? String else {
-            DiagnosticLogger.error(.schema, "Profile not found", context: ["profileId": profileId])
-            throw DatabaseError.documentNotFound
-        }
-
-        DiagnosticLogger.info(.schema, "Profile found, starting recursive delete", context: [
+    func deleteElderlyProfile(_ profileId: String, userId: String) async throws {
+        DiagnosticLogger.info(.schema, "Profile delete requested", context: [
             "profileId": profileId,
             "userId": userId
         ])
 
-        // ✅ Use recursive helper for safe cascade delete
+        // ✅ Use direct path deletion (no collection group query needed)
         try await deleteProfileRecursively(profileId, userId: userId)
 
         DiagnosticLogger.success(.schema, "Profile deleted successfully", context: ["profileId": profileId])
@@ -586,16 +571,57 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     func uploadPhoto(_ photoData: Data, for responseId: String) async throws -> String {
         let storageRef = storage.reference()
         let photoRef = storageRef.child("responses/\(responseId)/photo.jpg")
-        
+
         let metadata = StorageMetadata()
         metadata.contentType = "image/jpeg"
-        
+
         _ = try await photoRef.putDataAsync(photoData, metadata: metadata)
         let downloadURL = try await photoRef.downloadURL()
-        
+
         return downloadURL.absoluteString
     }
-    
+
+    func uploadProfilePhoto(_ photoData: Data, for profileId: String) async throws -> String {
+        print("📤 [Storage] Starting profile photo upload")
+        print("📤 [Storage] Profile ID: \(profileId)")
+        print("📤 [Storage] Photo size: \(photoData.count) bytes")
+
+        let storageRef = storage.reference()
+        let photoRef = storageRef.child("profiles/\(profileId)/photo.jpg")
+
+        print("📤 [Storage] Storage path: profiles/\(profileId)/photo.jpg")
+
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+
+        print("📤 [Storage] Calling putDataAsync()...")
+        let uploadResult: StorageMetadata
+        do {
+            uploadResult = try await photoRef.putDataAsync(photoData, metadata: metadata)
+            print("📤 [Storage] ✅ putDataAsync() completed!")
+            print("📤 [Storage] Upload result path: \(uploadResult.path ?? "no path")")
+            print("📤 [Storage] Upload result bucket: \(uploadResult.bucket ?? "no bucket")")
+            print("📤 [Storage] Upload result name: \(uploadResult.name ?? "no name")")
+        } catch {
+            print("📤 [Storage] ❌ putDataAsync() FAILED with error: \(error)")
+            print("📤 [Storage] Error type: \(type(of: error))")
+            print("📤 [Storage] Error details: \(error.localizedDescription)")
+            throw error
+        }
+
+        print("📤 [Storage] Getting download URL...")
+        do {
+            let downloadURL = try await photoRef.downloadURL()
+            print("📤 [Storage] ✅ Download URL obtained: \(downloadURL.absoluteString)")
+            return downloadURL.absoluteString
+        } catch {
+            print("📤 [Storage] ❌ downloadURL() FAILED with error: \(error)")
+            print("📤 [Storage] This means the upload succeeded but getting URL failed")
+            print("📤 [Storage] Error details: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
     func deletePhoto(at url: String) async throws {
         let photoRef = storage.reference(forURL: url)
         try await photoRef.delete()
@@ -1013,11 +1039,18 @@ extension FirebaseDatabaseService {
         let habitsSnapshot = try await profileRef.collection("habits").getDocuments()
         let messagesSnapshot = try await profileRef.collection("messages").getDocuments()
 
+        // Also count gallery events linked to this profile
+        let galleryEventsSnapshot = try await CollectionPath.userGalleryEvents(userId: userId)
+            .collection(in: db)
+            .whereField("profileId", isEqualTo: profileId)
+            .getDocuments()
+
         DiagnosticLogger.info(.schema, "Found nested data", context: [
             "profileId": profileId,
             "habitsCount": habitsSnapshot.documents.count,
             "messagesCount": messagesSnapshot.documents.count,
-            "totalItems": habitsSnapshot.documents.count + messagesSnapshot.documents.count
+            "galleryEventsCount": galleryEventsSnapshot.documents.count,
+            "totalItems": habitsSnapshot.documents.count + messagesSnapshot.documents.count + galleryEventsSnapshot.documents.count
         ])
 
         let totalOps = habitsSnapshot.documents.count + messagesSnapshot.documents.count + 1
@@ -1032,7 +1065,56 @@ extension FirebaseDatabaseService {
         // Delete all nested subcollections under profile (habits and messages)
         try await deleteDocumentRecursively(profileRef, subcollections: ["habits", "messages"])
 
-        // Verify deletion
+        // Process gallery events linked to this profile
+        // Strategy: Keep photos (memories), delete text-only events (sensitive data)
+        DiagnosticLogger.info(.schema, "Processing gallery events for profile", context: [
+            "profileId": profileId,
+            "galleryEventsCount": galleryEventsSnapshot.documents.count
+        ])
+
+        var dereferencedPhotos = 0
+        var deletedTextOnlyEvents = 0
+
+        for eventDoc in galleryEventsSnapshot.documents {
+            let eventData = eventDoc.data()
+
+            // Check if event contains photo data (nested in eventData field)
+            let hasPhoto: Bool
+            if let eventDataDict = eventData["eventData"] as? [String: Any],
+               let photoData = eventDataDict["photoData"] {
+                hasPhoto = !(photoData is NSNull)
+            } else {
+                hasPhoto = false
+            }
+
+            if hasPhoto {
+                // Photo event - dereference profile but keep photo (preserve memory)
+                try await eventDoc.reference.updateData([
+                    "profileId": FieldValue.delete()
+                ])
+                dereferencedPhotos += 1
+                DiagnosticLogger.debug(.schema, "Dereferenced photo event (kept photo)", context: [
+                    "eventId": eventDoc.documentID,
+                    "action": "removed profileId, kept photoData"
+                ])
+            } else {
+                // Text-only event - safe to delete entirely (no memories lost)
+                try await eventDoc.reference.delete()
+                deletedTextOnlyEvents += 1
+                DiagnosticLogger.debug(.schema, "Deleted text-only event", context: [
+                    "eventId": eventDoc.documentID,
+                    "action": "deleted entire event"
+                ])
+            }
+        }
+
+        DiagnosticLogger.success(.schema, "Gallery events processed", context: [
+            "profileId": profileId,
+            "dereferencedPhotos": dereferencedPhotos,
+            "deletedTextOnlyEvents": deletedTextOnlyEvents
+        ])
+
+        // Verify deletion of habits and messages (gallery events intentionally kept if they have photos)
         let verifyHabits = try await profileRef.collection("habits").limit(to: 1).getDocuments()
         let verifyMessages = try await profileRef.collection("messages").limit(to: 1).getDocuments()
 
@@ -1043,7 +1125,10 @@ extension FirebaseDatabaseService {
                 "remainingMessages": verifyMessages.documents.count
             ])
         } else {
-            DiagnosticLogger.success(.schema, "All nested data deleted", context: ["profileId": profileId])
+            DiagnosticLogger.success(.schema, "Profile data cleaned up successfully", context: [
+                "profileId": profileId,
+                "note": "Photo events dereferenced (kept), text-only events deleted"
+            ])
         }
 
         // Update user's profile count
@@ -1051,7 +1136,9 @@ extension FirebaseDatabaseService {
 
         tracker.end(success: true, additionalContext: [
             "deletedHabits": habitsSnapshot.documents.count,
-            "deletedMessages": messagesSnapshot.documents.count
+            "deletedMessages": messagesSnapshot.documents.count,
+            "dereferencedPhotoEvents": dereferencedPhotos,
+            "deletedTextOnlyEvents": deletedTextOnlyEvents
         ])
     }
 }

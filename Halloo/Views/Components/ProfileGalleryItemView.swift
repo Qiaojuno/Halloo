@@ -7,9 +7,9 @@ struct ProfileGalleryItemView: View {
     // Use the same profile colors from DashboardView
     private let profileColors: [Color] = [
         Color(hex: "B9E3FF"),         // Profile slot 0 - default light blue
-        Color.red.opacity(0.6),       // Profile slot 1 - brighter
-        Color.green.opacity(0.6),     // Profile slot 2 - brighter
-        Color.purple.opacity(0.6)     // Profile slot 3 - brighter
+        Color.red,                    // Profile slot 1
+        Color.green,                  // Profile slot 2
+        Color.purple                  // Profile slot 3
     ]
     
     // Profile emojis for consistency
@@ -100,7 +100,7 @@ struct ProfileGalleryItemView: View {
     }
     
     private var profileBackgroundColor: Color {
-        return profileStrokeColor.opacity(0.3)
+        return profileStrokeColor // Full opacity background
     }
     
     private var profileEmoji: String {

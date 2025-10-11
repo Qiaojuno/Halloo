@@ -27,23 +27,32 @@ struct GalleryPresentationData: Identifiable {
  * SHEETS: ProfileCreationView and TaskCreationView with proper ViewModel injection
  */
 struct DashboardView: View {
-    
+
     // MARK: - Environment & Dependencies
     /// Dependency injection container providing access to all app services
     /// (DatabaseService, AuthenticationService, NotificationService, etc.)
     @Environment(\.container) private var container
-    
+
+    /// Scroll lock state from ContentView (disables vertical scroll during horizontal swipe)
+    @Environment(\.isScrollDisabled) private var isScrollDisabled
+
     /// Reactive data source for dashboard content (profiles, tasks, filtering logic)
     /// Uses @Published properties to automatically update UI when data changes
     @EnvironmentObject private var viewModel: DashboardViewModel
-    
+
     /// Profile management for onboarding flow - shared across Dashboard and ProfileCreation
     /// Fixes ViewModel instance isolation by using same instance for profile creation
     @EnvironmentObject private var profileViewModel: ProfileViewModel
-    
+
     // MARK: - Navigation State
     /// Tab selection binding from parent ContentView for floating pill navigation
     @Binding var selectedTab: Int
+
+    /// Controls whether to show header (false when rendered in ContentView's layered architecture)
+    var showHeader: Bool = true
+
+    /// Controls whether to show bottom navigation (false when rendered in ContentView's layered architecture)
+    var showNav: Bool = true
     
     // MARK: - UI State Management
     /// Tracks which elderly profile is currently selected (0-3 max)
@@ -80,37 +89,40 @@ struct DashboardView: View {
     
     /// Current total events count for navigation
     @State private var currentTotalEvents: Int = 0
+
+    /// Tab transition state (for GalleryDetailView)
+    @State private var previousTab: Int = 0
+    @State private var transitionDirection: Int = 1
+    @State private var isTransitioning: Bool = false
     
     var body: some View {
-        Group {
-            if showingDirectOnboarding {
-                // ✅ NEW: Simplified single-card profile creation
-                SimplifiedProfileCreationView(onDismiss: {
-                    showingDirectOnboarding = false
-                })
-                .environmentObject(profileViewModel)
-                .transition(.identity)
-                .animation(nil, value: showingDirectOnboarding)
-            } else if showingTaskCreation {
-                // Show task creation flow without animation
-                TaskCreationView(
-                    preselectedProfileId: selectedProfile?.id,
-                    dismissAction: {
-                        showingTaskCreation = false
-                    }
-                )
-                .environmentObject(container.makeTaskViewModel())
-                .transition(.identity)
-                .animation(nil, value: showingTaskCreation)
-            } else {
-                // Show dashboard
-                dashboardContent
-                    .transition(.identity)
-                    .animation(nil, value: showingDirectOnboarding)
-                    .animation(nil, value: showingTaskCreation)
+        if showingDirectOnboarding {
+            // ✅ NEW: Simplified single-card profile creation
+            SimplifiedProfileCreationView(onDismiss: {
+                showingDirectOnboarding = false
+            })
+            .environmentObject(profileViewModel)
+            .transition(.identity)
+            .transaction { transaction in
+                transaction.disablesAnimations = true
             }
+        } else if showingTaskCreation {
+            // Show task creation flow
+            TaskCreationView(
+                preselectedProfileId: selectedProfile?.id,
+                dismissAction: {
+                    showingTaskCreation = false
+                }
+            )
+            .environmentObject(container.makeTaskViewModel())
+            .transition(.identity)
+            .transaction { transaction in
+                transaction.disablesAnimations = true
+            }
+        } else {
+            // Show dashboard - NO .transition() here, let parent control it
+            dashboardContent
         }
-        .animation(nil) // Disable all animations
     }
     
     private var dashboardContent: some View {
@@ -129,37 +141,45 @@ struct DashboardView: View {
                 ScrollView {
                     VStack(spacing: 10) { // Reduced spacing between cards by half
 
-                        // 🏠 HEADER: App branding + account access
-                        headerSection
-                            .padding(.bottom, 3.33) // Increase spacing by 1/3 (10 → 13.33)
+                        // 🏠 HEADER: App branding + account access (conditionally rendered)
+                        if showHeader {
+                            headerSection
+                                .padding(.bottom, 3.33) // Increase spacing by 1/3 (10 → 13.33)
+                        }
 
                         // ✅ COMPLETED: Interactive card stack showing task evidence
                         // Replaces detailed view system with swipeable playing card stack
-                        VStack(spacing: 4) {
+                        VStack(spacing: 18) {  // VStack spacing between card and task details (30pt total with TaskRowView padding)
                             cardStackSection
 
                             // 📋 TASK DETAILS: Shows current top card's habit information
                             // Only visible when there are cards in the stack
                             if currentTopCardEvent != nil {
                                 taskDetailsSection
+                                    .padding(.bottom, 8)  // Bottom padding to match top (total 20pt each side)
                             }
                         }
                         .padding(.bottom, -8.33) // Half the spacing to upcoming (3.33 - 6.67 = -3.33, halved from -6.67)
+                        .padding(.top, showHeader ? 0 : 100) // Add top padding when header is hidden (static header height)
 
                         // ⏰ UPCOMING: Today's pending tasks for selected profile only
                         // Shows tasks that still need to be completed today
                         upcomingSection
+                            .padding(.top, currentTopCardEvent == nil ? 18 : 0) // Add spacing when card stack is empty
 
                         // Bottom padding to prevent content from hiding behind navigation
                         Spacer(minLength: 100)
                     }
                     .padding(.horizontal, geometry.size.width * 0.04) // Match GalleryView (96% width)
                 }
+                .scrollDisabled(isScrollDisabled)
                 .background(Color(hex: "f9f9f9")) // Light gray app background
 
-                // Reusable bottom gradient navigation with create button
-                BottomGradientNavigation(selectedTab: $selectedTab) {
-                    createHabitButton
+                // Reusable bottom gradient navigation with create button (conditionally rendered)
+                if showNav {
+                    BottomGradientNavigation(selectedTab: $selectedTab, previousTab: $previousTab, transitionDirection: $transitionDirection, isTransitioning: $isTransitioning) {
+                        createHabitButton
+                    }
                 }
             }
         }
@@ -168,8 +188,18 @@ struct DashboardView: View {
              * DATA LOADING & PROFILE SELECTION:
              * 1. Connect DashboardViewModel to ProfileViewModel (single source of truth)
              * 2. Load dashboard data and auto-select first profile for task filtering
+             * 3. Sync UI selection state with ViewModel selection state
              */
             viewModel.setProfileViewModel(profileViewModel)
+
+            // Sync selectedProfileIndex with ViewModel's selectedProfileId
+            if let selectedId = viewModel.selectedProfileId,
+               let index = profileViewModel.profiles.firstIndex(where: { $0.id == selectedId }) {
+                selectedProfileIndex = index
+            } else {
+                print("⚠️ [DashboardView] Could not sync profile selection - profiles may not be loaded yet")
+            }
+
             loadData()
         }
         .onChange(of: viewModel.selectedProfileId) { newProfileId in
@@ -193,6 +223,9 @@ struct DashboardView: View {
             GalleryDetailView(
                 event: galleryData.event,
                 selectedTab: $selectedTab,
+                previousTab: $previousTab,
+                transitionDirection: $transitionDirection,
+                isTransitioning: $isTransitioning,
                 currentIndex: galleryData.index,
                 totalEvents: galleryData.total,
                 onPrevious: { navigateToPreviousTask() },
@@ -206,41 +239,35 @@ struct DashboardView: View {
     
     // MARK: - Helper Methods
     private func navigateToPreviousTask() {
-        print("DEBUG: navigateToPreviousTask called. Current index: \(currentGalleryIndex), Total events: \(todaysGalleryEvents.count)")
-        guard currentGalleryIndex > 0 else { 
-            print("DEBUG: Cannot navigate to previous - already at first item")
-            return 
+        guard currentGalleryIndex > 0 else {
+            return
         }
-        
+
         let newIndex = currentGalleryIndex - 1
         let newEvent = todaysGalleryEvents[newIndex]
-        
+
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             currentGalleryIndex = newIndex
             selectedTaskForGalleryDetail = GalleryPresentationData(event: newEvent, index: newIndex, total: todaysGalleryEvents.count)
         }
-        print("DEBUG: Navigated to previous task. New index: \(currentGalleryIndex)/\(todaysGalleryEvents.count)")
     }
-    
+
     private func navigateToNextTask() {
-        print("DEBUG: navigateToNextTask called. Current index: \(currentGalleryIndex), Total events: \(todaysGalleryEvents.count)")
-        guard currentGalleryIndex < todaysGalleryEvents.count - 1 else { 
-            print("DEBUG: Cannot navigate to next - already at last item")
-            return 
+        guard currentGalleryIndex < todaysGalleryEvents.count - 1 else {
+            return
         }
-        
+
         let newIndex = currentGalleryIndex + 1
         let newEvent = todaysGalleryEvents[newIndex]
-        
+
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             currentGalleryIndex = newIndex
             selectedTaskForGalleryDetail = GalleryPresentationData(event: newEvent, index: newIndex, total: todaysGalleryEvents.count)
         }
-        print("DEBUG: Navigated to next task. New index: \(currentGalleryIndex)/\(todaysGalleryEvents.count)")
     }
     
     private func loadTodaysGalleryEvents() async {
@@ -254,28 +281,17 @@ struct DashboardView: View {
             // Get task IDs from today's completed tasks IN ORDER
             let todaysTasks = viewModel.todaysCompletedTasks
             let todaysTaskIds = todaysTasks.map { $0.task.id }
-            print("DEBUG: ========================================")
-            print("DEBUG: Loading gallery events for \(todaysTasks.count) completed tasks")
-            for (index, task) in todaysTasks.enumerated() {
-                print("DEBUG: Task \(index): ID=\(task.task.id), Title=\(task.task.title)")
-            }
-            print("DEBUG: ========================================")
-            
+
             // Create a map of task ID to gallery event
             var taskEventMap: [String: GalleryHistoryEvent] = [:]
-            print("DEBUG: Total gallery events from database: \(allEvents.count)")
             for event in allEvents {
                 switch event.eventData {
                 case .taskResponse(let data):
                     if let taskId = data.taskId {
-                        print("DEBUG: Found event with taskId: \(taskId)")
                         if todaysTaskIds.contains(taskId) {
                             // Only keep the first event for each task (avoid duplicates)
                             if taskEventMap[taskId] == nil {
                                 taskEventMap[taskId] = event
-                                print("DEBUG: Mapped event for task \(taskId)")
-                            } else {
-                                print("DEBUG: Duplicate event for task \(taskId), skipping")
                             }
                         }
                     }
@@ -283,26 +299,17 @@ struct DashboardView: View {
                     break // Skip profile events
                 }
             }
-            print("DEBUG: Task event map has \(taskEventMap.count) entries")
-            
+
             // Build the gallery events array in the same order as completed tasks
             var orderedEvents: [GalleryHistoryEvent] = []
             for task in todaysTasks {
                 if let event = taskEventMap[task.task.id] {
                     orderedEvents.append(event)
-                } else {
-                    print("DEBUG: Warning - No gallery event found for task \(task.task.id)")
                 }
             }
-            
+
             await MainActor.run {
                 todaysGalleryEvents = orderedEvents
-                print("DEBUG: Loaded \(todaysGalleryEvents.count) gallery events for \(todaysTaskIds.count) tasks")
-                for (index, event) in todaysGalleryEvents.enumerated() {
-                    if case .taskResponse(let data) = event.eventData {
-                        print("DEBUG: Event \(index): taskId=\(data.taskId ?? "nil"), title=\(data.taskTitle ?? "nil")")
-                    }
-                }
             }
         } catch {
             print("Error loading today's gallery events: \(error)")
@@ -360,8 +367,8 @@ struct DashboardView: View {
         } else {
             // Get selected profile name
             let profileName = selectedProfile?.name ?? "Profile"
-            let momentText = taskCount == 1 ? "moment" : "moments"
-            return "\(profileName) has \(taskCount) \(momentText) left!"
+            let checkInText = taskCount == 1 ? "check-in" : "check-ins"
+            return "\(profileName) has \(taskCount) \(checkInText) left!"
         }
     }
     
@@ -530,7 +537,8 @@ struct DashboardView: View {
     private var cardStackSection: some View {
         // CARD STACK - Full width for proper centering
         CardStackView(events: completedTaskEvents, currentTopEvent: $currentTopCardEvent)
-            .padding(.vertical, 20)
+            .padding(.top, 20)  // Only top padding to avoid double padding with task details
+            .offset(y: 8)  // Move down slightly
             .frame(maxWidth: .infinity) // Allow full width for internal centering
     }
     
@@ -579,7 +587,7 @@ struct DashboardView: View {
                                 // Use profile-specific color based on profile ID hash
                                 let colorIndex = abs((profile?.id ?? topEvent.profileId).hashValue) % 4
                                 let profileColor = [Color(hex: "B9E3FF"), Color.red, Color.green, Color.purple][colorIndex]
-                                profileColor.opacity(0.2)
+                                profileColor // Full opacity background
                                 Text(String((profile?.name ?? "G").prefix(1)).uppercased())
                                     .font(.custom("Inter", size: 14))
                                     .fontWeight(.medium)
@@ -627,8 +635,6 @@ struct DashboardView: View {
             guard let response = task.response, response.isCompleted else { return nil }
             return GalleryHistoryEvent.fromSMSResponse(response)
         }
-        print("DEBUG: Completed tasks count: \(viewModel.todaysCompletedTasks.count)")
-        print("DEBUG: Card events count: \(events.count)")
         return events
     }
     
@@ -696,36 +702,23 @@ struct DashboardView: View {
                             showViewButton: true, // IMPORTANT: Enables viewing completion evidence
                             onViewButtonTapped: {
                                 guard selectedTaskForGalleryDetail == nil else { return }
-                                
-                                let taskToFind = task.task
+
                                 let taskIndex = rowIndex
-                                print("DEBUG: ========================================")
-                                print("DEBUG: View button \(taskIndex + 1) tapped")
-                                print("DEBUG: Task ID: \(taskToFind.id)")
-                                print("DEBUG: Task Title: \(taskToFind.title)")
-                                print("DEBUG: ========================================")
-                                
+
                                 _Concurrency.Task {
                                     // Always reload today's gallery events to ensure we have all of them
                                     await loadTodaysGalleryEvents()
-                                    
-                                    print("DEBUG: After loading, we have \(todaysGalleryEvents.count) gallery events")
-                                    print("DEBUG: Trying to open event at index \(taskIndex)")
-                                    
+
                                     // The gallery events are now guaranteed to be in the same order as completed tasks
                                     if taskIndex < todaysGalleryEvents.count {
                                         await MainActor.run {
                                             let galleryEvent = todaysGalleryEvents[taskIndex]
                                             let totalEventsCount = todaysGalleryEvents.count
-                                            print("DEBUG: Successfully setting currentGalleryIndex to \(taskIndex)")
-                                            print("DEBUG: Gallery event ID: \(galleryEvent.id)")
-                                            print("DEBUG: Will show next button: \(taskIndex < totalEventsCount - 1)")
-                                            print("DEBUG: About to present with currentIndex=\(taskIndex), totalEvents=\(totalEventsCount)")
-                                            
+
                                             // Set both values BEFORE presenting to ensure proper navigation state
                                             currentGalleryIndex = taskIndex
                                             currentTotalEvents = totalEventsCount
-                                            
+
                                             // Disable animation when presenting
                                             var transaction = Transaction()
                                             transaction.disablesAnimations = true
@@ -734,8 +727,7 @@ struct DashboardView: View {
                                             }
                                         }
                                     } else {
-                                        print("ERROR: Task index \(taskIndex) is out of bounds!")
-                                        print("ERROR: We only have \(todaysGalleryEvents.count) gallery events")
+                                        print("❌ [DashboardView] Gallery event index out of bounds")
                                     }
                                 }
                             }
@@ -1401,12 +1393,15 @@ struct PreviewBottomNavigation: View {
  * - Inactive tab: Gray icons/text
  * - White background with light gray border for definition
  * 
- * USAGE: 
- * - Regular views: FloatingPillNavigation(selectedTab: $tab, onTabTapped: nil)
- * - Detail views: FloatingPillNavigation(selectedTab: $tab, onTabTapped: { dismiss() })
+ * USAGE:
+ * - Regular views: FloatingPillNavigation(selectedTab: $tab, previousTab: $previousTab, transitionDirection: $transitionDirection, onTabTapped: nil)
+ * - Detail views: FloatingPillNavigation(selectedTab: $tab, previousTab: $previousTab, transitionDirection: $transitionDirection, onTabTapped: { dismiss() })
  */
 struct FloatingPillNavigation: View {
     @Binding var selectedTab: Int
+    @Binding var previousTab: Int  // Add binding to previousTab
+    @Binding var transitionDirection: Int  // Add binding to transition direction
+    @Binding var isTransitioning: Bool  // Lock to prevent animation overlap
     let onTabTapped: (() -> Void)? // Optional dismiss callback
     
     // iPhone 13 base dimensions for scaling (390x844)
@@ -1461,6 +1456,12 @@ struct FloatingPillNavigation: View {
                         .foregroundColor(selectedTab == 0 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
                 }
                 .onTapGesture {
+                    // Prevent rapid tab switches during animation
+                    guard !isTransitioning else {
+                        print("⚠️ Tab tap blocked - transition in progress")
+                        return
+                    }
+
                     if let onTabTapped = onTabTapped {
                         var transaction = Transaction()
                         transaction.disablesAnimations = true
@@ -1469,7 +1470,9 @@ struct FloatingPillNavigation: View {
                             onTabTapped()
                         }
                     } else {
-                        selectedTab = 0 // Switch to Home tab
+                        // Update previousTab for Habits transition (Dashboard/Gallery use fixed positions)
+                        previousTab = selectedTab
+                        selectedTab = 0
                     }
                 }
                 
@@ -1491,6 +1494,12 @@ struct FloatingPillNavigation: View {
                         .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
                 }
                 .onTapGesture {
+                    // Prevent rapid tab switches during animation
+                    guard !isTransitioning else {
+                        print("⚠️ Tab tap blocked - transition in progress")
+                        return
+                    }
+
                     if let onTabTapped = onTabTapped {
                         var transaction = Transaction()
                         transaction.disablesAnimations = true
@@ -1499,7 +1508,9 @@ struct FloatingPillNavigation: View {
                             onTabTapped()
                         }
                     } else {
-                        selectedTab = 1 // Switch to Habits tab
+                        // Update previousTab for Habits transition
+                        previousTab = selectedTab
+                        selectedTab = 1
                     }
                 }
                 
@@ -1521,6 +1532,12 @@ struct FloatingPillNavigation: View {
                         .foregroundColor(selectedTab == 2 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
                 }
                 .onTapGesture {
+                    // Prevent rapid tab switches during animation
+                    guard !isTransitioning else {
+                        print("⚠️ Tab tap blocked - transition in progress")
+                        return
+                    }
+
                     if let onTabTapped = onTabTapped {
                         var transaction = Transaction()
                         transaction.disablesAnimations = true
@@ -1529,7 +1546,9 @@ struct FloatingPillNavigation: View {
                             onTabTapped()
                         }
                     } else {
-                        selectedTab = 2 // Switch to Gallery tab
+                        // Update previousTab for Habits transition (Dashboard/Gallery use fixed positions)
+                        previousTab = selectedTab
+                        selectedTab = 2
                     }
                 }
             }

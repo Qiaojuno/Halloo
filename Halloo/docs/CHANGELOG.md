@@ -1,5 +1,142 @@
 # Changelog
 
+## [Unreleased] - 2025-10-11
+
+### Fixed - Profile UI Consistency and Typography
+- **Profile backgrounds**: Removed all opacity from profile colors (solid backgrounds everywhere)
+  - ProfileImageView: Changed from `opacity(0.35)` to full opacity
+  - GalleryPhotoView: Removed `opacity(0.6)` from color definitions and `opacity(0.35)` from overlays
+  - ProfileGalleryItemView: Changed from `opacity(0.3)` to full opacity
+  - GalleryDetailView: Changed from `opacity(0.2)` to full opacity
+  - DashboardView: Removed opacity from profile fallback placeholders
+- **Card titles typography**: Updated to Poppins-Medium with proper capitalization
+  - "TASK GALLERY" → "Task Gallery"
+  - "ALL SCHEDULED TASKS" → "All Scheduled Tasks"
+- **Impact**: Profiles now visually distinct with vibrant solid colors; headers more readable and consistent
+
+**Files modified**: ProfileImageView.swift, GalleryPhotoView.swift, ProfileGalleryItemView.swift, GalleryDetailView.swift, DashboardView.swift, GalleryView.swift, HabitsView.swift
+
+---
+
+## [Unreleased] - 2025-10-10
+
+### Added - 90-Day Data Retention Policy with Photo Archival
+
+#### Overview
+Implemented automated data retention policy that archives photos to Cloud Storage and deletes text data after 90 days, balancing privacy, cost savings, and memory preservation.
+
+#### Business Impact
+- **Privacy**: Deletes sensitive SMS text after 90 days (TCPA compliance)
+- **Cost Savings**: 75% reduction in Firestore costs (~$5.64/user/year savings)
+- **Memory Preservation**: Photos archived forever in Cloud Storage
+- **User Experience**: Seamless "Archived Memories" section in gallery
+
+#### Implementation
+
+**1. Cloud Functions (Backend)**
+- `cleanupOldGalleryEvents`: Scheduled function runs daily at midnight PST
+- `manualCleanup`: HTTP endpoint for testing (accepts `daysOld` parameter)
+- Batch processing: 500 events per day
+- Organized storage: `gallery-archive/{userId}/{profileId}/{year}/{month}/{eventId}.jpg`
+- Metadata preservation: originalCreatedAt, archivedAt, profileId, taskTitle
+
+**2. Cloud Storage Security Rules**
+```javascript
+match /gallery-archive/{userId}/{profileId}/{year}/{month}/{photoId} {
+  allow read: if isAuthenticated() && isOwner(userId);
+  allow write: if false; // Only Cloud Functions can write
+}
+```
+
+**3. iOS - GalleryViewModel**
+- Added `@Published var archivedPhotos: [ArchivedPhoto]`
+- Added `loadArchivedPhotos()` method
+- Created `ArchivedPhoto` model with URL, dates, profileId
+
+**4. iOS - GalleryView UI**
+- "Archived Memories (90+ days)" section below recent events
+- AsyncImage loading with loading/error states
+- 3-column grid matching recent gallery layout
+- Loads on view appear alongside recent gallery
+
+#### Cost Analysis
+- **Before**: ~$7.92/user/year (Firestore only)
+- **After**: ~$2.28/user/year (Firestore + Cloud Storage)
+- **Savings**: $5.64/user/year (71% reduction)
+
+#### Files Added/Modified
+- `functions/index.js` - Cloud Functions implementation
+- `functions/README.md` - Deployment documentation
+- `storage.rules` - Security rules
+- `Halloo/ViewModels/GalleryViewModel.swift` - Archived photos logic
+- `Halloo/Views/GalleryView.swift` - UI implementation
+- `docs/ARCHIVED-PHOTOS-FEATURE.md` - Complete documentation
+- `docs/DATA-MIGRATION-GUIDE.md` - Migration procedures
+
+---
+
+### Fixed - E.164 Phone Number Format for Twilio SMS
+
+#### Problem Summary
+- **Twilio error 21211**: "Invalid 'To' Phone Number"
+- **Symptom**: All SMS confirmations and task reminders failing
+- **Root cause**: Phone numbers stored with display formatting (e.g., "+1 (778) 814-3739") instead of E.164 format
+- **Impact**: Complete SMS functionality broken
+
+#### Root Causes Identified
+1. **Display format used for storage**: `formattedPhoneNumber` extension added parentheses, spaces, dashes
+2. **Twilio E.164 requirement**: Only accepts `+1XXXXXXXXXX` format (no spaces/dashes/parentheses)
+3. **Format confusion**: Same property used for both UI display and SMS delivery
+
+#### Changes Made
+
+**1. String+Extensions.swift - New E.164 Property (lines 67-96)**
+```swift
+/// E.164 format phone number for Twilio SMS (e.g., +17788143739)
+var e164PhoneNumber: String {
+    let cleaned = phoneNumberDigitsOnly
+
+    switch cleaned.count {
+    case 10:
+        return "+1\(cleaned)"
+    case 11 where cleaned.hasPrefix("1"):
+        return "+\(cleaned)"
+    default:
+        return "+\(cleaned)"
+    }
+}
+```
+
+**2. ProfileViewModel.swift - Use E.164 for Storage**
+Updated all phone number processing to use `.e164PhoneNumber`:
+- `createProfileAsync()` - Profile creation (line 672)
+- `updateProfileAsync()` - Profile updates (line 810)
+- `createTemporaryProfileForSMS()` - Onboarding flow (line 1535)
+- `validatePhoneNumber()` - Duplicate check (line 1293)
+
+**3. Separation of Concerns**
+- **UI Display**: Use `formattedPhoneNumber` (e.g., "+1 (778) 814-3739")
+- **SMS Delivery**: Use `e164PhoneNumber` (e.g., "+17788143739")
+- **Database Storage**: Store E.164 format
+
+#### E.164 Format Examples
+- Input: "778-814-3739" → Output: "+17788143739"
+- Input: "+1 (778) 814-3739" → Output: "+17788143739"
+- Input: "17788143739" → Output: "+17788143739"
+
+#### Benefits
+- ✅ All Twilio SMS now deliver successfully
+- ✅ Consistent phone format in database
+- ✅ No user-visible changes (UI still shows formatted)
+- ✅ Backward compatible (existing profiles work)
+
+#### Files Modified
+- `Halloo/Core/String+Extensions.swift` - E.164 conversion
+- `Halloo/ViewModels/ProfileViewModel.swift` - Use E.164 for storage
+- `docs/PHONE-NUMBER-FORMAT-FIX.md` - Complete documentation
+
+---
+
 ## [Unreleased] - 2025-10-09
 
 ### Fixed - Gallery UI Polish & Data Loading

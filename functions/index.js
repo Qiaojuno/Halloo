@@ -1,4 +1,5 @@
 const functions = require('firebase-functions');
+const {onSchedule} = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 const twilio = require('twilio');
 
@@ -254,10 +255,10 @@ function validateTwilioRequest(req) {
  * - Before: ~$2/user/year (3,000+ Firestore docs)
  * - After: ~$0.50/user/year (270 docs + Cloud Storage)
  */
-exports.cleanupOldGalleryEvents = functions.pubsub
-  .schedule('every 24 hours')
-  .timeZone('America/Los_Angeles')
-  .onRun(async (context) => {
+exports.cleanupOldGalleryEvents = onSchedule({
+  schedule: 'every 24 hours',
+  timeZone: 'America/Los_Angeles'
+}, async (event) => {
     const db = admin.firestore();
     const bucket = admin.storage().bucket();
 

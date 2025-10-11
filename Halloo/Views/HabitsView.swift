@@ -16,14 +16,22 @@ import UIKit
  * NAVIGATION: Accessed via middle tab (bookmark icon) in floating pill navigation
  */
 struct HabitsView: View {
-    
+
     // MARK: - Environment & Dependencies
     @Environment(\.container) private var container
+    @Environment(\.isScrollDisabled) private var isScrollDisabled
+    @Environment(\.isDragging) private var isDragging
     @EnvironmentObject private var viewModel: DashboardViewModel
     @EnvironmentObject private var profileViewModel: ProfileViewModel
-    
+
     // MARK: - Navigation State
     @Binding var selectedTab: Int
+
+    /// Controls whether to show header (false when rendered in ContentView's layered architecture)
+    var showHeader: Bool = true
+
+    /// Controls whether to show bottom navigation (false when rendered in ContentView's layered architecture)
+    var showNav: Bool = true
     
     // MARK: - UI State Management
     @State private var selectedProfileIndex: Int = 0
@@ -38,45 +46,55 @@ struct HabitsView: View {
     /// Controls action sheet for unified create button
     @State private var showingCreateActionSheet = false
 
-    /// Controls delete confirmation alert
+    /// Controls delete confirmation alert for habits
     @State private var showingDeleteConfirmation = false
     @State private var habitToDelete: Task?
 
+    /// Controls delete confirmation alert for profiles
+    @State private var showingProfileDeleteConfirmation = false
+
     /// Track locally deleted habit IDs for optimistic UI updates
     @State private var locallyDeletedHabitIds: Set<String> = []
+
+    /// Tab transition state (for BottomGradientNavigation)
+    @State private var previousTab: Int = 0
+    @State private var transitionDirection: Int = 1
+    @State private var isTransitioning: Bool = false
+
+    /// Delete button cooldown to prevent accidental taps
+    @State private var isDeleteButtonCoolingDown = false
 
     // Days of the week for display
     private let weekDays = ["S", "M", "T", "W", "T", "F", "S"]
     private let weekDayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     
     var body: some View {
-        Group {
-            if showingDirectOnboarding {
-                // ✅ NEW: Simplified single-card profile creation
-                SimplifiedProfileCreationView(onDismiss: {
-                    showingDirectOnboarding = false
-                })
-                .environmentObject(profileViewModel)
-                .transition(.identity)
-                .animation(nil, value: showingDirectOnboarding)
-            } else if showingTaskCreation {
-                // Show task creation flow without animation
-                TaskCreationView(
-                    preselectedProfileId: selectedProfile?.id,
-                    dismissAction: {
-                        showingTaskCreation = false
-                    }
-                )
-                .environmentObject(container.makeTaskViewModel())
-                .transition(.identity)
-                .animation(nil, value: showingTaskCreation)
-            } else {
-                // Show habits view
-                habitsContent
-                    .transition(.identity)
-                    .animation(nil, value: showingDirectOnboarding)
-                    .animation(nil, value: showingTaskCreation)
+        if showingDirectOnboarding {
+            // ✅ NEW: Simplified single-card profile creation
+            SimplifiedProfileCreationView(onDismiss: {
+                showingDirectOnboarding = false
+            })
+            .environmentObject(profileViewModel)
+            .transition(.identity)
+            .transaction { transaction in
+                transaction.disablesAnimations = true
             }
+        } else if showingTaskCreation {
+            // Show task creation flow
+            TaskCreationView(
+                preselectedProfileId: selectedProfile?.id,
+                dismissAction: {
+                    showingTaskCreation = false
+                }
+            )
+            .environmentObject(container.makeTaskViewModel())
+            .transition(.identity)
+            .transaction { transaction in
+                transaction.disablesAnimations = true
+            }
+        } else {
+            // Show habits view - NO .transition() here, let parent control it
+            habitsContent
         }
     }
     
@@ -87,25 +105,67 @@ struct HabitsView: View {
                 ScrollView {
                     VStack(spacing: 10) { // Match DashboardView spacing
 
-                        // 🏠 HEADER: App branding + account access
-                        headerSection
+                        // 🏠 HEADER: App branding + account access (conditionally rendered)
+                        if showHeader {
+                            headerSection
+                        }
 
                         // 📋 HABITS MANAGEMENT: All scheduled tasks with filtering and deletion
                         allScheduledTasksSection
+                            .padding(.top, showHeader ? 0 : 100) // Add top padding when header is hidden (static header height)
+
+                        // 🗑️ DELETE PROFILE BUTTON: Remove profile and all associated habits
+                        deleteProfileButton
 
                         // Bottom padding to prevent content from hiding behind navigation
                         Spacer(minLength: 100)
                     }
                     .padding(.horizontal, geometry.size.width * 0.04) // Match DashboardView
                 }
+                .scrollDisabled(isScrollDisabled)
                 .background(Color(hex: "f9f9f9")) // Light gray app background
 
-                // Reusable bottom gradient navigation (no create button)
-                BottomGradientNavigation(selectedTab: $selectedTab)
+                // Reusable bottom gradient navigation (no create button) (conditionally rendered)
+                if showNav {
+                    BottomGradientNavigation(selectedTab: $selectedTab, previousTab: $previousTab, transitionDirection: $transitionDirection, isTransitioning: $isTransitioning)
+                }
             }
         }
         .onAppear {
+            // Sync selectedProfileIndex with ViewModel's selectedProfileId when view appears
+            if let selectedId = viewModel.selectedProfileId,
+               let index = profileViewModel.profiles.firstIndex(where: { $0.id == selectedId }) {
+                selectedProfileIndex = index
+            } else {
+                print("⚠️ [HabitsView] Could not sync selectedProfileIndex - profile selection may be out of sync")
+            }
+
+            // Trigger initial cooldown if user is already on Habits tab
+            if selectedTab == 1 {
+                withAnimation {
+                    isDeleteButtonCoolingDown = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    withAnimation {
+                        isDeleteButtonCoolingDown = false
+                    }
+                }
+            }
+
             loadData()
+        }
+        .onChange(of: selectedTab) { oldValue, newValue in
+            // Start delete button cooldown when switching TO Habits tab (index 1)
+            if newValue == 1 {
+                withAnimation {
+                    isDeleteButtonCoolingDown = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    withAnimation {
+                        isDeleteButtonCoolingDown = false
+                    }
+                }
+            }
         }
         .onChange(of: viewModel.selectedProfileId) { newProfileId in
             // Sync selectedProfileIndex when ViewModel auto-selects a profile
@@ -137,8 +197,8 @@ struct HabitsView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Section title inside card
             HStack {
-                Text("ALL SCHEDULED TASKS")
-                    .font(.system(size: 15, weight: .bold))
+                Text("All Scheduled Tasks")
+                    .font(AppFonts.poppinsMedium(size: 15))
                     .tracking(-1)
                     .foregroundColor(Color(hex: "9f9f9f"))
                     .padding(.horizontal, 12)
@@ -170,28 +230,28 @@ struct HabitsView: View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 ForEach(0..<7, id: \.self) { dayIndex in
-                    Button(action: {
-                        if selectedDays.contains(dayIndex) {
-                            selectedDays.remove(dayIndex)
-                        } else {
-                            selectedDays.insert(dayIndex)
+                    Text(weekDays[dayIndex])
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(Color(hex: "0D0C0C")) // Dark text for both states
+                        .frame(width: (geometry.size.width / 7), height: 39) // Responsive width, fixed height
+                        .background(
+                            Circle()
+                                .fill(Color.clear) // Always clear background
+                                .frame(width: 39, height: 39) // Keep circle size consistent
+                        )
+                        .overlay(
+                            Circle()
+                                .stroke(selectedDays.contains(dayIndex) ? Color.black : Color(hex: "D5D5D5"), lineWidth: 1) // Black stroke when selected, gray stroke when not
+                                .frame(width: 39, height: 39) // Keep circle size consistent
+                        )
+                        .contentShape(Circle())
+                        .onTapGesture {
+                            if selectedDays.contains(dayIndex) {
+                                selectedDays.remove(dayIndex)
+                            } else {
+                                selectedDays.insert(dayIndex)
+                            }
                         }
-                    }) {
-                        Text(weekDays[dayIndex])
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(Color(hex: "0D0C0C")) // Dark text for both states
-                            .frame(width: (geometry.size.width / 7), height: 39) // Responsive width, fixed height
-                            .background(
-                                Circle()
-                                    .fill(Color.clear) // Always clear background
-                                    .frame(width: 39, height: 39) // Keep circle size consistent
-                            )
-                            .overlay(
-                                Circle()
-                                    .stroke(selectedDays.contains(dayIndex) ? Color.black : Color(hex: "D5D5D5"), lineWidth: 1) // Black stroke when selected, gray stroke when not
-                                    .frame(width: 39, height: 39) // Keep circle size consistent
-                            )
-                    }
                 }
             }
         }
@@ -412,6 +472,83 @@ struct HabitsView: View {
         }
     }
     
+    // MARK: - 🗑️ Delete Profile Button
+    /**
+     * DELETE PROFILE BUTTON: Removes selected profile and all habits
+     *
+     * PURPOSE: Allow users to delete profiles to test Twilio SMS integration
+     * Displays at bottom of habits list
+     * Shows profile name and habit count in confirmation dialog
+     */
+    private var deleteProfileButton: some View {
+        Button(action: {
+            guard !isDeleteButtonCoolingDown else {
+                return
+            }
+
+            // Haptic feedback for delete action
+            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+            impactFeedback.impactOccurred()
+
+            showingProfileDeleteConfirmation = true
+        }) {
+            HStack {
+                if isDeleteButtonCoolingDown {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "9f9f9f")))
+                        .scaleEffect(0.8)
+                        .frame(width: 16, height: 16)
+                } else {
+                    Image(systemName: "trash")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.red)
+                }
+
+                Text("Delete Profile")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(isDeleteButtonCoolingDown ? Color(hex: "9f9f9f") : .red)
+
+                Spacer()  // Push content to the left
+            }
+            .frame(maxWidth: .infinity, minHeight: 47)
+            .padding(.horizontal, 16)  // Add horizontal padding for left alignment
+            .background(Color.white)
+            .cornerRadius(10)
+            .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
+            .opacity(isDeleteButtonCoolingDown ? 0.6 : 1.0)
+        }
+        .disabled(isDeleteButtonCoolingDown)
+        .alert("Delete Profile", isPresented: $showingProfileDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                confirmDeleteProfile()
+            }
+        } message: {
+            if let profile = selectedProfile {
+                let habitCount = filteredHabits.count
+                Text("Are you sure you want to delete '\(profile.name)' and all \(habitCount) associated habit\(habitCount == 1 ? "" : "s")? This action cannot be undone.")
+            } else {
+                Text("No profile selected.")
+            }
+        }
+    }
+
+    // MARK: - Profile Deletion Logic
+    private func confirmDeleteProfile() {
+        guard let profile = selectedProfile else {
+            return
+        }
+
+        // Trigger haptic feedback
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+
+        // Call ProfileViewModel to delete profile (recursive deletion of habits)
+        profileViewModel.deleteProfile(profile)
+
+        // Reset selected profile index to 0 after deletion
+        selectedProfileIndex = 0
+    }
+
     // MARK: - Helper Properties
     // selectedProfile is already defined earlier in the file
 }
@@ -440,7 +577,7 @@ struct HabitRowViewSimple: View {
             // Task row content
             taskContent
                 .offset(x: dragOffset)
-                .simultaneousGesture(horizontalSwipeGesture)
+                .highPriorityGesture(horizontalSwipeGesture)
         }
     }
 

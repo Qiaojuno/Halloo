@@ -51,10 +51,10 @@ struct ProfileImageView: View {
     // Fixed colors for profile slots 0,1,2,3,4
     private let profileColors: [Color] = [
         Color(hex: "B9E3FF"),         // Profile slot 0 - default light blue
-        Color.red.opacity(0.6),       // Profile slot 1 - red
-        Color.green.opacity(0.6),     // Profile slot 2 - green
-        Color.purple.opacity(0.6),    // Profile slot 3 - purple
-        Color.orange.opacity(0.6)     // Profile slot 4 - orange (for 5+ profiles)
+        Color.red,                    // Profile slot 1 - red
+        Color.green,                  // Profile slot 2 - green
+        Color.purple,                 // Profile slot 3 - purple
+        Color.orange                  // Profile slot 4 - orange (for 5+ profiles)
     ]
     
     // MARK: - Computed Properties
@@ -98,7 +98,7 @@ struct ProfileImageView: View {
         } placeholder: {
             // Placeholder with initial letter (no emoji)
             ZStack {
-                profileColor.opacity(0.35) // Always use profile color for background
+                profileColor // Always use profile color for background (full opacity)
                 Text(profileInitial)
                     .font(.system(size: size.emojiSize, weight: .bold))
                     .foregroundColor(.black)
