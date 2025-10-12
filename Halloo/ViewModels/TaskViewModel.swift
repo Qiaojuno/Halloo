@@ -263,7 +263,12 @@ final class TaskViewModel: ObservableObject {
     
     /// Coordinator for elderly-care-aware error handling
     private let errorCoordinator: ErrorCoordinator
-    
+
+    /// PHASE 2: AppState reference for write consolidation
+    /// - Injected after initialization by ContentView
+    /// - Used to update centralized state instead of local @Published arrays
+    private weak var appState: AppState?
+
     // MARK: - Internal Coordination Properties
     
     /// Combine cancellables for reactive elderly care coordination
@@ -424,7 +429,16 @@ final class TaskViewModel: ObservableObject {
         // Load existing care tasks for family context
         loadTasks()
     }
-    
+
+    // MARK: - AppState Injection (Phase 2)
+
+    /// Sets the AppState reference for write consolidation
+    /// Called by ContentView after TaskViewModel initialization
+    func setAppState(_ appState: AppState) {
+        self.appState = appState
+        print("✅ [TaskViewModel] AppState reference injected")
+    }
+
     // MARK: - Setup Methods
     private func setupValidation() {
         // Title validation
@@ -690,10 +704,20 @@ final class TaskViewModel: ObservableObject {
 
             await MainActor.run {
                 print("🎉 Updating local state with \(createdTasks.count) new task(s)")
-                // Update local state for immediate family feedback
-                for task in createdTasks {
-                    self.tasks.insert(task, at: 0)
+
+                // PHASE 2: Update AppState instead of local array
+                if let appState = self.appState {
+                    for task in createdTasks {
+                        appState.addTask(task)
+                        print("✅ [TaskViewModel] Task added to AppState: \(task.title)")
+                    }
+                } else {
+                    // FALLBACK: Keep old behavior if AppState not injected
+                    for task in createdTasks {
+                        self.tasks.insert(task, at: 0)
+                    }
                 }
+
                 self.resetForm()
                 self.showingCreateTask = false
                 print("✅ Task creation complete! Total tasks: \(self.tasks.count)")
@@ -773,9 +797,17 @@ final class TaskViewModel: ObservableObject {
             }
             
             await MainActor.run {
-                if let index = self.tasks.firstIndex(where: { $0.id == task.id }) {
-                    self.tasks[index] = updatedTask
+                // PHASE 2: Update AppState instead of local array
+                if let appState = self.appState {
+                    appState.updateTask(updatedTask)
+                    print("✅ [TaskViewModel] Task updated in AppState: \(updatedTask.title)")
+                } else {
+                    // FALLBACK: Keep old behavior if AppState not injected
+                    if let index = self.tasks.firstIndex(where: { $0.id == task.id }) {
+                        self.tasks[index] = updatedTask
+                    }
                 }
+
                 self.resetForm()
                 self.showingEditTask = false
                 self.selectedTask = nil
@@ -809,7 +841,14 @@ final class TaskViewModel: ObservableObject {
             try await databaseService.deleteTask(task.id, userId: task.userId, profileId: task.profileId)
 
             await MainActor.run {
-                self.tasks.removeAll { $0.id == task.id }
+                // PHASE 2: Delete from AppState instead of local array
+                if let appState = self.appState {
+                    appState.deleteTask(task.id)
+                    print("✅ [TaskViewModel] Task deleted from AppState: \(task.title)")
+                } else {
+                    // FALLBACK: Keep old behavior if AppState not injected
+                    self.tasks.removeAll { $0.id == task.id }
+                }
             }
             
         } catch {

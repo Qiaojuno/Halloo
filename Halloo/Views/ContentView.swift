@@ -394,6 +394,11 @@ struct ContentView: View {
 
         print("✅ [ContentView] ProfileViewModel created")
 
+        // PHASE 2: Inject AppState into ProfileViewModel for write consolidation
+        if let appState = appState, let profileVM = profileViewModel {
+            profileVM.setAppState(appState)
+        }
+
         // Load profiles after ViewModel is fully initialized
         profileViewModel?.loadProfiles()
 
@@ -462,6 +467,11 @@ struct ContentView: View {
             dataSyncCoordinator: dataSyncCoordinator,
             errorCoordinator: errorCoordinator
         )
+
+        // PHASE 2: Inject AppState into TaskViewModel for write consolidation
+        if let appState = appState {
+            viewModel.setAppState(appState)
+        }
 
         return viewModel
     }

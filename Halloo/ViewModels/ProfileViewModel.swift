@@ -213,7 +213,12 @@ final class ProfileViewModel: ObservableObject {
     
     /// Coordinator for elderly-care-aware error handling and recovery
     private let errorCoordinator: ErrorCoordinator
-    
+
+    /// PHASE 2: AppState reference for write consolidation
+    /// - Injected after initialization by ContentView
+    /// - Used to update centralized state instead of local @Published arrays
+    private weak var appState: AppState?
+
     // MARK: - Internal Coordination Properties
     
     /// Combine cancellables for reactive elderly profile coordination
@@ -404,6 +409,15 @@ final class ProfileViewModel: ObservableObject {
     deinit {
         print("💀 [ProfileViewModel] DEINIT CALLED - ProfileViewModel is being deallocated!")
         print("   - Cancellables count: \(cancellables.count)")
+    }
+
+    // MARK: - AppState Injection (Phase 2)
+
+    /// Sets the AppState reference for write consolidation
+    /// Called by ContentView after ProfileViewModel initialization
+    func setAppState(_ appState: AppState) {
+        self.appState = appState
+        print("✅ [ProfileViewModel] AppState reference injected")
     }
 
     // MARK: - Setup Methods
@@ -808,9 +822,17 @@ final class ProfileViewModel: ObservableObject {
                     "thread": DiagnosticLogger.threadInfo()
                 ])
 
+                // PHASE 2: Update AppState instead of local array
+                // AppState will broadcast via DataSyncCoordinator automatically
+                if let appState = self.appState {
+                    appState.addProfile(profile)
+                    print("✅ [ProfileViewModel] Profile added to AppState: \(profile.name)")
+                } else {
+                    // FALLBACK: Keep old behavior if AppState not injected (Phase 1 compatibility)
+                    print("⚠️ [ProfileViewModel] AppState not available, profile will be added via broadcast")
+                }
+
                 // Update confirmation status and reset form
-                // NOTE: Profile will be added to local array via dataSyncCoordinator broadcast
-                // which triggers loadProfiles() - no need to manually insert here
                 self.confirmationStatus[profile.id] = .sent
                 self.resetForm()
                 self.showingCreateProfile = false
@@ -904,9 +926,17 @@ final class ProfileViewModel: ObservableObject {
             }
             
             await MainActor.run {
-                if let index = self.profiles.firstIndex(where: { $0.id == profile.id }) {
-                    self.profiles[index] = updatedProfile
+                // PHASE 2: Update AppState instead of local array
+                if let appState = self.appState {
+                    appState.updateProfile(updatedProfile)
+                    print("✅ [ProfileViewModel] Profile updated in AppState: \(updatedProfile.name)")
+                } else {
+                    // FALLBACK: Keep old behavior if AppState not injected
+                    if let index = self.profiles.firstIndex(where: { $0.id == profile.id }) {
+                        self.profiles[index] = updatedProfile
+                    }
                 }
+
                 self.resetForm()
                 self.showingEditProfile = false
                 self.selectedProfile = nil
@@ -935,7 +965,16 @@ final class ProfileViewModel: ObservableObject {
         // ✅ OPTIMISTIC UI UPDATE: Remove from UI immediately (before async deletion)
         await MainActor.run {
             print("🎬 [ProfileViewModel] Optimistic delete - removing '\(profile.name)' from UI immediately")
-            self.profiles.removeAll { $0.id == profile.id }
+
+            // PHASE 2: Delete from AppState instead of local array
+            if let appState = self.appState {
+                appState.deleteProfile(profile.id)
+                print("✅ [ProfileViewModel] Profile deleted from AppState: \(profile.name)")
+            } else {
+                // FALLBACK: Keep old behavior if AppState not injected
+                self.profiles.removeAll { $0.id == profile.id }
+            }
+
             self.confirmationStatus.removeValue(forKey: profile.id)
             self.confirmationMessages.removeValue(forKey: profile.id)
         }
@@ -950,8 +989,17 @@ final class ProfileViewModel: ObservableObject {
             // ❌ ERROR RECOVERY: If deletion fails, restore profile to UI
             await MainActor.run {
                 print("❌ [ProfileViewModel] Deletion failed - restoring '\(profile.name)' to UI")
-                self.profiles.append(profile)
-                self.profiles.sort { $0.createdAt > $1.createdAt } // Maintain sort order
+
+                // PHASE 2: Restore to AppState instead of local array
+                if let appState = self.appState {
+                    appState.addProfile(profile)  // Re-add the profile
+                    print("✅ [ProfileViewModel] Profile restored to AppState after delete failure")
+                } else {
+                    // FALLBACK: Restore to local array
+                    self.profiles.append(profile)
+                    self.profiles.sort { $0.createdAt > $1.createdAt } // Maintain sort order
+                }
+
                 self.errorMessage = "Failed to delete profile: \(error.localizedDescription)"
                 self.errorCoordinator.handle(error, context: "Deleting profile")
             }
