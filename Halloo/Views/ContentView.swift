@@ -29,12 +29,15 @@ struct ContentView: View {
     @Environment(\.container) private var container
 
     // MARK: - State Management
+    // Phase 1: READ-ONLY AppState integration (keeping existing ViewModels temporarily)
+    @State private var appState: AppState?
+
     @State private var onboardingViewModel: OnboardingViewModel?
     @State private var profileViewModel: ProfileViewModel?
     @State private var dashboardViewModel: DashboardViewModel?
     @State private var galleryViewModel: GalleryViewModel?
     @State private var authService: FirebaseAuthenticationService?
-    @State private var isAuthenticated = false
+    @State private var isAuthenticated = false  // Temporary - will be removed in Phase 4
     @State private var selectedTab = 0
     @State private var previousTab = 0  // Track previous tab for Habits (middle) transition direction
     @State private var transitionDirection: Int = 1  // Unused - kept for backward compatibility with bindings
@@ -118,6 +121,7 @@ struct ContentView: View {
                     )
                         .environmentObject(dashboardVM)
                         .environmentObject(profileVM)
+                        .environmentObject(appState!)  // PHASE 1: Inject AppState for read-only access
                         .environment(\.isScrollDisabled, isHorizontalDragging)
                         .environment(\.isDragging, dragOffset != 0)
                         .offset(x: tabOffset(for: 0))
@@ -127,6 +131,7 @@ struct ContentView: View {
                     GalleryView(selectedTab: $selectedTab, showHeader: false, showNav: false)
                         .environmentObject(galleryVM) // Use real Firebase services!
                         .environmentObject(profileVM)
+                        .environmentObject(appState!)  // PHASE 1: Inject AppState for read-only access
                         .environment(\.isScrollDisabled, isHorizontalDragging)
                         .environment(\.isDragging, dragOffset != 0)
                         .offset(x: tabOffset(for: 1))
@@ -136,6 +141,7 @@ struct ContentView: View {
                     HabitsView(selectedTab: $selectedTab, showHeader: false, showNav: false)
                         .environmentObject(dashboardVM) // Share same instance for real-time data sync
                         .environmentObject(profileVM)
+                        .environmentObject(appState!)  // PHASE 1: Inject AppState for read-only access
                         .environment(\.isScrollDisabled, isHorizontalDragging)
                         .environment(\.isDragging, dragOffset != 0)
                         .offset(x: tabOffset(for: 2))
@@ -370,6 +376,18 @@ struct ContentView: View {
 
         print("🔵 [ContentView] Initializing ViewModels...")
 
+        // PHASE 1: Initialize AppState with injected services
+        let authSvc = container.resolve(AuthenticationServiceProtocol.self)
+        let dbSvc = container.resolve(DatabaseServiceProtocol.self)
+        let syncCoordinator = container.resolve(DataSyncCoordinator.self)
+
+        appState = AppState(
+            authService: authSvc,
+            databaseService: dbSvc,
+            dataSyncCoordinator: syncCoordinator
+        )
+        print("✅ [ContentView] AppState created")
+
         // Create ViewModels using Container (all factory methods are @MainActor)
         onboardingViewModel = container.makeOnboardingViewModel()
         profileViewModel = container.makeProfileViewModel()
@@ -415,6 +433,12 @@ struct ContentView: View {
                 self.isAuthenticated = newAuthState
 
                 if newAuthState {
+                    // PHASE 1: Load data into AppState (single source of truth)
+                    _Concurrency.Task { @MainActor in
+                        await self.appState?.loadUserData()
+                    }
+
+                    // Keep existing ViewModel loads temporarily (Phase 2 will remove)
                     self.profileViewModel?.loadProfiles()
                 }
             }

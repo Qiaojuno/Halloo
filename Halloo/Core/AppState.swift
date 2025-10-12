@@ -1,0 +1,436 @@
+//
+//  AppState.swift
+//  Halloo
+//
+//  Purpose: Single source of truth for all app-wide shared state
+//  Replaces: Duplicated state across ProfileViewModel, TaskViewModel, DashboardViewModel
+//  Pattern: Observable State Container with Service Injection
+//
+//  Created by Claude Code on 2025-10-12
+//
+
+import Foundation
+import SwiftUI
+import Combine
+
+/// Single source of truth for all app-wide state
+///
+/// This class consolidates state that was previously duplicated across multiple ViewModels,
+/// providing a unified data model for profiles, tasks, and user information. All ViewModels
+/// now read from AppState and write mutations back to it, ensuring consistency.
+///
+/// **Key Benefits:**
+/// - Eliminates state synchronization bugs between ViewModels
+/// - Reduces Firebase query duplication (loads data once)
+/// - Simplifies ViewModel code (no more loadProfiles/loadTasks methods)
+/// - Enables centralized error handling and loading indicators
+/// - Integrates with DataSyncCoordinator for multi-device sync
+///
+/// **Usage:**
+/// ```swift
+/// // In ContentView
+/// @StateObject private var appState = AppState(...)
+///
+/// var body: some View {
+///     DashboardView()
+///         .environmentObject(appState)  // Inject once
+/// }
+///
+/// // In any View
+/// @EnvironmentObject var appState: AppState
+///
+/// var body: some View {
+///     List(appState.profiles) { profile in  // Read directly
+///         ProfileRow(profile: profile)
+///     }
+/// }
+///
+/// // In ViewModel
+/// func createProfile() async {
+///     let profile = ElderlyProfile(...)
+///     await appState.addProfile(profile)  // Write via method
+/// }
+/// ```
+@MainActor
+final class AppState: ObservableObject {
+
+    // MARK: - Shared State (Previously Duplicated Across ViewModels)
+
+    /// Current authenticated user
+    ///
+    /// Replaces:
+    /// - ContentView.AuthenticationViewModel.currentUser (dead code)
+    /// - Various ViewModel checks of authService.currentUser
+    @Published var currentUser: AuthUser?
+
+    /// All elderly profiles for the current family caregiver
+    ///
+    /// Replaces:
+    /// - ProfileViewModel.profiles (canonical source)
+    /// - TaskViewModel.availableProfiles (duplicate)
+    /// - DashboardViewModel.profiles (computed from ProfileViewModel)
+    @Published var profiles: [ElderlyProfile] = []
+
+    /// All care tasks/habits across all profiles
+    ///
+    /// Replaces:
+    /// - TaskViewModel.tasks (all tasks)
+    /// - DashboardViewModel.todaysTasks (filtered subset)
+    @Published var tasks: [Task] = []
+
+    /// Gallery history events (photos and SMS responses)
+    ///
+    /// Replaces:
+    /// - GalleryViewModel.events (will be updated in future phase)
+    @Published var galleryEvents: [GalleryHistoryEvent] = []
+
+    /// Global loading indicator
+    ///
+    /// Aggregates loading state from all operations. Shows true if ANY
+    /// data loading operation is in progress (profiles, tasks, gallery).
+    ///
+    /// Replaces:
+    /// - ProfileViewModel.isLoading
+    /// - TaskViewModel.isLoading
+    /// - DashboardViewModel.isLoading
+    /// - GalleryViewModel.isLoading
+    @Published var isLoading: Bool = false
+
+    /// Global error state
+    ///
+    /// Displays app-wide errors in a centralized banner/alert.
+    /// ViewModels can still have form-specific error messages.
+    ///
+    /// Replaces:
+    /// - ProfileViewModel.errorMessage
+    /// - TaskViewModel.errorMessage
+    /// - DashboardViewModel.errorMessage
+    @Published var globalError: AppError?
+
+    // MARK: - Services (Injected Once, Shared Across All Operations)
+
+    private let authService: AuthenticationServiceProtocol
+    private let databaseService: DatabaseServiceProtocol
+    private let dataSyncCoordinator: DataSyncCoordinator
+    private var cancellables = Set<AnyCancellable>()
+
+    // MARK: - Initialization
+
+    /// Creates AppState with injected services
+    ///
+    /// **Important:** Services must be singletons from Container.shared
+    /// to ensure consistent auth state and prevent duplicate listeners.
+    ///
+    /// - Parameters:
+    ///   - authService: Firebase authentication service (singleton)
+    ///   - databaseService: Firestore database service (singleton)
+    ///   - dataSyncCoordinator: Multi-device sync coordinator (singleton)
+    init(
+        authService: AuthenticationServiceProtocol,
+        databaseService: DatabaseServiceProtocol,
+        dataSyncCoordinator: DataSyncCoordinator
+    ) {
+        self.authService = authService
+        self.databaseService = databaseService
+        self.dataSyncCoordinator = dataSyncCoordinator
+
+        // Set initial user if already authenticated
+        self.currentUser = authService.currentUser
+
+        setupSubscriptions()
+    }
+
+    // MARK: - Subscriptions (Listen to DataSyncCoordinator for Multi-Device Updates)
+
+    /// Subscribe to data updates from DataSyncCoordinator
+    ///
+    /// This enables multi-device sync: when another device (or user) updates
+    /// a profile/task, the coordinator broadcasts it and we update our local state.
+    private func setupSubscriptions() {
+        // Profile updates from other devices/users
+        dataSyncCoordinator.profileUpdates
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] updatedProfile in
+                self?.handleProfileUpdate(updatedProfile)
+            }
+            .store(in: &cancellables)
+
+        // Task updates from other devices/users
+        dataSyncCoordinator.taskUpdates
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] updatedTask in
+                self?.handleTaskUpdate(updatedTask)
+            }
+            .store(in: &cancellables)
+
+        // SMS response updates (elderly person replied)
+        dataSyncCoordinator.smsResponses
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] response in
+                self?.handleSMSResponse(response)
+            }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Data Loading (Called Once by ContentView on Auth Success)
+
+    /// Load all user data from Firebase
+    ///
+    /// Called by ContentView when authentication succeeds. Loads profiles, tasks,
+    /// and gallery events in parallel for fast app startup.
+    ///
+    /// **Important:** This replaces separate loadProfiles() and loadTasks() methods
+    /// that were previously called by each ViewModel independently.
+    ///
+    /// - Note: Uses Swift concurrency async let for parallel loading
+    /// - Throws: Re-throws Firebase errors as AppError for display
+    func loadUserData() async {
+        guard let userId = authService.currentUser?.uid else {
+            print("⚠️ [AppState] Cannot load data - no authenticated user")
+            return
+        }
+
+        // Prevent duplicate loads if already loading
+        guard !isLoading else {
+            print("⚠️ [AppState] Already loading data, skipping duplicate request")
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            // Load profiles and tasks in parallel for faster startup
+            async let profilesTask = databaseService.getElderlyProfiles(for: userId)
+            async let tasksTask = databaseService.getTasks(for: userId)
+
+            self.profiles = try await profilesTask
+            self.tasks = try await tasksTask
+
+            print("✅ [AppState] Loaded data: \(profiles.count) profiles, \(tasks.count) tasks")
+
+        } catch {
+            print("❌ [AppState] Failed to load user data: \(error.localizedDescription)")
+            self.globalError = AppError(
+                error: error,
+                context: "Failed to Load Data",
+                severity: .high,
+                timestamp: Date(),
+                userInfo: [:]
+            )
+        }
+    }
+
+    /// Refresh user data (called by pull-to-refresh)
+    ///
+    /// Similar to loadUserData() but explicitly intended for user-initiated refresh.
+    /// Reloads all data even if cache exists.
+    func refreshUserData() async {
+        await loadUserData()
+    }
+
+    // MARK: - Profile Mutations (Called by ProfileViewModel)
+
+    /// Add a newly created profile
+    ///
+    /// **Flow:**
+    /// 1. Append to profiles array (immediate UI update)
+    /// 2. Broadcast via DataSyncCoordinator (notify other devices)
+    ///
+    /// - Parameter profile: The newly created ElderlyProfile
+    /// - Note: Profile must already be saved to Firestore by caller
+    func addProfile(_ profile: ElderlyProfile) {
+        profiles.append(profile)
+        dataSyncCoordinator.broadcastProfileUpdate(profile)
+
+        print("✅ [AppState] Added profile: \(profile.name) (ID: \(profile.id))")
+    }
+
+    /// Update an existing profile
+    ///
+    /// **Flow:**
+    /// 1. Find profile by ID and update in array (immediate UI update)
+    /// 2. Broadcast via DataSyncCoordinator (notify other devices)
+    ///
+    /// - Parameter profile: The updated ElderlyProfile with changes
+    /// - Note: Profile must already be updated in Firestore by caller
+    func updateProfile(_ profile: ElderlyProfile) {
+        if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+            profiles[index] = profile
+            dataSyncCoordinator.broadcastProfileUpdate(profile)
+
+            print("✅ [AppState] Updated profile: \(profile.name) (ID: \(profile.id))")
+        } else {
+            print("⚠️ [AppState] Profile not found for update: \(profile.id)")
+        }
+    }
+
+    /// Delete a profile
+    ///
+    /// **Flow:**
+    /// 1. Remove from profiles array (immediate UI update)
+    /// 2. Broadcast deletion via DataSyncCoordinator (notify other devices)
+    ///
+    /// - Parameter profileId: The ID of the profile to delete
+    /// - Note: Profile must already be deleted from Firestore by caller
+    func deleteProfile(_ profileId: String) {
+        profiles.removeAll { $0.id == profileId }
+
+        // Also remove all tasks associated with this profile
+        tasks.removeAll { $0.profileId == profileId }
+
+        print("✅ [AppState] Deleted profile: \(profileId) and associated tasks")
+    }
+
+    // MARK: - Task Mutations (Called by TaskViewModel)
+
+    /// Add a newly created task
+    ///
+    /// **Flow:**
+    /// 1. Append to tasks array (immediate UI update)
+    /// 2. Broadcast via DataSyncCoordinator (notify other devices)
+    ///
+    /// - Parameter task: The newly created Task
+    /// - Note: Task must already be saved to Firestore by caller
+    func addTask(_ task: Task) {
+        tasks.append(task)
+        dataSyncCoordinator.broadcastTaskUpdate(task)
+
+        print("✅ [AppState] Added task: \(task.title) (ID: \(task.id))")
+    }
+
+    /// Update an existing task
+    ///
+    /// **Flow:**
+    /// 1. Find task by ID and update in array (immediate UI update)
+    /// 2. Broadcast via DataSyncCoordinator (notify other devices)
+    ///
+    /// - Parameter task: The updated Task with changes
+    /// - Note: Task must already be updated in Firestore by caller
+    func updateTask(_ task: Task) {
+        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+            tasks[index] = task
+            dataSyncCoordinator.broadcastTaskUpdate(task)
+
+            print("✅ [AppState] Updated task: \(task.title) (ID: \(task.id))")
+        } else {
+            print("⚠️ [AppState] Task not found for update: \(task.id)")
+        }
+    }
+
+    /// Delete a task
+    ///
+    /// **Flow:**
+    /// 1. Remove from tasks array (immediate UI update)
+    /// 2. Broadcast deletion via DataSyncCoordinator (notify other devices)
+    ///
+    /// - Parameter taskId: The ID of the task to delete
+    /// - Note: Task must already be deleted from Firestore by caller
+    func deleteTask(_ taskId: String) {
+        tasks.removeAll { $0.id == taskId }
+
+        print("✅ [AppState] Deleted task: \(taskId)")
+    }
+
+    // MARK: - Handlers (Updates from DataSyncCoordinator - Other Devices)
+
+    /// Handle profile update from another device/user
+    ///
+    /// Called when DataSyncCoordinator receives a profile update broadcast.
+    /// This keeps multi-device state synchronized.
+    private func handleProfileUpdate(_ profile: ElderlyProfile) {
+        if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+            profiles[index] = profile
+            print("🔄 [AppState] Synced profile update from remote: \(profile.name)")
+        } else {
+            profiles.append(profile)
+            print("🔄 [AppState] Synced new profile from remote: \(profile.name)")
+        }
+    }
+
+    /// Handle task update from another device/user
+    private func handleTaskUpdate(_ task: Task) {
+        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+            tasks[index] = task
+            print("🔄 [AppState] Synced task update from remote: \(task.title)")
+        } else {
+            tasks.append(task)
+            print("🔄 [AppState] Synced new task from remote: \(task.title)")
+        }
+    }
+
+    /// Handle SMS response from elderly user
+    ///
+    /// When an elderly person replies to a task reminder, update the associated
+    /// task's status to reflect completion.
+    private func handleSMSResponse(_ response: SMSResponse) {
+        // Find associated task and mark as completed
+        if let taskIndex = tasks.firstIndex(where: { $0.id == response.taskId }) {
+            var task = tasks[taskIndex]
+            task.markCompleted()
+            tasks[taskIndex] = task
+
+            print("🔄 [AppState] Task completed via SMS: \(task.title)")
+        }
+    }
+
+    // MARK: - Error Handling
+
+    /// Clear the global error (called when user dismisses error alert)
+    func clearError() {
+        globalError = nil
+    }
+}
+
+// MARK: - Computed Properties (Convenience Accessors)
+
+extension AppState {
+
+    /// Profiles that have been confirmed by elderly user (replied YES to SMS)
+    var confirmedProfiles: [ElderlyProfile] {
+        profiles.filter { $0.status == .confirmed }
+    }
+
+    /// Profiles still pending confirmation (waiting for SMS reply)
+    var pendingProfiles: [ElderlyProfile] {
+        profiles.filter { $0.status == .pendingConfirmation }
+    }
+
+    /// Tasks scheduled for today
+    var todaysTasks: [Task] {
+        tasks.filter { task in
+            Calendar.current.isDateInToday(task.scheduledTime) ||
+            Calendar.current.isDateInToday(task.nextScheduledDate)
+        }
+    }
+
+    /// Overdue tasks (past deadline, not completed)
+    var overdueTasks: [Task] {
+        tasks.filter { $0.isOverdue }
+    }
+
+    /// Active tasks (not archived or expired)
+    var activeTasks: [Task] {
+        tasks.filter { $0.status == .active }
+    }
+
+    /// Get tasks for a specific profile
+    func tasks(for profileId: String) -> [Task] {
+        tasks.filter { $0.profileId == profileId }
+    }
+
+    /// Get profile by ID
+    func profile(with profileId: String) -> ElderlyProfile? {
+        profiles.first { $0.id == profileId }
+    }
+
+    /// Check if user has any profiles
+    var hasProfiles: Bool {
+        !profiles.isEmpty
+    }
+
+    /// Check if user has any confirmed profiles
+    var hasConfirmedProfiles: Bool {
+        !confirmedProfiles.isEmpty
+    }
+}
