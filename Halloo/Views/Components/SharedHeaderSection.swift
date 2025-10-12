@@ -17,6 +17,9 @@ import SwiftUI
 struct SharedHeaderSection: View {
     // MARK: - Environment & State
     @Environment(\.container) private var container
+
+    // PHASE 3: Single source of truth for shared state
+    @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var profileViewModel: ProfileViewModel
     @EnvironmentObject private var viewModel: DashboardViewModel
     @Binding var selectedProfileIndex: Int
@@ -48,9 +51,10 @@ struct SharedHeaderSection: View {
                  * PROFILE CIRCLES: Elderly family member selection
                  * Positioned immediately after logo like original design
                  * Max 2 profiles only, Size: 45x45 (standardized across app)
+                 * PHASE 3: Read from AppState (single source of truth)
                  */
                 HStack(spacing: 8) {
-                    ForEach(Array(profileViewModel.profiles.prefix(2).enumerated()), id: \.element.id) { index, profile in
+                    ForEach(Array(appState.profiles.prefix(2).enumerated()), id: \.element.id) { index, profile in
                         ProfileImageView(
                             profile: profile,
                             profileSlot: index,

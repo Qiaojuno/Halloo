@@ -56,11 +56,13 @@ final class TaskViewModel: ObservableObject {
     
     // MARK: - Task Management Properties
     
+    // PHASE 3: DEPRECATED - Moved to AppState (single source of truth)
+    // Views should read from appState.tasks instead
     /// All tasks created by the current family user for their elderly profiles
-    /// 
-    /// Updated in real-time as tasks are created, completed, or modified by family members.
-    /// Used by families to monitor all active care reminders across multiple elderly profiles.
-    @Published var tasks: [Task] = []
+    ///
+    /// **DEPRECATED:** Use `appState.tasks` instead
+    /// This property is maintained for backward compatibility only
+    @Published var tasks: [Task] = []  // DEPRECATED: Use appState.tasks
     
     /// Loading state for task operations (create, update, delete)
     /// 
@@ -88,8 +90,11 @@ final class TaskViewModel: ObservableObject {
     /// Controls task editing form presentation  
     @Published var showingEditTask = false
     
+    // PHASE 3: DEPRECATED - Use appState.profiles instead
     /// Available elderly profiles for task assignment
-    @Published var availableProfiles: [ElderlyProfile] = []
+    ///
+    /// **DEPRECATED:** Use `appState.confirmedProfiles` instead
+    @Published var availableProfiles: [ElderlyProfile] = []  // DEPRECATED: Use appState.confirmedProfiles
     
     /// Currently selected profile ID for task creation
     @Published var selectedProfileId: String?

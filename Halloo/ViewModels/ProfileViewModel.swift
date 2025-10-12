@@ -56,12 +56,14 @@ final class ProfileViewModel: ObservableObject {
     
     // MARK: - Profile Management Properties
     
+    // PHASE 3: DEPRECATED - Moved to AppState (single source of truth)
+    // Views should read from appState.profiles instead
+    // Keeping temporarily for backward compatibility
     /// All elderly profiles created by the current family user
-    /// 
-    /// Updated in real-time as profiles are created, confirmed, or modified.
-    /// Used by families to monitor the status of all elderly family members
-    /// they want to send reminders to.
-    @Published var profiles: [ElderlyProfile] = []
+    ///
+    /// **DEPRECATED:** Use `appState.profiles` instead
+    /// This property is maintained for backward compatibility only
+    @Published var profiles: [ElderlyProfile] = []  // DEPRECATED: Use appState.profiles
     
     /// Loading state for profile operations (create, update, SMS sending)
     /// 

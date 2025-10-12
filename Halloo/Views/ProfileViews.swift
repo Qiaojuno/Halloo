@@ -8,6 +8,8 @@ import Combine
 struct SimplifiedProfileCreationView: View {
     let onDismiss: () -> Void
 
+    // PHASE 3: Need appState for debug logging
+    @EnvironmentObject var appState: AppState
     @EnvironmentObject var profileViewModel: ProfileViewModel
     @Environment(\.presentationMode) var presentationMode
 
@@ -453,7 +455,8 @@ struct SimplifiedProfileCreationView: View {
             await profileViewModel.createProfileAsync()
 
             print("✅ SimplifiedProfileCreationView: createProfileAsync() returned")
-            print("✅ ProfileViewModel.profiles.count = \(profileViewModel.profiles.count)")
+            // PHASE 3: Read from AppState for debug logging
+            print("✅ AppState.profiles.count = \(appState.profiles.count)")
 
             await MainActor.run {
                 print("✅ SimplifiedProfileCreationView: Dismissing view...")

@@ -21,6 +21,9 @@ struct HabitsView: View {
     @Environment(\.container) private var container
     @Environment(\.isScrollDisabled) private var isScrollDisabled
     @Environment(\.isDragging) private var isDragging
+
+    // PHASE 3: Single source of truth for all shared state
+    @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var viewModel: DashboardViewModel
     @EnvironmentObject private var profileViewModel: ProfileViewModel
 
@@ -156,9 +159,9 @@ struct HabitsView: View {
             }
         }
         .onAppear {
-            // Sync selectedProfileIndex with ViewModel's selectedProfileId when view appears
+            // PHASE 3: Sync selectedProfileIndex with ViewModel's selectedProfileId when view appears
             if let selectedId = viewModel.selectedProfileId,
-               let index = profileViewModel.profiles.firstIndex(where: { $0.id == selectedId }) {
+               let index = appState.profiles.firstIndex(where: { $0.id == selectedId }) {
                 selectedProfileIndex = index
             } else {
                 print("⚠️ [HabitsView] Could not sync selectedProfileIndex - profile selection may be out of sync")
@@ -192,9 +195,9 @@ struct HabitsView: View {
             }
         }
         .onChange(of: viewModel.selectedProfileId) { newProfileId in
-            // Sync selectedProfileIndex when ViewModel auto-selects a profile
+            // PHASE 3: Sync selectedProfileIndex when ViewModel auto-selects a profile
             if let newId = newProfileId,
-               let index = profileViewModel.profiles.firstIndex(where: { $0.id == newId }) {
+               let index = appState.profiles.firstIndex(where: { $0.id == newId }) {
                 selectedProfileIndex = index
             }
         }
@@ -337,11 +340,11 @@ struct HabitsView: View {
     }
     
     // MARK: - Computed Properties
-    
-    /// Selected profile accessor - Use ProfileViewModel as single source of truth
+
+    /// PHASE 3: Selected profile accessor - Use AppState as single source of truth
     private var selectedProfile: ElderlyProfile? {
-        guard selectedProfileIndex < profileViewModel.profiles.count else { return nil }
-        return profileViewModel.profiles[selectedProfileIndex]
+        guard selectedProfileIndex < appState.profiles.count else { return nil }
+        return appState.profiles[selectedProfileIndex]
     }
     
     /// Filtered habits based on selected profile and days
@@ -373,8 +376,8 @@ struct HabitsView: View {
     }
     
     private func getProfileForHabit(_ habit: Task) -> ElderlyProfile? {
-        // Use ProfileViewModel as single source of truth
-        return profileViewModel.profiles.first { $0.id == habit.profileId }
+        // PHASE 3: Use AppState as single source of truth
+        return appState.profiles.first { $0.id == habit.profileId }
     }
     
     private func deleteHabitFromSelectedDays(habit: Task) {
@@ -698,6 +701,8 @@ struct HabitRowViewSimple: View {
     let profile: ElderlyProfile?
     let selectedDays: Set<Int>
 
+    // PHASE 3: Need appState for profile slot calculation
+    @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var profileViewModel: ProfileViewModel
 
     var body: some View {
@@ -785,7 +790,8 @@ struct HabitRowViewSimple: View {
 
     private var profileSlot: Int {
         guard let profile = profile else { return 0 }
-        return profileViewModel.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
+        // PHASE 3: Use AppState for profile slot calculation
+        return appState.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
     }
 
     private func formatTime(_ date: Date) -> String {

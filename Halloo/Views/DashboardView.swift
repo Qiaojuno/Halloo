@@ -36,6 +36,10 @@ struct DashboardView: View {
     /// Scroll lock state from ContentView (disables vertical scroll during horizontal swipe)
     @Environment(\.isScrollDisabled) private var isScrollDisabled
 
+    // PHASE 3: Single source of truth for all shared state
+    /// Centralized app state containing profiles, tasks, and user data
+    @EnvironmentObject private var appState: AppState
+
     /// Reactive data source for dashboard content (profiles, tasks, filtering logic)
     /// Uses @Published properties to automatically update UI when data changes
     @EnvironmentObject private var viewModel: DashboardViewModel
@@ -160,9 +164,10 @@ struct DashboardView: View {
              */
             viewModel.setProfileViewModel(profileViewModel)
 
-            // Sync selectedProfileIndex with ViewModel's selectedProfileId
+            // PHASE 3: Sync selectedProfileIndex with ViewModel's selectedProfileId
+            // Read from appState (single source of truth)
             if let selectedId = viewModel.selectedProfileId,
-               let index = profileViewModel.profiles.firstIndex(where: { $0.id == selectedId }) {
+               let index = appState.profiles.firstIndex(where: { $0.id == selectedId }) {
                 selectedProfileIndex = index
             } else {
                 print("⚠️ [DashboardView] Could not sync profile selection - profiles may not be loaded yet")
@@ -171,9 +176,10 @@ struct DashboardView: View {
             loadData()
         }
         .onChange(of: viewModel.selectedProfileId) { newProfileId in
-            // Sync selectedProfileIndex when ViewModel auto-selects a profile
+            // PHASE 3: Sync selectedProfileIndex when ViewModel auto-selects a profile
+            // Read from appState (single source of truth)
             if let newId = newProfileId,
-               let index = profileViewModel.profiles.firstIndex(where: { $0.id == newId }) {
+               let index = appState.profiles.firstIndex(where: { $0.id == newId }) {
                 selectedProfileIndex = index
             }
         }
@@ -368,10 +374,10 @@ struct DashboardView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 12)
 
-            // Profile circles - NOW USING ProfileViewModel (single source of truth)
+            // PHASE 3: Profile circles - Reading from AppState (single source of truth)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(Array(profileViewModel.profiles.enumerated()), id: \.element.id) { index, profile in
+                    ForEach(Array(appState.profiles.enumerated()), id: \.element.id) { index, profile in
                         Button(action: {
                             selectedProfileIndex = index
                             // Update DashboardViewModel's selected profile to trigger task filtering
@@ -543,8 +549,8 @@ struct DashboardView: View {
                 } else {
                     // Mock data fallback - show basic info without full Task creation
                     HStack(spacing: 16) {
-                        // Connected profile circle - find profile by profileId
-                        let profile = profileViewModel.profiles.first(where: { $0.id == topEvent.profileId })
+                        // PHASE 3: Connected profile circle - find profile by profileId from AppState
+                        let profile = appState.profiles.first(where: { $0.id == topEvent.profileId })
                         
                         AsyncImage(url: URL(string: profile?.photoURL ?? "")) { image in
                             image
@@ -756,14 +762,15 @@ struct DashboardView: View {
      * 
      * PURPOSE: Provides the ElderlyProfile object for the currently selected index
      * Used for preselecting profile in TaskCreationView and safety checks
-     * 
+     *
+     * PHASE 3: Reads from AppState (single source of truth)
      * SAFETY: Returns nil if selectedProfileIndex is out of bounds
      * This prevents crashes when profiles are loading or being modified
      */
     private var selectedProfile: ElderlyProfile? {
-        // Use ProfileViewModel as single source of truth
-        guard selectedProfileIndex < profileViewModel.profiles.count else { return nil }
-        return profileViewModel.profiles[selectedProfileIndex]
+        // PHASE 3: Use AppState as single source of truth
+        guard selectedProfileIndex < appState.profiles.count else { return nil }
+        return appState.profiles[selectedProfileIndex]
     }
     
     /**
@@ -814,6 +821,8 @@ struct TaskRowView: View {
     let showViewButton: Bool
     let onViewButtonTapped: (() -> Void)?
 
+    // PHASE 3: Need appState for profile slot calculation
+    @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var profileViewModel: ProfileViewModel
 
     init(
@@ -828,10 +837,10 @@ struct TaskRowView: View {
         self.onViewButtonTapped = onViewButtonTapped
     }
 
-    // Calculate profile slot index based on position in ProfileViewModel
+    // PHASE 3: Calculate profile slot index based on position in AppState
     private var profileSlot: Int {
         guard let profile = profile else { return 0 }
-        return profileViewModel.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
+        return appState.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
     }
 
     var body: some View {

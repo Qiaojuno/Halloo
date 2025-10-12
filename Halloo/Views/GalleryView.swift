@@ -7,6 +7,9 @@ struct GalleryView: View {
     // MARK: - Environment & Dependencies
     @Environment(\.container) private var container
     @Environment(\.isScrollDisabled) private var isScrollDisabled
+
+    // PHASE 3: Single source of truth for shared state
+    @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel: GalleryViewModel
     @EnvironmentObject private var profileViewModel: ProfileViewModel
 
@@ -206,18 +209,18 @@ struct GalleryView: View {
     }
 
     /// Get profile initial letter for display in gallery
-    /// Looks up profile by ID and returns first letter of name
+    /// PHASE 3: Looks up profile by ID from AppState and returns first letter of name
     private func getProfileInitial(for profileId: String) -> String? {
-        guard let profile = profileViewModel.profiles.first(where: { $0.id == profileId }) else {
+        guard let profile = appState.profiles.first(where: { $0.id == profileId }) else {
             return nil
         }
         return String(profile.name.prefix(1)).uppercased()
     }
 
     /// Get profile slot index for color coding
-    /// Looks up profile by ID and returns its index in the profiles array
+    /// PHASE 3: Looks up profile by ID from AppState and returns its index
     private func getProfileSlot(for profileId: String) -> Int? {
-        guard let index = profileViewModel.profiles.firstIndex(where: { $0.id == profileId }) else {
+        guard let index = appState.profiles.firstIndex(where: { $0.id == profileId }) else {
             return nil
         }
         return index

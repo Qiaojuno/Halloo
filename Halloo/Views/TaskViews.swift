@@ -60,6 +60,9 @@ struct TaskCreationView: View {
 struct CustomHabitCreationFlow: View {
     @ObservedObject var viewModel: TaskViewModel
     let onDismiss: () -> Void
+
+    // PHASE 3: Need appState for profile lookup
+    @EnvironmentObject var appState: AppState
     @EnvironmentObject var profileViewModel: ProfileViewModel
 
     @State private var currentStep = 0 // Start at 0 for profile selection
@@ -81,12 +84,12 @@ struct CustomHabitCreationFlow: View {
                     onNext: {
                         if let profileId = selectedProfileForHabit {
                             print("🔵 [CustomHabitCreationFlow] Profile selected: \(profileId)")
-                            // CRITICAL: Directly assign selectedProfile from ProfileViewModel
-                            if let profile = profileViewModel.profiles.first(where: { $0.id == profileId }) {
+                            // PHASE 3: Look up profile from AppState (single source of truth)
+                            if let profile = appState.profiles.first(where: { $0.id == profileId }) {
                                 print("✅ [CustomHabitCreationFlow] Found profile, assigning to TaskViewModel")
                                 viewModel.selectedProfile = profile
                             } else {
-                                print("❌ [CustomHabitCreationFlow] Profile NOT FOUND in ProfileViewModel!")
+                                print("❌ [CustomHabitCreationFlow] Profile NOT FOUND in AppState!")
                             }
                             currentStep = 1
                         }
@@ -1014,6 +1017,8 @@ struct ProfileSelectionStep: View {
     let onNext: () -> Void
     let onDismiss: () -> Void
 
+    // PHASE 3: Need appState for profile list
+    @EnvironmentObject var appState: AppState
     @EnvironmentObject var viewModel: TaskViewModel
     @EnvironmentObject var profileViewModel: ProfileViewModel
     @Environment(\.container) private var container
@@ -1090,7 +1095,8 @@ struct ProfileSelectionStep: View {
 
     private var profileList: some View {
         VStack(spacing: 16) {
-            ForEach(profileViewModel.profiles) { profile in
+            // PHASE 3: Read profiles from AppState (single source of truth)
+            ForEach(appState.profiles) { profile in
                 ProfileSelectionCard(
                     profile: profile,
                     isSelected: selectedProfile == profile.id,
