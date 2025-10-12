@@ -405,6 +405,11 @@ struct ContentView: View {
         dashboardViewModel = container.makeDashboardViewModel()
         galleryViewModel = container.makeGalleryViewModel()
 
+        // PHASE 4: Inject AppState into DashboardViewModel
+        if let appState = appState, let dashboardVM = dashboardViewModel {
+            dashboardVM.setAppState(appState)
+        }
+
         // Store auth service reference (singleton)
         authService = container.resolve(AuthenticationServiceProtocol.self) as? FirebaseAuthenticationService
 
@@ -504,74 +509,9 @@ enum AuthenticationState {
     case unauthenticated
 }
 
-// MARK: - Authentication ViewModel
-class AuthenticationViewModel: ObservableObject {
-    @Published var authenticationState: AuthenticationState = .loading
-    @Published var currentUser: User?
-    
-    private var authService: AuthenticationServiceProtocol
-    private var errorCoordinator: ErrorCoordinator
-    private var cancellables = Set<AnyCancellable>()
-    
-    init(authService: AuthenticationServiceProtocol, errorCoordinator: ErrorCoordinator) {
-        self.authService = authService
-        self.errorCoordinator = errorCoordinator
-        observeAuthenticationChanges()
-    }
-    
-    func updateServices(authService: AuthenticationServiceProtocol, errorCoordinator: ErrorCoordinator) {
-        self.authService = authService
-        self.errorCoordinator = errorCoordinator
-        observeAuthenticationChanges()
-    }
-    
-    private func observeAuthenticationChanges() {
-        authService.authStatePublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] isAuthenticated in
-                self?.authenticationState = isAuthenticated ? .authenticated : .unauthenticated
-                if isAuthenticated {
-                    _Concurrency.Task { [weak self] in
-                        if self?.authService.currentUser != nil {
-                            await MainActor.run { [weak self] in
-                                // Convert AuthUser to User if needed, or use authUser directly
-                                self?.currentUser = nil // For now, since we don't have a direct conversion
-                            }
-                        }
-                    }
-                } else {
-                    self?.currentUser = nil
-                }
-            }
-            .store(in: &cancellables)
-    }
-    
-    func checkAuthenticationState() async {
-        await MainActor.run {
-            let isAuthenticated = authService.isAuthenticated
-            self.authenticationState = isAuthenticated ? .authenticated : .unauthenticated
-            if isAuthenticated {
-                // For now, we'll use the currentUser property directly
-                // since getCurrentUser() isn't in the protocol
-                self.currentUser = nil // Placeholder - would need proper User conversion
-            } else {
-                self.currentUser = nil
-            }
-        }
-    }
-    
-    func signOut() async {
-        do {
-            try await authService.signOut()
-            await MainActor.run {
-                self.authenticationState = .unauthenticated
-                self.currentUser = nil
-            }
-        } catch {
-            errorCoordinator.handle(error, context: "User sign out")
-        }
-    }
-}
+// PHASE 4: REMOVED AuthenticationViewModel (dead code - never instantiated)
+// Authentication is now handled by AppState.currentUser and isAuthenticated @State
+// ContentView subscribes to authService.authStatePublisher directly
 
 // MARK: - Loading View
 struct LoadingView: View {

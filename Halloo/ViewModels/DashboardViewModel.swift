@@ -225,7 +225,9 @@ final class DashboardViewModel: ObservableObject {
 
     /// ProfileViewModel reference for accessing profiles (single source of truth)
     /// Dashboard reads profiles but does not manage them
-    private weak var profileViewModel: ProfileViewModel?
+    // PHASE 4: Migrating to AppState
+    private weak var profileViewModel: ProfileViewModel?  // TODO Phase 5: Remove completely
+    private weak var appState: AppState?
 
     /// Computed property to access profiles from ProfileViewModel
     private var profiles: [ElderlyProfile] {
@@ -401,20 +403,32 @@ final class DashboardViewModel: ObservableObject {
         loadDashboardData()
     }
 
-    /// Set ProfileViewModel reference after initialization (for dependency injection)
-    func setProfileViewModel(_ profileViewModel: ProfileViewModel) {
-        self.profileViewModel = profileViewModel
+    /// PHASE 4: Set AppState reference after initialization (preferred method)
+    func setAppState(_ appState: AppState) {
+        self.appState = appState
 
         // Auto-select first profile if available immediately
-        updateProfileSelection(from: profileViewModel.profiles)
+        updateProfileSelection(from: appState.profiles)
 
-        // Subscribe to profile changes (for async loading and updates)
-        profileViewModel.$profiles
+        // Subscribe to profile changes from AppState (single source of truth)
+        appState.$profiles
             .receive(on: DispatchQueue.main)
             .sink { [weak self] profiles in
                 self?.updateProfileSelection(from: profiles)
             }
             .store(in: &cancellables)
+    }
+
+    /// DEPRECATED: Set ProfileViewModel reference (use setAppState instead)
+    /// Kept for backward compatibility during Phase 4 transition
+    func setProfileViewModel(_ profileViewModel: ProfileViewModel) {
+        self.profileViewModel = profileViewModel
+        print("⚠️ [DashboardViewModel] setProfileViewModel() deprecated - use setAppState() instead")
+
+        // If AppState not set yet, auto-select from ProfileViewModel
+        if appState == nil {
+            updateProfileSelection(from: profileViewModel.profiles)
+        }
     }
 
     /// Update profile selection and pending confirmations when profiles change

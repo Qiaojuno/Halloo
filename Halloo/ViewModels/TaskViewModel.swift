@@ -56,13 +56,12 @@ final class TaskViewModel: ObservableObject {
     
     // MARK: - Task Management Properties
     
-    // PHASE 3: DEPRECATED - Moved to AppState (single source of truth)
-    // Views should read from appState.tasks instead
-    /// All tasks created by the current family user for their elderly profiles
-    ///
-    /// **DEPRECATED:** Use `appState.tasks` instead
-    /// This property is maintained for backward compatibility only
-    @Published var tasks: [Task] = []  // DEPRECATED: Use appState.tasks
+    // PHASE 4: MIGRATING to AppState.tasks
+    // Computed property that reads from AppState (single source of truth)
+    // TODO Phase 5: Update all views to read directly from @EnvironmentObject AppState
+    var tasks: [Task] {
+        appState?.tasks ?? []
+    }
     
     /// Loading state for task operations (create, update, delete)
     /// 
@@ -90,11 +89,12 @@ final class TaskViewModel: ObservableObject {
     /// Controls task editing form presentation  
     @Published var showingEditTask = false
     
-    // PHASE 3: DEPRECATED - Use appState.profiles instead
-    /// Available elderly profiles for task assignment
-    ///
-    /// **DEPRECATED:** Use `appState.confirmedProfiles` instead
-    @Published var availableProfiles: [ElderlyProfile] = []  // DEPRECATED: Use appState.confirmedProfiles
+    // PHASE 4: MIGRATING to AppState.confirmedProfiles
+    // Computed property that reads from AppState (single source of truth)
+    // TODO Phase 5: Update all views to read directly from @EnvironmentObject AppState
+    var availableProfiles: [ElderlyProfile] {
+        appState?.confirmedProfiles ?? []
+    }
     
     /// Currently selected profile ID for task creation
     @Published var selectedProfileId: String?
@@ -504,10 +504,8 @@ final class TaskViewModel: ObservableObject {
     private func handleProfileUpdate(_ profile: ElderlyProfile) {
         print("📩 [TaskViewModel] Profile update received: \(profile.id)")
 
-        // Update availableProfiles list
-        if let index = availableProfiles.firstIndex(where: { $0.id == profile.id }) {
-            availableProfiles[index] = profile
-        }
+        // PHASE 4: availableProfiles now reads from AppState.confirmedProfiles
+        // No need to manually update local array - AppState handles it
 
         // If currently selected profile was updated, refresh it
         if selectedProfile?.id == profile.id {
@@ -522,38 +520,12 @@ final class TaskViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Data Loading
+    // PHASE 4: loadTasks() is now a no-op - AppState.loadUserData() handles all data loading
+    // ContentView calls appState.loadUserData() on authentication
+    // Kept as empty method for backward compatibility during transition
     func loadTasks() {
-        _Concurrency.Task {
-            await loadTasksAsync()
-        }
-    }
-    
-    private func loadTasksAsync() async {
-        isLoading = true
-        errorMessage = nil
-        
-        do {
-            guard let userId = authService.currentUser?.uid else {
-                throw TaskError.userNotAuthenticated
-            }
-            
-            let loadedTasks = try await databaseService.getTasks(for: userId)
-            
-            await MainActor.run {
-                self.tasks = loadedTasks.sorted { $0.createdAt > $1.createdAt }
-            }
-            
-        } catch {
-            await MainActor.run {
-                self.errorMessage = error.localizedDescription
-                self.errorCoordinator.handle(error, context: "Loading tasks")
-            }
-        }
-        
-        await MainActor.run {
-            self.isLoading = false
-        }
+        print("⚠️ [TaskViewModel] loadTasks() called but is deprecated - AppState handles loading")
+        // No-op: AppState.loadUserData() is called by ContentView instead
     }
     
     // MARK: - Profile Selection
@@ -710,17 +682,10 @@ final class TaskViewModel: ObservableObject {
             await MainActor.run {
                 print("🎉 Updating local state with \(createdTasks.count) new task(s)")
 
-                // PHASE 2: Update AppState instead of local array
-                if let appState = self.appState {
-                    for task in createdTasks {
-                        appState.addTask(task)
-                        print("✅ [TaskViewModel] Task added to AppState: \(task.title)")
-                    }
-                } else {
-                    // FALLBACK: Keep old behavior if AppState not injected
-                    for task in createdTasks {
-                        self.tasks.insert(task, at: 0)
-                    }
+                // PHASE 4: AppState is always available - update it directly
+                for task in createdTasks {
+                    appState?.addTask(task)
+                    print("✅ [TaskViewModel] Task added to AppState: \(task.title)")
                 }
 
                 self.resetForm()
@@ -802,16 +767,9 @@ final class TaskViewModel: ObservableObject {
             }
             
             await MainActor.run {
-                // PHASE 2: Update AppState instead of local array
-                if let appState = self.appState {
-                    appState.updateTask(updatedTask)
-                    print("✅ [TaskViewModel] Task updated in AppState: \(updatedTask.title)")
-                } else {
-                    // FALLBACK: Keep old behavior if AppState not injected
-                    if let index = self.tasks.firstIndex(where: { $0.id == task.id }) {
-                        self.tasks[index] = updatedTask
-                    }
-                }
+                // PHASE 4: AppState is always available - update it directly
+                appState?.updateTask(updatedTask)
+                print("✅ [TaskViewModel] Task updated in AppState: \(updatedTask.title)")
 
                 self.resetForm()
                 self.showingEditTask = false
@@ -846,14 +804,9 @@ final class TaskViewModel: ObservableObject {
             try await databaseService.deleteTask(task.id, userId: task.userId, profileId: task.profileId)
 
             await MainActor.run {
-                // PHASE 2: Delete from AppState instead of local array
-                if let appState = self.appState {
-                    appState.deleteTask(task.id)
-                    print("✅ [TaskViewModel] Task deleted from AppState: \(task.title)")
-                } else {
-                    // FALLBACK: Keep old behavior if AppState not injected
-                    self.tasks.removeAll { $0.id == task.id }
-                }
+                // PHASE 4: AppState is always available - delete via AppState
+                appState?.deleteTask(task.id)
+                print("✅ [TaskViewModel] Task deleted from AppState: \(task.title)")
             }
             
         } catch {
@@ -908,11 +861,11 @@ final class TaskViewModel: ObservableObject {
             } else {
                 try await cancelTaskNotifications(for: task)
             }
-            
+
             await MainActor.run {
-                if let index = self.tasks.firstIndex(where: { $0.id == task.id }) {
-                    self.tasks[index] = updatedTask
-                }
+                // PHASE 4: AppState is always available - update via AppState
+                appState?.updateTask(updatedTask)
+                print("✅ [TaskViewModel] Task status toggled in AppState: \(updatedTask.title)")
             }
             
         } catch {
@@ -1015,11 +968,11 @@ final class TaskViewModel: ObservableObject {
             )
             
             try await databaseService.updateTask(updatedTask)
-            
+
             await MainActor.run {
-                if let index = self.tasks.firstIndex(where: { $0.id == task.id }) {
-                    self.tasks[index] = updatedTask
-                }
+                // PHASE 4: AppState is always available - update via AppState
+                appState?.updateTask(updatedTask)
+                print("✅ [TaskViewModel] Task completion updated in AppState: \(updatedTask.title)")
             }
             
         } catch {
@@ -1032,31 +985,17 @@ final class TaskViewModel: ObservableObject {
     
     // MARK: - Data Sync Handlers
     private func handleTaskUpdate(_ updatedTask: Task) {
-        if let index = tasks.firstIndex(where: { $0.id == updatedTask.id }) {
-            tasks[index] = updatedTask
-        } else {
-            tasks.insert(updatedTask, at: 0)
-        }
+        // PHASE 4: AppState handles task updates via DataSyncCoordinator
+        // This handler is redundant now - AppState.handleTaskUpdate() already updates the array
+        // Keeping for backward compatibility but making it a no-op
+        print("📩 [TaskViewModel] Task update received: \(updatedTask.title) - AppState handles update")
     }
     
     private func handleTaskResponse(_ response: SMSResponse) {
-        guard let taskId = response.taskId,
-              let taskIndex = tasks.firstIndex(where: { $0.id == taskId }) else {
-            return
-        }
-        
-        if response.isCompleted {
-            // Update task completion
-            var updatedTask = tasks[taskIndex]
-            updatedTask.completionCount += 1
-            updatedTask.lastCompletedAt = response.receivedAt
-            tasks[taskIndex] = updatedTask
-            
-            // Update in database
-            _Concurrency.Task {
-                try? await databaseService.updateTask(updatedTask)
-            }
-        }
+        // PHASE 4: AppState handles SMS responses via DataSyncCoordinator
+        // AppState.handleSMSResponse() already updates the task
+        // Keeping for backward compatibility but making it a no-op
+        print("📩 [TaskViewModel] SMS response received for task \(response.taskId ?? "unknown") - AppState handles update")
     }
     
     // MARK: - Validation Methods

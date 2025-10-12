@@ -56,14 +56,12 @@ final class ProfileViewModel: ObservableObject {
     
     // MARK: - Profile Management Properties
     
-    // PHASE 3: DEPRECATED - Moved to AppState (single source of truth)
-    // Views should read from appState.profiles instead
-    // Keeping temporarily for backward compatibility
-    /// All elderly profiles created by the current family user
-    ///
-    /// **DEPRECATED:** Use `appState.profiles` instead
-    /// This property is maintained for backward compatibility only
-    @Published var profiles: [ElderlyProfile] = []  // DEPRECATED: Use appState.profiles
+    // PHASE 4: MIGRATING to AppState.profiles
+    // Computed property that reads from AppState (single source of truth)
+    // TODO Phase 5: Update all views to read directly from @EnvironmentObject AppState
+    var profiles: [ElderlyProfile] {
+        appState?.profiles ?? []
+    }
     
     /// Loading state for profile operations (create, update, SMS sending)
     /// 
@@ -499,98 +497,12 @@ final class ProfileViewModel: ObservableObject {
         print("✅ [ProfileViewModel] DataSync subscriptions established - total cancellables: \(cancellables.count)")
     }
     
-    // MARK: - Data Loading
+    // PHASE 4: loadProfiles() is now a no-op - AppState.loadUserData() handles all data loading
+    // ContentView calls appState.loadUserData() on authentication
+    // Kept as empty method for backward compatibility during transition
     func loadProfiles() {
-        let callId = DiagnosticLogger.generateCallId()
-        DiagnosticLogger.info(.vmLoad, "loadProfiles() called", context: [
-            "callId": callId,
-            "thread": DiagnosticLogger.threadInfo()
-        ])
-
-        _Concurrency.Task {
-            await loadProfilesAsync(callId: callId)
-        }
-    }
-
-    private func loadProfilesAsync(callId: String = "UNKNOWN") async {
-        DiagnosticLogger.enter(.vmLoad, "loadProfilesAsync", context: [
-            "callId": callId,
-            "thread": DiagnosticLogger.threadInfo()
-        ])
-
-        isLoading = true
-        errorMessage = nil
-
-        do {
-            DiagnosticLogger.info(.vmLoad, "Checking authentication", context: [
-                "callId": callId,
-                "isAuthenticated": authService.isAuthenticated,
-                "userId": authService.currentUser?.uid ?? "nil"
-            ])
-
-            guard let userId = authService.currentUser?.uid else {
-                DiagnosticLogger.warning(.vmLoad, "⚠️ No user authenticated, returning early", context: [
-                    "callId": callId
-                ])
-                throw ProfileError.userNotAuthenticated
-            }
-
-            DiagnosticLogger.info(.vmLoad, "Fetching profiles from database", context: [
-                "callId": callId,
-                "userId": userId
-            ])
-
-            let tracker = DiagnosticLogger.track(.database, "Fetch profiles", context: [
-                "callId": callId,
-                "userId": userId
-            ])
-
-            let loadedProfiles = try await databaseService.getElderlyProfiles(for: userId)
-
-            tracker.end(success: true, additionalContext: ["count": loadedProfiles.count])
-
-            DiagnosticLogger.success(.vmLoad, "Profiles loaded from database", context: [
-                "callId": callId,
-                "count": loadedProfiles.count
-            ])
-
-            await MainActor.run {
-                DiagnosticLogger.info(.uiUpdate, "Updating profiles array", context: [
-                    "callId": callId,
-                    "oldCount": self.profiles.count,
-                    "newCount": loadedProfiles.count,
-                    "thread": DiagnosticLogger.threadInfo()
-                ])
-
-                self.profiles = loadedProfiles.sorted { $0.createdAt > $1.createdAt }
-                self.updateConfirmationStatuses()
-
-                DiagnosticLogger.success(.uiUpdate, "UI updated with profiles", context: [
-                    "callId": callId,
-                    "profileCount": self.profiles.count
-                ])
-            }
-
-        } catch {
-            DiagnosticLogger.error(.vmLoad, "Failed to load profiles", context: [
-                "callId": callId,
-                "error": error.localizedDescription
-            ], error: error)
-
-            await MainActor.run {
-                self.errorMessage = error.localizedDescription
-                self.errorCoordinator.handle(error, context: "Loading profiles")
-            }
-        }
-
-        await MainActor.run {
-            self.isLoading = false
-        }
-
-        DiagnosticLogger.exit(.vmLoad, "loadProfilesAsync", context: [
-            "callId": callId,
-            "finalProfileCount": profiles.count
-        ])
+        print("⚠️ [ProfileViewModel] loadProfiles() called but is deprecated - AppState handles loading")
+        // No-op: AppState.loadUserData() is called by ContentView instead
     }
     
     // MARK: - Profile Creation & SMS Confirmation
@@ -928,16 +840,9 @@ final class ProfileViewModel: ObservableObject {
             }
             
             await MainActor.run {
-                // PHASE 2: Update AppState instead of local array
-                if let appState = self.appState {
-                    appState.updateProfile(updatedProfile)
-                    print("✅ [ProfileViewModel] Profile updated in AppState: \(updatedProfile.name)")
-                } else {
-                    // FALLBACK: Keep old behavior if AppState not injected
-                    if let index = self.profiles.firstIndex(where: { $0.id == profile.id }) {
-                        self.profiles[index] = updatedProfile
-                    }
-                }
+                // PHASE 4: AppState is always available - update directly
+                appState?.updateProfile(updatedProfile)
+                print("✅ [ProfileViewModel] Profile updated in AppState: \(updatedProfile.name)")
 
                 self.resetForm()
                 self.showingEditProfile = false
@@ -968,14 +873,9 @@ final class ProfileViewModel: ObservableObject {
         await MainActor.run {
             print("🎬 [ProfileViewModel] Optimistic delete - removing '\(profile.name)' from UI immediately")
 
-            // PHASE 2: Delete from AppState instead of local array
-            if let appState = self.appState {
-                appState.deleteProfile(profile.id)
-                print("✅ [ProfileViewModel] Profile deleted from AppState: \(profile.name)")
-            } else {
-                // FALLBACK: Keep old behavior if AppState not injected
-                self.profiles.removeAll { $0.id == profile.id }
-            }
+            // PHASE 4: AppState is always available - delete directly
+            appState?.deleteProfile(profile.id)
+            print("✅ [ProfileViewModel] Profile deleted from AppState: \(profile.name)")
 
             self.confirmationStatus.removeValue(forKey: profile.id)
             self.confirmationMessages.removeValue(forKey: profile.id)
@@ -992,15 +892,9 @@ final class ProfileViewModel: ObservableObject {
             await MainActor.run {
                 print("❌ [ProfileViewModel] Deletion failed - restoring '\(profile.name)' to UI")
 
-                // PHASE 2: Restore to AppState instead of local array
-                if let appState = self.appState {
-                    appState.addProfile(profile)  // Re-add the profile
-                    print("✅ [ProfileViewModel] Profile restored to AppState after delete failure")
-                } else {
-                    // FALLBACK: Restore to local array
-                    self.profiles.append(profile)
-                    self.profiles.sort { $0.createdAt > $1.createdAt } // Maintain sort order
-                }
+                // PHASE 4: AppState is always available - restore directly
+                appState?.addProfile(profile)  // Re-add the profile
+                print("✅ [ProfileViewModel] Profile restored to AppState after delete failure")
 
                 self.errorMessage = "Failed to delete profile: \(error.localizedDescription)"
                 self.errorCoordinator.handle(error, context: "Deleting profile")
@@ -1039,9 +933,9 @@ final class ProfileViewModel: ObservableObject {
             dataSyncCoordinator.broadcastProfileUpdate(updatedProfile)
             
             await MainActor.run {
-                if let index = self.profiles.firstIndex(where: { $0.id == profile.id }) {
-                    self.profiles[index] = updatedProfile
-                }
+                // PHASE 4: AppState is always available - update directly
+                appState?.updateProfile(updatedProfile)
+                print("✅ [ProfileViewModel] Profile status toggled in AppState: \(updatedProfile.name)")
             }
             
         } catch {
@@ -1154,11 +1048,10 @@ final class ProfileViewModel: ObservableObject {
     about which profiles are ready for task creation.
     */
     private func handleProfileUpdate(_ updatedProfile: ElderlyProfile) {
-        if let index = profiles.firstIndex(where: { $0.id == updatedProfile.id }) {
-            profiles[index] = updatedProfile
-        } else {
-            profiles.insert(updatedProfile, at: 0)
-        }
+        // PHASE 4: AppState handles profile updates via DataSyncCoordinator
+        // This handler is redundant now - AppState.handleProfileUpdate() already updates the array
+        // Keeping for backward compatibility but making it a no-op except for confirmation status
+        print("📩 [ProfileViewModel] Profile update received: \(updatedProfile.name) - AppState handles update")
         updateConfirmationStatuses()
     }
     
@@ -1210,11 +1103,13 @@ final class ProfileViewModel: ObservableObject {
                         try await self.databaseService.createElderlyProfile(confirmedProfile)
                         
                         await MainActor.run {
-                            // Add to profiles array for the first time
-                            self.profiles.insert(confirmedProfile, at: 0)
+                            // PHASE 4: Add to AppState (single source of truth)
+                            appState?.addProfile(confirmedProfile)
+                            print("✅ [ProfileViewModel] Confirmed profile added to AppState: \(confirmedProfile.name)")
+
                             self.confirmationStatus[profileId] = .confirmed
                             self.confirmationMessages[profileId] = "Confirmed! Ready to receive reminders."
-                            
+
                             // Create gallery history event for profile creation
                             self.createGalleryEventForProfile(confirmedProfile, profileSlot: 0)
                             
@@ -1241,7 +1136,10 @@ final class ProfileViewModel: ObservableObject {
                     var updatedProfile = profiles[index]
                     updatedProfile.status = .confirmed
                     updatedProfile.confirmedAt = response.receivedAt
-                    profiles[index] = updatedProfile
+
+                    // PHASE 4: Update via AppState (single source of truth)
+                    appState?.updateProfile(updatedProfile)
+                    print("✅ [ProfileViewModel] Profile confirmed and updated in AppState: \(updatedProfile.name)")
 
                     confirmationStatus[updatedProfile.id] = .confirmed
                     confirmationMessages[updatedProfile.id] = "Confirmed! Ready to receive reminders."
@@ -1322,8 +1220,9 @@ final class ProfileViewModel: ObservableObject {
         // Mark as opted out
         updatedProfile.optOutOfSMS(method: "STOP_KEYWORD")
 
-        // Update local state immediately (optimistic UI)
-        profiles[index] = updatedProfile
+        // PHASE 4: Update via AppState (optimistic UI)
+        appState?.updateProfile(updatedProfile)
+        print("✅ [ProfileViewModel] Profile opted out via STOP in AppState: \(updatedProfile.name)")
         confirmationStatus[profileId] = .declined
         confirmationMessages[profileId] = "⚠️ Opted out via STOP keyword. No SMS will be sent."
 
