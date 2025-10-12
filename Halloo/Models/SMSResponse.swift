@@ -15,9 +15,58 @@ struct SMSResponse: Codable, Identifiable, Hashable {
     let isPositiveConfirmation: Bool
     let responseScore: Double?
     let processingNotes: String?
-    
-    // Note: Custom init removed to allow Codable synthesis
-    // Use static factory methods below instead
+
+    // Custom decoder to handle old documents missing new fields
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        id = try container.decode(String.self, forKey: .id)
+        taskId = try container.decodeIfPresent(String.self, forKey: .taskId)
+        profileId = try container.decodeIfPresent(String.self, forKey: .profileId)
+        userId = try container.decode(String.self, forKey: .userId)
+        textResponse = try container.decodeIfPresent(String.self, forKey: .textResponse)
+        photoData = try container.decodeIfPresent(Data.self, forKey: .photoData)
+        isCompleted = try container.decodeIfPresent(Bool.self, forKey: .isCompleted) ?? false
+        receivedAt = try container.decode(Date.self, forKey: .receivedAt)
+        responseType = try container.decode(ResponseType.self, forKey: .responseType)
+
+        // New fields with defaults for backwards compatibility
+        isConfirmationResponse = try container.decodeIfPresent(Bool.self, forKey: .isConfirmationResponse) ?? false
+        isPositiveConfirmation = try container.decodeIfPresent(Bool.self, forKey: .isPositiveConfirmation) ?? false
+        responseScore = try container.decodeIfPresent(Double.self, forKey: .responseScore)
+        processingNotes = try container.decodeIfPresent(String.self, forKey: .processingNotes)
+    }
+
+    // Standard initializer for creating new instances
+    init(
+        id: String,
+        taskId: String?,
+        profileId: String?,
+        userId: String,
+        textResponse: String?,
+        photoData: Data?,
+        isCompleted: Bool,
+        receivedAt: Date,
+        responseType: ResponseType,
+        isConfirmationResponse: Bool,
+        isPositiveConfirmation: Bool,
+        responseScore: Double?,
+        processingNotes: String?
+    ) {
+        self.id = id
+        self.taskId = taskId
+        self.profileId = profileId
+        self.userId = userId
+        self.textResponse = textResponse
+        self.photoData = photoData
+        self.isCompleted = isCompleted
+        self.receivedAt = receivedAt
+        self.responseType = responseType
+        self.isConfirmationResponse = isConfirmationResponse
+        self.isPositiveConfirmation = isPositiveConfirmation
+        self.responseScore = responseScore
+        self.processingNotes = processingNotes
+    }
 }
 
 // MARK: - SMS Response Extensions

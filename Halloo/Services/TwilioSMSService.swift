@@ -27,11 +27,14 @@ class TwilioSMSService: SMSServiceProtocol {
     init() {
         print("✅ TwilioSMSService initialized (using Cloud Functions backend)")
 
-        #if DEBUG
-        // Use local emulator for testing
-        functions.useEmulator(withHost: "127.0.0.1", port: 5001)
-        print("🔧 Using Firebase Functions Emulator at 127.0.0.1:5001")
-        #endif
+        // NOTE: Emulator disabled - using production Cloud Functions
+        // To re-enable emulator, uncomment the code below
+        // #if DEBUG
+        // functions.useEmulator(withHost: "127.0.0.1", port: 5001)
+        // print("🔧 Using Firebase Functions Emulator at 127.0.0.1:5001")
+        // #endif
+
+        print("🌐 Using production Cloud Functions at us-central1")
     }
 
     // MARK: - SMS Delivery

@@ -11,6 +11,9 @@ final class Container: ObservableObject {
     private var singletons: [String: Any] = [:]  // Singleton instances
     private let lock = NSLock()
 
+    // Store Combine subscriptions (e.g., SMS listener)
+    var cancellables = Set<AnyCancellable>()
+
     private init() {
         setupServices()
     }
@@ -81,9 +84,9 @@ final class Container: ObservableObject {
             NotificationCoordinator()
         }
 
-        register(DataSyncCoordinator.self) {
-            // Lazy creation - will be created when first needed
-            DataSyncCoordinator(
+        registerSingleton(DataSyncCoordinator.self) {
+            print("🔴 [Container] Creating DataSyncCoordinator SINGLETON")
+            return DataSyncCoordinator(
                 databaseService: useFirebaseServices ? FirebaseDatabaseService() : MockDatabaseService(),
                 notificationCoordinator: NotificationCoordinator(),
                 errorCoordinator: ErrorCoordinator()

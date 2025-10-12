@@ -44,6 +44,11 @@ struct ContentView: View {
     @State private var isHorizontalDragging = false  // Track if user is actively horizontal swiping
     @State private var horizontalGestureMomentum = false  // Prioritize horizontal after recent tab switch
 
+    // Create action state (lifted from DashboardView for proper presentation context)
+    @State private var showingCreateActionSheet = false
+    @State private var showingDirectOnboarding = false
+    @State private var showingTaskCreation = false
+
     @State private var authCancellables = Set<AnyCancellable>()
 
     // MARK: - Initialization
@@ -103,7 +108,14 @@ struct ContentView: View {
 
                 ZStack {
                     // Dashboard Tab - Home screen (content only) - LEFTMOST
-                    DashboardView(selectedTab: $selectedTab, showHeader: false, showNav: false)
+                    DashboardView(
+                        selectedTab: $selectedTab,
+                        showHeader: false,
+                        showNav: false,
+                        showingCreateActionSheet: $showingCreateActionSheet,
+                        showingDirectOnboarding: $showingDirectOnboarding,
+                        showingTaskCreation: $showingTaskCreation
+                    )
                         .environmentObject(dashboardVM)
                         .environmentObject(profileVM)
                         .environment(\.isScrollDisabled, isHorizontalDragging)
@@ -111,18 +123,18 @@ struct ContentView: View {
                         .offset(x: tabOffset(for: 0))
                         .zIndex(selectedTab == 0 ? 1 : 0)
 
-                    // Habits Tab - Habit management screen (content only) - MIDDLE
-                    HabitsView(selectedTab: $selectedTab, showHeader: false, showNav: false)
-                        .environmentObject(dashboardVM) // Share same instance for real-time data sync
+                    // Gallery Tab - Archive of completed habits with photos (content only) - MIDDLE
+                    GalleryView(selectedTab: $selectedTab, showHeader: false, showNav: false)
+                        .environmentObject(galleryVM) // Use real Firebase services!
                         .environmentObject(profileVM)
                         .environment(\.isScrollDisabled, isHorizontalDragging)
                         .environment(\.isDragging, dragOffset != 0)
                         .offset(x: tabOffset(for: 1))
                         .zIndex(selectedTab == 1 ? 1 : 0)
 
-                    // Gallery Tab - Archive of completed habits with photos (content only) - RIGHTMOST
-                    GalleryView(selectedTab: $selectedTab, showHeader: false, showNav: false)
-                        .environmentObject(galleryVM) // Use real Firebase services!
+                    // Habits Tab - Habit management screen (content only) - RIGHTMOST
+                    HabitsView(selectedTab: $selectedTab, showHeader: false, showNav: false)
+                        .environmentObject(dashboardVM) // Share same instance for real-time data sync
                         .environmentObject(profileVM)
                         .environment(\.isScrollDisabled, isHorizontalDragging)
                         .environment(\.isDragging, dragOffset != 0)
@@ -278,6 +290,38 @@ struct ContentView: View {
                 LoadingView()
             }
         }
+        .confirmationDialog("What would you like to create?", isPresented: $showingCreateActionSheet) {
+            Button("Add Family Member") {
+                if let profileVM = profileViewModel {
+                    profileVM.startProfileOnboarding()
+                    showingDirectOnboarding = true
+                }
+            }
+            Button("Create Habit") {
+                showingTaskCreation = true
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .fullScreenCover(isPresented: $showingDirectOnboarding) {
+            if let profileVM = profileViewModel {
+                SimplifiedProfileCreationView(onDismiss: {
+                    showingDirectOnboarding = false
+                })
+                .environmentObject(profileVM)
+            }
+        }
+        .fullScreenCover(isPresented: $showingTaskCreation) {
+            if let dashboardVM = dashboardViewModel, let profileVM = profileViewModel {
+                TaskCreationView(
+                    preselectedProfileId: dashboardVM.selectedProfileId,
+                    dismissAction: {
+                        showingTaskCreation = false
+                    }
+                )
+                .environmentObject(container.makeTaskViewModel())
+                .environmentObject(profileVM)
+            }
+        }
     }
 
     // MARK: - Create Button (for Dashboard only)
@@ -287,7 +331,7 @@ struct ContentView: View {
             let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
             impactFeedback.impactOccurred()
 
-            // Create habit action - would show creation flow
+            showingCreateActionSheet = true
         }) {
             ZStack {
                 Circle()
@@ -318,9 +362,19 @@ struct ContentView: View {
     // MARK: - Initialization Methods
     @MainActor
     private func initializeViewModels() {
+        // Only initialize once - prevent recreating ViewModels on every render
+        guard profileViewModel == nil else {
+            print("⚠️ [ContentView] ViewModels already initialized - skipping")
+            return
+        }
+
+        print("🔵 [ContentView] Initializing ViewModels...")
+
         // Create ViewModels using Container (all factory methods are @MainActor)
         onboardingViewModel = container.makeOnboardingViewModel()
         profileViewModel = container.makeProfileViewModel()
+
+        print("✅ [ContentView] ProfileViewModel created")
 
         // Load profiles after ViewModel is fully initialized
         profileViewModel?.loadProfiles()

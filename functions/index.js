@@ -1,19 +1,17 @@
 const functions = require('firebase-functions');
 const {onSchedule} = require('firebase-functions/v2/scheduler');
+const {onCall} = require('firebase-functions/v2/https');
+const {defineSecret} = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const twilio = require('twilio');
 
 // Initialize Firebase Admin
 admin.initializeApp();
 
-// Load Twilio credentials from environment variables
-// These will be set using: firebase functions:config:set
-const twilioAccountSid = functions.config().twilio?.account_sid || process.env.TWILIO_ACCOUNT_SID;
-const twilioAuthToken = functions.config().twilio?.auth_token || process.env.TWILIO_AUTH_TOKEN;
-const twilioPhoneNumber = functions.config().twilio?.phone_number || process.env.TWILIO_PHONE_NUMBER;
-
-// Initialize Twilio client
-const twilioClient = twilio(twilioAccountSid, twilioAuthToken);
+// Define secrets for Twilio (will be accessed from Firebase Secret Manager)
+const twilioAccountSid = defineSecret('TWILIO_ACCOUNT_SID');
+const twilioAuthToken = defineSecret('TWILIO_AUTH_TOKEN');
+const twilioPhoneNumber = defineSecret('TWILIO_PHONE_NUMBER');
 
 /**
  * Cloud Function to send SMS via Twilio
@@ -34,14 +32,26 @@ const twilioClient = twilio(twilioAccountSid, twilioAuthToken);
  *   "sentAt": "2025-10-09T..."
  * }
  */
-exports.sendSMS = functions.https.onCall(async (data, context) => {
+exports.sendSMS = onCall({
+  secrets: [twilioAccountSid, twilioAuthToken, twilioPhoneNumber]
+}, async (request) => {
   // Verify user is authenticated
-  if (!context.auth) {
+  if (!request.auth) {
     throw new functions.https.HttpsError(
       'unauthenticated',
       'User must be authenticated to send SMS'
     );
   }
+
+  // Access secrets from request.rawRequest (v2 pattern)
+  const accountSid = twilioAccountSid.value();
+  const authToken = twilioAuthToken.value();
+  const fromNumber = twilioPhoneNumber.value();
+
+  // Initialize Twilio client with secrets
+  const twilioClient = twilio(accountSid, authToken);
+
+  const data = request.data;
 
   const { to, message, profileId, messageType } = data;
 
@@ -63,7 +73,7 @@ exports.sendSMS = functions.https.onCall(async (data, context) => {
   }
 
   // Check user's SMS quota (prevent abuse)
-  const userId = context.auth.uid;
+  const userId = request.auth.uid;
   const userDoc = await admin.firestore().collection('users').doc(userId).get();
 
   if (!userDoc.exists) {
@@ -100,7 +110,7 @@ exports.sendSMS = functions.https.onCall(async (data, context) => {
     // Send SMS via Twilio
     const twilioMessage = await twilioClient.messages.create({
       body: message,
-      from: twilioPhoneNumber,
+      from: fromNumber,
       to: to
     });
 
@@ -162,22 +172,51 @@ exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
   } = req.body;
 
   try {
-    // Find the profile by phone number
-    const profilesSnapshot = await admin.firestore()
-      .collectionGroup('profiles')
-      .where('phoneNumber', '==', fromPhone)
-      .limit(1)
-      .get();
+    // WORKAROUND: Try collectionGroup first, if it fails due to index building,
+    // fall back to searching all users (less efficient but works)
+    let profileDoc = null;
+    let userId = null;
 
-    if (profilesSnapshot.empty) {
+    try {
+      // Try collectionGroup query (requires index)
+      const profilesSnapshot = await admin.firestore()
+        .collectionGroup('profiles')
+        .where('phoneNumber', '==', fromPhone)
+        .limit(1)
+        .get();
+
+      if (!profilesSnapshot.empty) {
+        profileDoc = profilesSnapshot.docs[0];
+        const profileData = profileDoc.data();
+        userId = profileData.userId;
+      }
+    } catch (indexError) {
+      console.warn(`⚠️ CollectionGroup query failed (index building?): ${indexError.message}`);
+      console.log('📝 Falling back to manual user search...');
+
+      // Fallback: Query all users and search their profiles
+      const usersSnapshot = await admin.firestore().collection('users').get();
+
+      for (const userDoc of usersSnapshot.docs) {
+        const userProfiles = await userDoc.ref.collection('profiles')
+          .where('phoneNumber', '==', fromPhone)
+          .limit(1)
+          .get();
+
+        if (!userProfiles.empty) {
+          profileDoc = userProfiles.docs[0];
+          userId = userDoc.id;
+          console.log(`✅ Found profile via fallback method for user: ${userId}`);
+          break;
+        }
+      }
+    }
+
+    if (!profileDoc || !userId) {
       console.warn(`⚠️ No profile found for phone: ${fromPhone}`);
       res.status(200).send('OK'); // Still return 200 to Twilio
       return;
     }
-
-    const profileDoc = profilesSnapshot.docs[0];
-    const profileData = profileDoc.data();
-    const userId = profileData.userId;
 
     // Check for STOP keywords (opt-out)
     const upperMessage = messageBody.toUpperCase().trim();
@@ -202,6 +241,8 @@ exports.twilioWebhook = functions.https.onRequest(async (req, res) => {
       .doc(profileDoc.id)
       .collection('messages')
       .add({
+        userId: userId, // Add userId for collectionGroup queries
+        profileId: profileDoc.id,
         fromPhone: fromPhone,
         toPhone: toPhone,
         messageBody: messageBody,

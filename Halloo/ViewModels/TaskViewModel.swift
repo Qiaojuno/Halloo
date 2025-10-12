@@ -460,7 +460,7 @@ final class TaskViewModel: ObservableObject {
                 self?.handleTaskUpdate(updatedTask)
             }
             .store(in: &cancellables)
-        
+
         // Listen for SMS responses to update task completion
         dataSyncCoordinator.smsResponses
             .receive(on: DispatchQueue.main)
@@ -473,6 +473,34 @@ final class TaskViewModel: ObservableObject {
                 self?.handleTaskResponse(response)
             }
             .store(in: &cancellables)
+
+        // Listen for profile updates (deletions, status changes)
+        dataSyncCoordinator.profileUpdates
+            .sink { [weak self] updatedProfile in
+                self?.handleProfileUpdate(updatedProfile)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func handleProfileUpdate(_ profile: ElderlyProfile) {
+        print("📩 [TaskViewModel] Profile update received: \(profile.id)")
+
+        // Update availableProfiles list
+        if let index = availableProfiles.firstIndex(where: { $0.id == profile.id }) {
+            availableProfiles[index] = profile
+        }
+
+        // If currently selected profile was updated, refresh it
+        if selectedProfile?.id == profile.id {
+            if profile.status == .inactive {
+                print("⚠️ [TaskViewModel] Selected profile became inactive - clearing selection")
+                selectedProfile = nil
+                selectedProfileId = nil
+            } else {
+                // Update to latest profile state
+                selectedProfile = profile
+            }
+        }
     }
     
     // MARK: - Data Loading
@@ -582,6 +610,17 @@ final class TaskViewModel: ObservableObject {
     */
     private func createTaskAsync() async {
         print("📝 Starting task creation...")
+        print("🔍 Validation check:")
+        print("   - taskTitle: '\(taskTitle)'")
+        print("   - taskTitle.isEmpty: \(!taskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)")
+        print("   - selectedProfile: \(selectedProfile?.id ?? "NIL")")
+        print("   - titleError: \(titleError ?? "nil")")
+        print("   - timeError: \(timeError ?? "nil")")
+        print("   - profileError: \(profileError ?? "nil")")
+        print("   - requiresPhoto: \(requiresPhoto)")
+        print("   - requiresText: \(requiresText)")
+        print("   - isValidForm: \(isValidForm)")
+
         guard isValidForm, let profile = selectedProfile else {
             print("⚠️ Form validation failed or no profile selected")
             return

@@ -400,7 +400,12 @@ final class ProfileViewModel: ObservableObject {
             loadProfiles()
         }
     }
-    
+
+    deinit {
+        print("💀 [ProfileViewModel] DEINIT CALLED - ProfileViewModel is being deallocated!")
+        print("   - Cancellables count: \(cancellables.count)")
+    }
+
     // MARK: - Setup Methods
     private func setupValidation() {
         // Name validation
@@ -429,26 +434,53 @@ final class ProfileViewModel: ObservableObject {
     }
     
     private func setupDataSync() {
+        print("🔍 [ProfileViewModel] Setting up DataSync subscriptions...")
+        print("🔍 [ProfileViewModel] DataSyncCoordinator instance: \(ObjectIdentifier(dataSyncCoordinator))")
+        print("🔍 [ProfileViewModel] Current thread: \(Thread.current)")
+
         // Listen for profile updates from other family members
-        dataSyncCoordinator.profileUpdates
+        let profileUpdatesCancellable = dataSyncCoordinator.profileUpdates
             .receive(on: DispatchQueue.main)
             .sink { [weak self] updatedProfile in
+                print("📩 [ProfileViewModel] Received profile update: \(updatedProfile.id)")
                 self?.handleProfileUpdate(updatedProfile)
             }
-            .store(in: &cancellables)
-        
+        cancellables.insert(profileUpdatesCancellable)
+        print("✅ [ProfileViewModel] Profile updates subscription stored")
+
         // Listen for SMS confirmation responses
-        dataSyncCoordinator.smsResponses
-            .receive(on: DispatchQueue.main)
-            .compactMap { response in
+        print("🔍 [ProfileViewModel] About to access smsResponses publisher...")
+        let smsPublisher = dataSyncCoordinator.smsResponses
+        print("✅ [ProfileViewModel] Got smsResponses publisher, setting up pipeline...")
+
+        let smsCancellable = smsPublisher
+            .handleEvents(receiveOutput: { response in
+                print("🔥 [ProfileViewModel] RAW SMS EVENT RECEIVED (before compactMap) - Thread: \(Thread.current)")
+                print("   - Profile ID: \(response.profileId ?? "nil")")
+                print("   - Is Confirmation: \(response.isConfirmationResponse)")
+                print("   - Text: \(response.textResponse ?? "nil")")
+            })
+            .compactMap { (response: SMSResponse) -> SMSResponse? in
+                print("📩 [ProfileViewModel] In compactMap - isConfirmation: \(response.isConfirmationResponse)")
                 // Filter for confirmation responses
-                guard response.isConfirmationResponse else { return nil }
+                guard response.isConfirmationResponse else {
+                    print("⚠️ [ProfileViewModel] Filtered out - not a confirmation response")
+                    return nil
+                }
+                print("✅ [ProfileViewModel] Passed filter - returning response")
                 return response
             }
-            .sink { [weak self] response in
-                self?.handleConfirmationResponse(response)
+            .sink { [weak self] (response: SMSResponse) in
+                print("🎯 [ProfileViewModel] IN SINK - Processing confirmation response for profile: \(response.profileId ?? "unknown")")
+                // Ensure UI updates happen on main thread
+                DispatchQueue.main.async {
+                    self?.handleConfirmationResponse(response)
+                }
             }
-            .store(in: &cancellables)
+        cancellables.insert(smsCancellable)
+        print("✅ [ProfileViewModel] SMS responses subscription stored")
+
+        print("✅ [ProfileViewModel] DataSync subscriptions established - total cancellables: \(cancellables.count)")
     }
     
     // MARK: - Data Loading
@@ -1032,17 +1064,17 @@ final class ProfileViewModel: ObservableObject {
         // TCPA-COMPLIANT CONSENT MESSAGE
         // Required elements:
         // ✅ Purpose of messages clearly stated
-        // ✅ Frequency disclosure ("up to 3 messages/day")
+        // ✅ Frequency disclosure ("multiple messages per day")
         // ✅ Opt-out instructions (STOP keyword)
         // ✅ Help keyword (HELP for info)
         // ✅ Message & data rates disclosure
         let message = """
         Hello \(profile.name)! Your family member wants to send you helpful daily reminders via text.
 
-        Reply YES to receive up to 3 messages/day. Reply STOP to unsubscribe or HELP for info.
+        Reply YES to receive multiple messages per day. Reply STOP to unsubscribe or HELP for info.
 
         Message & data rates may apply.
-        - Hallo Family Care
+        - Remi
         """
 
         let _ = try await smsService.sendSMS(
@@ -1096,11 +1128,23 @@ final class ProfileViewModel: ObservableObject {
     No further SMS reminders will be sent to elderly users who decline.
     */
     private func handleConfirmationResponse(_ response: SMSResponse) {
+        print("🎯 [ProfileViewModel] handleConfirmationResponse called")
+        print("   - Profile ID: \(response.profileId ?? "nil")")
+        print("   - Is Positive: \(response.isPositiveConfirmation)")
+        print("   - Text: \(response.textResponse ?? "no text")")
+
         guard let profileId = response.profileId else {
+            print("⚠️ [ProfileViewModel] No profile ID in response - skipping")
             return
         }
-        
+
+        print("🔍 [ProfileViewModel] Current profiles count: \(profiles.count)")
+        for (index, profile) in profiles.enumerated() {
+            print("   Profile \(index): \(profile.id) - status: \(profile.status)")
+        }
+
         if response.isPositiveConfirmation {
+            print("✅ [ProfileViewModel] Processing POSITIVE confirmation")
             // ONBOARDING FLOW: Check if this response is for current onboarding profile
             if let onboardingProfile = onboardingProfile,
                onboardingProfile.id == profileId,
@@ -1140,14 +1184,17 @@ final class ProfileViewModel: ObservableObject {
                 }
             } else {
                 // Handle existing profile confirmation (not onboarding)
-                if let index = profiles.firstIndex(where: { $0.id == profileId }) {
+                // NOTE: profileId from webhook is actually the phone number (fromPhone)
+                // So we need to match by phoneNumber, not by document ID
+                if let index = profiles.firstIndex(where: { $0.phoneNumber == profileId }) {
+                    print("✅ [ProfileViewModel] Found existing profile at index \(index) with phone: \(profileId)")
                     var updatedProfile = profiles[index]
                     updatedProfile.status = .confirmed
                     updatedProfile.confirmedAt = response.receivedAt
                     profiles[index] = updatedProfile
-                    
-                    confirmationStatus[profileId] = .confirmed
-                    confirmationMessages[profileId] = "Confirmed! Ready to receive reminders."
+
+                    confirmationStatus[updatedProfile.id] = .confirmed
+                    confirmationMessages[updatedProfile.id] = "Confirmed! Ready to receive reminders."
                     
                     // Create gallery history event for profile creation
                     createGalleryEventForProfile(updatedProfile, profileSlot: index)
@@ -1157,6 +1204,12 @@ final class ProfileViewModel: ObservableObject {
                         try? await databaseService.updateElderlyProfile(updatedProfile)
                         // Broadcast profile status update to Dashboard and family members
                         self.dataSyncCoordinator.broadcastProfileUpdate(updatedProfile)
+                    }
+                } else {
+                    print("⚠️ [ProfileViewModel] No profile found with phone number: \(profileId)")
+                    print("   Current profiles:")
+                    for profile in profiles {
+                        print("   - \(profile.name): \(profile.phoneNumber) (status: \(profile.status))")
                     }
                 }
             }
@@ -1279,7 +1332,7 @@ final class ProfileViewModel: ObservableObject {
         Reply YES to start receiving reminders again, or STOP to stay unsubscribed.
 
         Message & data rates may apply.
-        - Hallo Family Care
+        - Remi
         """
 
         try await smsService.sendSMS(

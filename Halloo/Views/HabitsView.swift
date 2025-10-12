@@ -53,6 +53,9 @@ struct HabitsView: View {
     /// Controls delete confirmation alert for profiles
     @State private var showingProfileDeleteConfirmation = false
 
+    /// Track habits pending deletion (waiting for user confirmation)
+    @State private var habitsPendingDeletion: Set<String> = []
+
     /// Track locally deleted habit IDs for optimistic UI updates
     @State private var locallyDeletedHabitIds: Set<String> = []
 
@@ -63,6 +66,12 @@ struct HabitsView: View {
 
     /// Delete button cooldown to prevent accidental taps
     @State private var isDeleteButtonCoolingDown = false
+
+    /// Persistent TaskViewModel instance (prevents recreation on re-render)
+    @State private var taskViewModel: TaskViewModel?
+
+    /// Force view refresh when tasks change
+    @State private var refreshID = UUID()
 
     // Days of the week for display
     private let weekDays = ["S", "M", "T", "W", "T", "F", "S"]
@@ -79,15 +88,15 @@ struct HabitsView: View {
             .transaction { transaction in
                 transaction.disablesAnimations = true
             }
-        } else if showingTaskCreation {
-            // Show task creation flow
+        } else if showingTaskCreation, let taskVM = taskViewModel {
+            // Show task creation flow with persistent ViewModel
             TaskCreationView(
                 preselectedProfileId: selectedProfile?.id,
                 dismissAction: {
                     showingTaskCreation = false
                 }
             )
-            .environmentObject(container.makeTaskViewModel())
+            .environmentObject(taskVM)
             .transition(.identity)
             .transaction { transaction in
                 transaction.disablesAnimations = true
@@ -95,6 +104,21 @@ struct HabitsView: View {
         } else {
             // Show habits view - NO .transition() here, let parent control it
             habitsContent
+                .onAppear {
+                    // Initialize TaskViewModel once
+                    if taskViewModel == nil {
+                        print("🔴 [HabitsView] Creating TaskViewModel instance")
+                        taskViewModel = container.makeTaskViewModel()
+                        // Load all tasks for the authenticated user
+                        taskViewModel?.loadTasks()
+                    }
+                }
+                .onChange(of: taskViewModel?.tasks.count) { newCount in
+                    print("🔄 [HabitsView] Tasks count changed to: \(newCount ?? 0)")
+                    // Force view refresh by updating a local state
+                    refreshID = UUID()
+                }
+                .id(refreshID) // Force refresh when refreshID changes
         }
     }
     
@@ -141,7 +165,7 @@ struct HabitsView: View {
             }
 
             // Trigger initial cooldown if user is already on Habits tab
-            if selectedTab == 1 {
+            if selectedTab == 2 {
                 withAnimation {
                     isDeleteButtonCoolingDown = true
                 }
@@ -155,8 +179,8 @@ struct HabitsView: View {
             loadData()
         }
         .onChange(of: selectedTab) { oldValue, newValue in
-            // Start delete button cooldown when switching TO Habits tab (index 1)
-            if newValue == 1 {
+            // Start delete button cooldown when switching TO Habits tab (index 2)
+            if newValue == 2 {
                 withAnimation {
                     isDeleteButtonCoolingDown = true
                 }
@@ -176,6 +200,8 @@ struct HabitsView: View {
         }
         .alert("Delete Habit", isPresented: $showingDeleteConfirmation, presenting: habitToDelete) { habit in
             Button("Cancel", role: .cancel) {
+                // Remove from pending deletion if user cancels
+                habitsPendingDeletion.remove(habit.id)
                 habitToDelete = nil
             }
             Button("Delete", role: .destructive) {
@@ -260,7 +286,7 @@ struct HabitsView: View {
     
     // MARK: - Habits List Section
     private var habitsListSection: some View {
-        VStack(spacing: 0) {
+        Group {
             if filteredHabits.isEmpty {
                 // Empty state
                 HStack {
@@ -272,34 +298,39 @@ struct HabitsView: View {
                     Spacer()
                 }
             } else {
-                ForEach(filteredHabits, id: \.id) { habit in
-                    HabitRowViewSimple(
-                        habit: habit,
-                        profile: getProfileForHabit(habit),
-                        selectedDays: selectedDays,
-                        onDelete: {
-                            deleteHabitFromSelectedDays(habit: habit)
-                        }
-                    )
-                    .padding(.horizontal, 20) // Match dashboard completed tasks padding exactly
-                    .padding(.vertical, 12) // Match dashboard completed tasks padding exactly
-                    .background(Color.white) // Each habit has white background like dashboard
-                    .overlay(
-                        // Divider at bottom if not last item
-                        VStack {
-                            Spacer()
-                            if habit.id != filteredHabits.last?.id {
-                                Divider()
-                                    .overlay(Color(hex: "f8f3f3"))
-                                    .padding(.horizontal, 4) // Relative padding since we're inside the padded view
+                List {
+                    ForEach(filteredHabits, id: \.id) { habit in
+                        HabitRowViewSimple(
+                            habit: habit,
+                            profile: getProfileForHabit(habit),
+                            selectedDays: selectedDays
+                        )
+                        .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.white)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                deleteHabitFromSelectedDays(habit: habit)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
                             }
                         }
-                    )
-                    .transition(.asymmetric(
-                        insertion: .identity,
-                        removal: .move(edge: .leading).combined(with: .opacity)
-                    ))
+                        .overlay(
+                            VStack {
+                                Spacer()
+                                if habit.id != filteredHabits.last?.id {
+                                    Divider()
+                                        .overlay(Color(hex: "f8f3f3"))
+                                        .padding(.horizontal, 4)
+                                }
+                            }
+                        )
+                    }
                 }
+                .listStyle(.plain)
+                .scrollDisabled(true)
+                .frame(height: CGFloat(filteredHabits.count) * 90) // Increased for multi-line titles
+                .animation(.easeInOut(duration: 0.3), value: selectedDays)
             }
         }
         .padding(.bottom, 12)
@@ -315,8 +346,9 @@ struct HabitsView: View {
     
     /// Filtered habits based on selected profile and days
     private var filteredHabits: [Task] {
-        // Get all unique tasks from the ViewModel (today's tasks contain all active tasks)
-        let allTasks = viewModel.todaysTasks.map { $0.task }
+        // Get all tasks from TaskViewModel (not just today's tasks)
+        guard let taskVM = taskViewModel else { return [] }
+        let allTasks = taskVM.tasks
 
         return allTasks.filter { habit in
             // Exclude locally deleted habits for optimistic UI
@@ -346,6 +378,9 @@ struct HabitsView: View {
     }
     
     private func deleteHabitFromSelectedDays(habit: Task) {
+        // Mark as pending deletion (prevents List from auto-animating)
+        habitsPendingDeletion.insert(habit.id)
+
         // Store habit and show confirmation alert
         habitToDelete = habit
         showingDeleteConfirmation = true
@@ -355,6 +390,9 @@ struct HabitsView: View {
         guard let habit = habitToDelete else { return }
 
         print("🗑️ Deleting habit '\(habit.title)' (ID: \(habit.id))")
+
+        // Remove from pending deletion
+        habitsPendingDeletion.remove(habit.id)
 
         // Optimistic UI update: immediately remove from local state with iOS-native spring animation
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -553,115 +591,207 @@ struct HabitsView: View {
     // selectedProfile is already defined earlier in the file
 }
 
+// MARK: - Habit Row With Custom Swipe
+struct HabitRowWithCustomSwipe: View {
+    let habit: Task
+    let profile: ElderlyProfile?
+    let selectedDays: Set<Int>
+    let isLastItem: Bool
+    let onDelete: () -> Void
+
+    @EnvironmentObject private var profileViewModel: ProfileViewModel
+    @State private var dragOffset: CGFloat = 0
+    @State private var isRevealed: Bool = false
+
+    private let deleteButtonWidth: CGFloat = 80
+    private let swipeThreshold: CGFloat = 50
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            // Delete button background (always present, revealed by drag)
+            HStack {
+                Spacer()
+                Button(action: {
+                    // Don't animate here - just trigger delete confirmation
+                    onDelete()
+                    // Keep button revealed until user confirms/cancels
+                }) {
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.red)
+                            .frame(width: deleteButtonWidth)
+
+                        Image(systemName: "trash")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                }
+                .frame(maxHeight: .infinity)
+            }
+
+            // Main content that slides
+            VStack(spacing: 0) {
+                HabitRowViewSimple(
+                    habit: habit,
+                    profile: profile,
+                    selectedDays: selectedDays
+                )
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+
+                // Divider
+                if !isLastItem {
+                    Divider()
+                        .overlay(Color(hex: "f8f3f3"))
+                        .padding(.horizontal, 4)
+                }
+            }
+            .background(Color.white)
+            .offset(x: dragOffset)
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 5)
+                    .onChanged { value in
+                        let translation = value.translation.width
+                        let verticalTranslation = abs(value.translation.height)
+                        let horizontalTranslation = abs(translation)
+
+                        // Require swipe to be STRONGLY horizontal (3x more horizontal than vertical)
+                        // This prevents accidental tab switching while allowing scroll
+                        guard horizontalTranslation > verticalTranslation * 3 else { return }
+
+                        // Only allow left swipe
+                        if translation < 0 {
+                            dragOffset = max(translation, -deleteButtonWidth)
+                        } else if isRevealed {
+                            // Allow closing if already revealed
+                            dragOffset = min(0, -deleteButtonWidth + translation)
+                        }
+                    }
+                    .onEnded { value in
+                        let translation = value.translation.width
+                        let verticalTranslation = abs(value.translation.height)
+                        let horizontalTranslation = abs(translation)
+
+                        // Require swipe to be STRONGLY horizontal
+                        guard horizontalTranslation > verticalTranslation * 3 else { return }
+
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            if translation < -swipeThreshold {
+                                // Reveal delete button
+                                dragOffset = -deleteButtonWidth
+                                isRevealed = true
+                            } else {
+                                // Close
+                                dragOffset = 0
+                                isRevealed = false
+                            }
+                        }
+                    }
+            )
+        }
+    }
+}
+
 // MARK: - Simplified Habit Row View Component
 struct HabitRowViewSimple: View {
     let habit: Task
     let profile: ElderlyProfile?
     let selectedDays: Set<Int>
-    let onDelete: () -> Void
 
     @EnvironmentObject private var profileViewModel: ProfileViewModel
-    @State private var dragOffset: CGFloat = 0
-
-    // Gesture detection constants
-    private let deleteButtonWidth: CGFloat = 80
-    private let minimumDragDistance: CGFloat = 25
-    private let swipeRevealThreshold: CGFloat = 50
-    private let horizontalAngleThreshold: Double = .pi / 6  // 30 degrees
 
     var body: some View {
-        ZStack {
-            // Delete button background
-            deleteButton
+        HStack(spacing: 16) {
+            // Profile Image
+            if let profile = profile {
+                ProfileImageView.custom(
+                    profile: profile,
+                    profileSlot: profileSlot,
+                    isSelected: false,
+                    size: 32
+                )
+            }
 
-            // Task row content
-            taskContent
-                .offset(x: dragOffset)
-                .highPriorityGesture(horizontalSwipeGesture)
-        }
-    }
+            // Task Details with mini week strip
+            VStack(alignment: .leading, spacing: 4) {
+                Text(profile?.name ?? "")
+                    .font(.system(size: 16, weight: .heavy))
+                    .tracking(-0.25)
+                    .foregroundColor(.black)
 
-    // MARK: - Subviews
+                // Habit title and time on same row with dot separator
+                HStack(spacing: 4) {
+                    Text(habit.title)
+                        .font(.custom("Inter", size: 13))
+                        .fontWeight(.regular)
+                        .tracking(-0.5)
+                        .foregroundColor(.black)
+                        .lineLimit(1)
 
-    private var deleteButton: some View {
-        HStack {
+                    Text("•")
+                        .font(.custom("Inter", size: 13))
+                        .foregroundColor(.black)
+
+                    Text(formatTime(habit.scheduledTime))
+                        .font(.custom("Inter", size: 13))
+                        .fontWeight(.regular)
+                        .tracking(-0.5)
+                        .foregroundColor(.black)
+                }
+
+                // Mini week strip - only show scheduled days
+                miniWeekStrip
+            }
+
             Spacer()
-            Button(action: {
-                withAnimation(.spring()) {
-                    dragOffset = 0
-                }
-                onDelete()
-            }) {
-                Image(systemName: "trash")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(width: deleteButtonWidth)
-                    .frame(maxHeight: .infinity)
-                    .background(Color.red)
+        }
+    }
+
+    // MARK: - Mini Week Strip (Only Scheduled Days)
+    private var miniWeekStrip: some View {
+        let weekDays = ["S", "M", "T", "W", "T", "F", "S"]
+        let scheduledDays = getScheduledDays()
+
+        return HStack(spacing: 4) {
+            ForEach(scheduledDays, id: \.self) { dayIndex in
+                Text(weekDays[dayIndex])
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(Color(hex: "9f9f9f"))
+                    .frame(width: 18, height: 18)
+                    .background(
+                        Circle()
+                            .fill(Color.clear)
+                    )
             }
         }
     }
 
-    private var taskContent: some View {
-        TaskRowView(
-            task: habit,
-            profile: profile,
-            showViewButton: false,
-            onViewButtonTapped: nil
-        )
-        .background(Color.white)
-    }
-
-    // MARK: - Gesture Handling
-
-    private var horizontalSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: minimumDragDistance)
-            .onChanged { value in
-                if isHorizontalSwipe(translation: value.translation) {
-                    updateDragOffset(translation: value.translation)
-                }
-            }
-            .onEnded { value in
-                if isHorizontalSwipe(translation: value.translation) {
-                    snapToPosition(translation: value.translation)
-                } else {
-                    resetDragOffset()
-                }
-            }
-    }
-
-    // MARK: - Helper Methods
-
-    /// Determines if the drag gesture is primarily horizontal
-    private func isHorizontalSwipe(translation: CGSize) -> Bool {
-        let angle = atan2(abs(translation.height), abs(translation.width))
-        let isHorizontal = angle < horizontalAngleThreshold
-        let isDraggingLeft = translation.width < 0
-
-        return isHorizontal && isDraggingLeft
-    }
-
-    /// Updates drag offset during gesture
-    private func updateDragOffset(translation: CGSize) {
-        dragOffset = max(translation.width, -deleteButtonWidth)
-    }
-
-    /// Snaps to revealed or hidden position when gesture ends
-    private func snapToPosition(translation: CGSize) {
-        withAnimation(.spring()) {
-            if translation.width < -swipeRevealThreshold {
-                dragOffset = -deleteButtonWidth
-            } else {
-                dragOffset = 0
-            }
+    /// Returns array of day indices (0-6) that the habit is scheduled for
+    private func getScheduledDays() -> [Int] {
+        switch habit.frequency {
+        case .daily:
+            return [0, 1, 2, 3, 4, 5, 6] // All days
+        case .weekdays:
+            return [1, 2, 3, 4, 5] // Mon-Fri
+        case .weekly:
+            let taskWeekday = Calendar.current.component(.weekday, from: habit.scheduledTime)
+            return [taskWeekday - 1] // Single day
+        case .custom:
+            return habit.customDays.map { $0.toIndex() }.sorted()
+        case .once:
+            return [] // No recurring days
         }
     }
 
-    /// Resets drag offset with animation
-    private func resetDragOffset() {
-        withAnimation(.spring()) {
-            dragOffset = 0
-        }
+    private var profileSlot: Int {
+        guard let profile = profile else { return 0 }
+        return profileViewModel.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
+    }
+
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: date)
     }
 }
 

@@ -1,6 +1,6 @@
 //
 //  DataSyncCoordinator.swift
-//  Hallo
+//  Remi
 //
 //  Purpose: Orchestrates real-time data synchronization for family coordination across devices and elderly care workflows
 //  Key Features: 
@@ -162,12 +162,13 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     }
     
     /// Real-time SMS responses from elderly users for family coordination
-    /// 
+    ///
     /// Enables all family ViewModels to immediately see elderly person's
     /// care task responses, confirmation messages, and help requests for
     /// coordinated family response and care decision-making.
     var smsResponses: AnyPublisher<SMSResponse, Never> {
-        smsResponsesSubject.eraseToAnyPublisher()
+        print("🔍 [DataSyncCoordinator] smsResponses publisher accessed - creating new subscription")
+        return smsResponsesSubject.eraseToAnyPublisher()
     }
     
     /// Real-time family user updates for account coordination
@@ -406,6 +407,10 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     }
     
     func broadcastSMSResponse(_ response: SMSResponse) {
+        print("📢 [DataSyncCoordinator] Broadcasting SMS response:")
+        print("   - Profile ID: \(response.profileId ?? "unknown")")
+        print("   - Is Confirmation: \(response.isConfirmationResponse)")
+        print("   - Text: \(response.textResponse ?? "no text")")
         smsResponsesSubject.send(response)
         updatePendingChanges()
     }

@@ -359,8 +359,16 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             .order(by: "nextScheduledDate")
             .getDocuments()
 
-        return try snapshot.documents.map { document in
-            try decodeFromFirestore(document.data(), as: Task.self)
+        return try snapshot.documents.compactMap { document in
+            do {
+                // Log document structure for debugging
+                let data = document.data()
+                print("🔍 [FirebaseDatabaseService] Task document keys: \(data.keys.joined(separator: ", "))")
+                return try decodeFromFirestore(data, as: Task.self)
+            } catch {
+                print("⚠️ [FirebaseDatabaseService] Skipping task \(document.documentID): \(error.localizedDescription)")
+                return nil
+            }
         }
     }
 
@@ -504,8 +512,16 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             print("✅ [FirebaseDatabaseService] Found \(snapshot.documents.count) recent messages")
             #endif
 
-            return try snapshot.documents.map { document in
-                try decodeFromFirestore(document.data(), as: SMSResponse.self)
+            return try snapshot.documents.compactMap { document in
+                do {
+                    // Log document structure for debugging
+                    let data = document.data()
+                    print("🔍 [FirebaseDatabaseService] Message document keys: \(data.keys.joined(separator: ", "))")
+                    return try decodeFromFirestore(data, as: SMSResponse.self)
+                } catch {
+                    print("⚠️ [FirebaseDatabaseService] Skipping message \(document.documentID): \(error.localizedDescription)")
+                    return nil
+                }
             }
         } catch {
             #if DEBUG
@@ -692,7 +708,121 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
         listeners.append(listener)
         return subject.eraseToAnyPublisher()
     }
-    
+
+    /// Observes incoming SMS messages for a user across all profiles
+    ///
+    /// Listens to the messages subcollection across all user profiles to detect
+    /// incoming SMS replies (YES confirmations, STOP keywords, task responses).
+    /// Broadcasts messages via DataSyncCoordinator for real-time UI updates.
+    ///
+    /// - Parameter userId: Family user ID to observe messages for
+    /// - Returns: Publisher that emits incoming SMS messages
+    func observeIncomingSMSMessages(_ userId: String) -> AnyPublisher<SMSResponse, Error> {
+        let subject = PassthroughSubject<SMSResponse, Error>()
+
+        print("📱 [FirebaseDatabaseService] Setting up incoming SMS listener for user: \(userId)")
+
+        // Use collection group query to observe all messages across user's profiles
+        // Only listen for NEW messages (direction: inbound, not yet processed)
+        let listener = db.collectionGroup("messages")
+            .whereField("userId", isEqualTo: userId)
+            .whereField("direction", isEqualTo: "inbound")
+            .order(by: "receivedAt", descending: true)
+            .limit(to: 50) // Only recent messages to avoid loading history
+            .addSnapshotListener { snapshot, error in
+                if let error = error {
+                    let nsError = error as NSError
+                    print("❌ [FirebaseDatabaseService] SMS listener error: \(error.localizedDescription)")
+                    print("   - Error code: \(nsError.code)")
+                    print("   - Error domain: \(nsError.domain)")
+                    if nsError.code == 9 {
+                        print("   - ⚠️ FAILED_PRECONDITION: This usually means a Firestore index is missing or still building")
+                        print("   - Check Firebase Console > Firestore > Indexes")
+                    }
+                    subject.send(completion: .failure(error))
+                    return
+                }
+
+                guard let snapshot = snapshot else {
+                    print("⚠️ [FirebaseDatabaseService] SMS listener: no snapshot")
+                    return
+                }
+
+                // Process only NEW messages (documentChanges with type .added)
+                for change in snapshot.documentChanges {
+                    guard change.type == .added else { continue }
+
+                    let data = change.document.data()
+                    print("📩 [FirebaseDatabaseService] New incoming SMS detected:")
+                    print("   - Document ID: \(change.document.documentID)")
+                    print("   - From: \(data["fromPhone"] as? String ?? "unknown")")
+                    print("   - Message: \(data["messageBody"] as? String ?? "empty")")
+                    print("   - Direction: \(data["direction"] as? String ?? "unknown")")
+
+                    do {
+                        // Convert Firestore message to SMSResponse
+                        let smsResponse = try self.convertMessageToSMSResponse(data, documentId: change.document.documentID)
+                        print("✅ [FirebaseDatabaseService] SMS converted to SMSResponse - broadcasting")
+                        subject.send(smsResponse)
+                    } catch {
+                        print("❌ [FirebaseDatabaseService] Failed to convert message: \(error.localizedDescription)")
+                    }
+                }
+            }
+
+        listeners.append(listener)
+        print("✅ [FirebaseDatabaseService] SMS listener registered")
+        return subject.eraseToAnyPublisher()
+    }
+
+    /// Converts Firestore message document to SMSResponse model
+    private func convertMessageToSMSResponse(_ data: [String: Any], documentId: String) throws -> SMSResponse {
+        print("🔍 [FirebaseDatabaseService] Converting message document:")
+        print("   - Raw data keys: \(data.keys.joined(separator: ", "))")
+        print("   - fromPhone: \(data["fromPhone"] ?? "nil")")
+        print("   - profileId: \(data["profileId"] ?? "nil")")
+        print("   - userId: \(data["userId"] ?? "nil")")
+
+        // Extract fields from Firestore message
+        guard let fromPhone = data["fromPhone"] as? String,
+              let messageBody = data["messageBody"] as? String,
+              let receivedAtTimestamp = data["receivedAt"] as? Timestamp,
+              let userId = data["userId"] as? String,
+              let profileId = data["profileId"] as? String else {
+            print("❌ [FirebaseDatabaseService] Missing required fields!")
+            throw NSError(domain: "FirebaseDatabaseService", code: -1,
+                         userInfo: [NSLocalizedDescriptionKey: "Missing required message fields"])
+        }
+
+        print("✅ [FirebaseDatabaseService] Successfully extracted profileId: \(profileId)")
+
+        let receivedAt = receivedAtTimestamp.dateValue()
+        let twilioSid = data["twilioSid"] as? String
+        let numMedia = data["numMedia"] as? Int ?? 0
+        let isOptOut = data["isOptOut"] as? Bool ?? false
+
+        // Determine response type
+        let responseType: ResponseType = numMedia > 0 ? .photo : .text
+
+        // Analyze message sentiment
+        let upperMessage = messageBody.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let isPositive = upperMessage.contains("YES") ||
+                        upperMessage.contains("DONE") ||
+                        upperMessage.contains("OK") ||
+                        upperMessage.contains("COMPLETED")
+
+        let isConfirmation = upperMessage.contains("YES") || upperMessage.contains("CONFIRM")
+        let isPositiveConfirmation = isConfirmation && isPositive
+
+        // Use factory method for confirmation responses
+        return SMSResponse.createConfirmationResponse(
+            profileId: profileId,
+            userId: userId,
+            textResponse: messageBody,
+            isPositive: isPositiveConfirmation
+        )
+    }
+
     // MARK: - Analytics and Reporting
     
     func getTaskCompletionStats(for userId: String, from startDate: Date, to endDate: Date) async throws -> TaskCompletionStats {

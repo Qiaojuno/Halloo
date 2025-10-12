@@ -83,12 +83,16 @@ final class DashboardViewModel: ObservableObject {
     @Published var lastRefresh = Date()
     
     /// Selected profile ID for task filtering
-    /// 
+    ///
     /// When set, tasks are filtered to show only those belonging to this profile.
     /// Updated by DashboardView when user selects different profile.
     /// Used to implement profile-specific task display as requested.
     @Published var selectedProfileId: String? = nil
-    
+
+    /// Tracks if user has ever made an explicit profile selection
+    /// Used to prevent auto-selecting after user has dereferenced
+    private var hasUserSelectedProfile = false
+
     // MARK: - Family Care Monitoring Properties
     
     /// All care tasks scheduled for the selected date across elderly profiles
@@ -415,9 +419,11 @@ final class DashboardViewModel: ObservableObject {
 
     /// Update profile selection and pending confirmations when profiles change
     private func updateProfileSelection(from profiles: [ElderlyProfile]) {
-        // Auto-select first profile if none selected (UX improvement)
-        if self.selectedProfileId == nil && !profiles.isEmpty {
+        // Auto-select first profile ONLY on initial load (when user hasn't made a choice yet)
+        // Once user explicitly selects or deselects, respect their choice forever
+        if self.selectedProfileId == nil && !profiles.isEmpty && !hasUserSelectedProfile {
             self.selectedProfileId = profiles[0].id
+            hasUserSelectedProfile = true  // Mark as user-initiated choice
         }
 
         // Update pending confirmations
@@ -549,9 +555,11 @@ final class DashboardViewModel: ObservableObject {
         await MainActor.run {
             self.pendingConfirmations = profiles.filter { $0.status == .pendingConfirmation }
 
-            // Auto-select first profile if none selected (UX improvement)
-            if self.selectedProfileId == nil && !profiles.isEmpty {
+            // Auto-select first profile ONLY on initial load (when user hasn't made a choice yet)
+            // Once user explicitly selects or deselects, respect their choice forever
+            if self.selectedProfileId == nil && !profiles.isEmpty && !hasUserSelectedProfile {
                 self.selectedProfileId = profiles[0].id
+                hasUserSelectedProfile = true  // Mark as user-initiated choice
             }
         }
     }
@@ -867,14 +875,15 @@ final class DashboardViewModel: ObservableObject {
     // MARK: - Profile Selection
     
     /// Updates the selected profile for task filtering
-    /// 
+    ///
     /// This method is called by DashboardView when user taps a profile.
-    /// It updates the selectedProfileId and triggers UI refresh to show 
+    /// It updates the selectedProfileId and triggers UI refresh to show
     /// only tasks for the selected profile.
     ///
     /// - Parameter profileId: The ID of the selected elderly profile
     func selectProfile(profileId: String?) {
         selectedProfileId = profileId
+        hasUserSelectedProfile = true  // Mark that user has made an explicit choice
         // Computed properties will automatically update UI
     }
     

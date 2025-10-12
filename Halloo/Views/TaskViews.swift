@@ -60,6 +60,7 @@ struct TaskCreationView: View {
 struct CustomHabitCreationFlow: View {
     @ObservedObject var viewModel: TaskViewModel
     let onDismiss: () -> Void
+    @EnvironmentObject var profileViewModel: ProfileViewModel
 
     @State private var currentStep = 0 // Start at 0 for profile selection
     @State private var selectedProfileForHabit: String? = nil
@@ -79,7 +80,14 @@ struct CustomHabitCreationFlow: View {
                     selectedProfile: $selectedProfileForHabit,
                     onNext: {
                         if let profileId = selectedProfileForHabit {
-                            viewModel.preselectProfile(profileId: profileId)
+                            print("🔵 [CustomHabitCreationFlow] Profile selected: \(profileId)")
+                            // CRITICAL: Directly assign selectedProfile from ProfileViewModel
+                            if let profile = profileViewModel.profiles.first(where: { $0.id == profileId }) {
+                                print("✅ [CustomHabitCreationFlow] Found profile, assigning to TaskViewModel")
+                                viewModel.selectedProfile = profile
+                            } else {
+                                print("❌ [CustomHabitCreationFlow] Profile NOT FOUND in ProfileViewModel!")
+                            }
                             currentStep = 1
                         }
                     },
@@ -612,22 +620,39 @@ struct Step2_ConfirmationMethod: View {
     
     // MARK: - Helper Functions
     private func createHabit() {
+        print("🐛 [createHabit] STARTING habit creation")
+        print("🐛 [createHabit] habitName: \(habitName)")
+        print("🐛 [createHabit] selectedDays: \(selectedDays)")
+        print("🐛 [createHabit] selectedTimes count: \(selectedTimes.count)")
+        print("🐛 [createHabit] confirmationMethod: \(confirmationMethod)")
+        print("🐛 [createHabit] viewModel.selectedProfile: \(viewModel.selectedProfile?.id ?? "NIL")")
+        print("🐛 [createHabit] viewModel.selectedProfile.name: \(viewModel.selectedProfile?.name ?? "NIL")")
+
         // Transfer form data to TaskViewModel
         viewModel.taskTitle = habitName
         viewModel.taskCategory = .medication // Default as requested
         viewModel.frequency = .custom // Since we have specific days selected
         viewModel.scheduledTimes = selectedTimes
         viewModel.customDays = convertDaysToWeekdays(selectedDays)
-        
+
         // Set confirmation method requirements
         if confirmationMethod == "photo" {
             viewModel.requiresPhoto = true
             viewModel.requiresText = false
         } else {
-            viewModel.requiresPhoto = false  
+            viewModel.requiresPhoto = false
             viewModel.requiresText = true
         }
-        
+
+        print("🐛 [createHabit] Form data transferred")
+        print("🐛 [createHabit] viewModel.scheduledTimes.count: \(viewModel.scheduledTimes.count)")
+
+        // CRITICAL: Clear timeError since validation is debounced and won't complete before createTask
+        if !viewModel.scheduledTimes.isEmpty {
+            viewModel.timeError = nil
+        }
+
+        print("🐛 [createHabit] Calling createTask()")
         // Create the task and dismiss on success
         viewModel.createTask()
         onDismiss()
@@ -990,6 +1015,7 @@ struct ProfileSelectionStep: View {
     let onDismiss: () -> Void
 
     @EnvironmentObject var viewModel: TaskViewModel
+    @EnvironmentObject var profileViewModel: ProfileViewModel
     @Environment(\.container) private var container
 
     var body: some View {
@@ -1064,14 +1090,17 @@ struct ProfileSelectionStep: View {
 
     private var profileList: some View {
         VStack(spacing: 16) {
-            ForEach(viewModel.availableProfiles) { profile in
+            ForEach(profileViewModel.profiles) { profile in
                 ProfileSelectionCard(
                     profile: profile,
                     isSelected: selectedProfile == profile.id,
                     onTap: {
-                        selectedProfile = profile.id
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            onNext()
+                        // Only allow selection if profile is confirmed
+                        if profile.status == .confirmed {
+                            selectedProfile = profile.id
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                onNext()
+                            }
                         }
                     }
                 )
@@ -1101,6 +1130,10 @@ struct ProfileSelectionCard: View {
     let isSelected: Bool
     let onTap: () -> Void
 
+    private var isConfirmed: Bool {
+        profile.status == .confirmed
+    }
+
     var body: some View {
         Button(action: {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -1109,37 +1142,54 @@ struct ProfileSelectionCard: View {
             HStack(spacing: 16) {
                 // Profile Photo Circle
                 Circle()
-                    .fill(Color.gray.opacity(0.1))
+                    .fill(Color.gray.opacity(isConfirmed ? 0.1 : 0.05))
                     .frame(width: 60, height: 60)
                     .overlay(
                         Image(systemName: "person.fill")
                             .font(.system(size: 24))
-                            .foregroundColor(.gray)
+                            .foregroundColor(isConfirmed ? .gray : .gray.opacity(0.3))
                     )
 
-                // Profile Name
-                Text(profile.name)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.black)
+                // Profile Name and Status
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(profile.name)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(isConfirmed ? .black : .gray.opacity(0.5))
+
+                    if !isConfirmed {
+                        Text("Pending Confirmation")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundColor(.gray.opacity(0.6))
+                    }
+                }
 
                 Spacer()
 
-                // Selection Indicator
-                if isSelected {
+                // Selection Indicator (only if confirmed and selected)
+                if isSelected && isConfirmed {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 24))
                         .foregroundColor(.black)
+                } else if !isConfirmed {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(.gray.opacity(0.3))
                 }
             }
             .padding(20)
-            .background(Color.white)
+            .background(isConfirmed ? Color.white : Color.gray.opacity(0.05))
             .cornerRadius(16)
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                    .stroke(isSelected ? Color.black : Color.gray.opacity(0.3), lineWidth: isSelected ? 2 : 1)
+                    .stroke(
+                        isSelected && isConfirmed ? Color.black : Color.gray.opacity(isConfirmed ? 0.3 : 0.2),
+                        lineWidth: isSelected && isConfirmed ? 2 : 1
+                    )
             )
-            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+            .shadow(color: Color.black.opacity(isConfirmed ? 0.05 : 0.02), radius: 8, x: 0, y: 4)
         }
+        .disabled(!isConfirmed)
+        .opacity(isConfirmed ? 1.0 : 0.6)
     }
 }
 

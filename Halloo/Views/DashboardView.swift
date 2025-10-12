@@ -53,7 +53,12 @@ struct DashboardView: View {
 
     /// Controls whether to show bottom navigation (false when rendered in ContentView's layered architecture)
     var showNav: Bool = true
-    
+
+    /// Bindings for create actions (lifted to ContentView for proper presentation context)
+    @Binding var showingCreateActionSheet: Bool
+    @Binding var showingDirectOnboarding: Bool
+    @Binding var showingTaskCreation: Bool
+
     // MARK: - UI State Management
     /// Tracks which elderly profile is currently selected (0-3 max)
     /// IMPORTANT: This drives task filtering - only selected profile's tasks show
@@ -62,19 +67,7 @@ struct DashboardView: View {
     /// Controls upcoming section expand/collapse state
     /// When collapsed: shows summary message, when expanded: shows task list or confirmation
     @State private var isUpcomingExpanded: Bool = false
-    
-    
-    /// Controls TaskCreationView conditional presentation with profile preselection
-    /// Triggered by + button in "Create Custom Habit" section
-    @State private var showingTaskCreation = false
-    
-    /// Controls direct ProfileOnboardingFlow presentation
-    /// Alternative to ProfileCreationView sheet for smoother UX
-    @State private var showingDirectOnboarding = false
-    
-    /// Controls action sheet for unified create button
-    @State private var showingCreateActionSheet = false
-    
+
     /// Controls GalleryDetailView presentation for completed task viewing
     @State private var selectedTaskForGalleryDetail: GalleryPresentationData?
     
@@ -96,33 +89,8 @@ struct DashboardView: View {
     @State private var isTransitioning: Bool = false
     
     var body: some View {
-        if showingDirectOnboarding {
-            // ✅ NEW: Simplified single-card profile creation
-            SimplifiedProfileCreationView(onDismiss: {
-                showingDirectOnboarding = false
-            })
-            .environmentObject(profileViewModel)
-            .transition(.identity)
-            .transaction { transaction in
-                transaction.disablesAnimations = true
-            }
-        } else if showingTaskCreation {
-            // Show task creation flow
-            TaskCreationView(
-                preselectedProfileId: selectedProfile?.id,
-                dismissAction: {
-                    showingTaskCreation = false
-                }
-            )
-            .environmentObject(container.makeTaskViewModel())
-            .transition(.identity)
-            .transaction { transaction in
-                transaction.disablesAnimations = true
-            }
-        } else {
-            // Show dashboard - NO .transition() here, let parent control it
-            dashboardContent
-        }
+        // Show dashboard content directly - presentation handled by ContentView
+        dashboardContent
     }
     
     private var dashboardContent: some View {
@@ -765,7 +733,7 @@ struct DashboardView: View {
             // Haptic feedback for create action
             let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
             impactFeedback.impactOccurred()
-            
+
             showingCreateActionSheet = true
         }) {
             ZStack {
@@ -778,23 +746,6 @@ struct DashboardView: View {
                     .font(.system(size: 26.11, weight: .medium)) // 28.08 × 0.93 = 26.11 (7% smaller)
                     .foregroundColor(.white)
             }
-        }
-        .actionSheet(isPresented: $showingCreateActionSheet) {
-            ActionSheet(
-                title: Text("What would you like to create?"),
-                buttons: [
-                    .default(Text("Add Family Member")) {
-                        // Create profile action
-                        profileViewModel.startProfileOnboarding()
-                        showingDirectOnboarding = true
-                    },
-                    .default(Text("Create Habit")) {
-                        // Create task action
-                        showingTaskCreation = true
-                    },
-                    .cancel()
-                ]
-            )
         }
     }
     
@@ -901,18 +852,18 @@ struct TaskRowView: View {
                     .font(.system(size: 16, weight: .heavy))  // System font with heavy weight
                     .tracking(-0.25)  // Half of original -0.5 offset
                     .foregroundColor(.black)
-                
+
                 HStack(spacing: 4) {
                     Text(task.title)
                         .font(.custom("Inter", size: 13))  // Smaller for hierarchy
                         .fontWeight(.regular)
                         .tracking(-0.5)  // Less tight tracking
                         .foregroundColor(.black)
-                    
+
                     Text("•")
                         .font(.custom("Inter", size: 14))
                         .foregroundColor(Color(hex: "9f9f9f"))
-                    
+
                     Text(formatTime(task.scheduledTime))
                         .font(.custom("Inter", size: 13))  // Smaller for hierarchy
                         .fontWeight(.regular)
@@ -1477,18 +1428,18 @@ struct FloatingPillNavigation: View {
                 }
                 
                 /*
-                 * HABITS TAB: Dynamic active/inactive state
-                 * Icon: bookmark.fill when active, bookmark when inactive
-                 * Text: "habits" in small Inter font with negative tracking
+                 * GALLERY TAB: Dynamic active/inactive state
+                 * Icon: photo.fill when active, photo when inactive (single photo representation)
+                 * Text: "gallery" in small Inter font with negative tracking
                  * Color: Changes based on selectedTab state
-                 * Action: Updates selectedTab to switch to Habits view
+                 * Action: Updates selectedTab to switch to Gallery view
                  */
                 VStack(spacing: 2) { // Reduced from 4 to 2
-                    Image(systemName: selectedTab == 1 ? "bookmark.fill" : "bookmark")
+                    Image(systemName: selectedTab == 1 ? "photo.fill" : "photo")
                         .font(.system(size: iconSize))
                         .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
 
-                    Text("habits")
+                    Text("gallery")
                         .font(.custom("Inter", size: fontSize))
                         .tracking(-0.5) // Negative letter spacing to condense text
                         .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
@@ -1508,25 +1459,25 @@ struct FloatingPillNavigation: View {
                             onTabTapped()
                         }
                     } else {
-                        // Update previousTab for Habits transition
+                        // Update previousTab for Gallery transition
                         previousTab = selectedTab
                         selectedTab = 1
                     }
                 }
-                
+
                 /*
-                 * GALLERY TAB: Dynamic active/inactive state
-                 * Icon: photo.fill when active, photo when inactive (single photo representation)
-                 * Text: "gallery" in small Inter font with negative tracking
+                 * HABITS TAB: Dynamic active/inactive state
+                 * Icon: bookmark.fill when active, bookmark when inactive
+                 * Text: "habits" in small Inter font with negative tracking
                  * Color: Changes based on selectedTab state
-                 * Action: Updates selectedTab to switch to Gallery view
+                 * Action: Updates selectedTab to switch to Habits view
                  */
                 VStack(spacing: 2) { // Reduced from 4 to 2
-                    Image(systemName: selectedTab == 2 ? "photo.fill" : "photo")
+                    Image(systemName: selectedTab == 2 ? "bookmark.fill" : "bookmark")
                         .font(.system(size: iconSize))
                         .foregroundColor(selectedTab == 2 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
 
-                    Text("gallery")
+                    Text("habits")
                         .font(.custom("Inter", size: fontSize))
                         .tracking(-0.5) // Negative letter spacing to condense text
                         .foregroundColor(selectedTab == 2 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
@@ -1546,7 +1497,7 @@ struct FloatingPillNavigation: View {
                             onTabTapped()
                         }
                     } else {
-                        // Update previousTab for Habits transition (Dashboard/Gallery use fixed positions)
+                        // Update previousTab for Habits transition
                         previousTab = selectedTab
                         selectedTab = 2
                     }

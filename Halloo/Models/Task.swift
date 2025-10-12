@@ -22,7 +22,35 @@ struct Task: Codable, Identifiable, Hashable {
     var completionCount: Int
     var lastCompletedAt: Date?
     var nextScheduledDate: Date
-    
+
+    // Custom decoder to handle old documents missing new fields
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        id = try container.decode(String.self, forKey: .id)
+        userId = try container.decode(String.self, forKey: .userId)
+        profileId = try container.decode(String.self, forKey: .profileId)
+        title = try container.decode(String.self, forKey: .title)
+        description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        category = try container.decodeIfPresent(TaskCategory.self, forKey: .category) ?? .other
+        frequency = try container.decode(TaskFrequency.self, forKey: .frequency)
+        scheduledTime = try container.decode(Date.self, forKey: .scheduledTime)
+        deadlineMinutes = try container.decodeIfPresent(Int.self, forKey: .deadlineMinutes) ?? 10
+        requiresPhoto = try container.decodeIfPresent(Bool.self, forKey: .requiresPhoto) ?? false
+        requiresText = try container.decodeIfPresent(Bool.self, forKey: .requiresText) ?? true
+        customDays = try container.decodeIfPresent([Weekday].self, forKey: .customDays) ?? []
+        startDate = try container.decodeIfPresent(Date.self, forKey: .startDate) ?? Date()
+        endDate = try container.decodeIfPresent(Date.self, forKey: .endDate)
+        status = try container.decodeIfPresent(TaskStatus.self, forKey: .status) ?? .active
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        lastModifiedAt = try container.decodeIfPresent(Date.self, forKey: .lastModifiedAt) ?? Date()
+        completionCount = try container.decodeIfPresent(Int.self, forKey: .completionCount) ?? 0
+        lastCompletedAt = try container.decodeIfPresent(Date.self, forKey: .lastCompletedAt)
+
+        // nextScheduledDate: use stored value or fall back to scheduledTime
+        nextScheduledDate = try container.decodeIfPresent(Date.self, forKey: .nextScheduledDate) ?? scheduledTime
+    }
+
     init(
         id: String,
         userId: String,

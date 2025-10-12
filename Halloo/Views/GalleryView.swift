@@ -64,6 +64,7 @@ struct GalleryView: View {
                             // Photo Grid extends naturally without bottom rounding
                             photoGridContent
                                 .background(Color.white)
+                                .animation(.easeInOut(duration: 0.3), value: selectedFilter)
                         }
                         .cornerRadius(10) // Round all corners
                         .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2) // Dark gray shadow

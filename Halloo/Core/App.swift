@@ -189,16 +189,26 @@ struct HalloApp: App {
     private func initializeCriticalServices() async {
         // Initialize authentication state
         let authService = container.resolve(AuthenticationServiceProtocol.self)
+        print("🔍 [App] BEFORE initializeAuthState - currentUser: \(authService.currentUser?.uid ?? "nil")")
         await authService.initializeAuthState()
-        
+        print("🔍 [App] AFTER initializeAuthState - currentUser: \(authService.currentUser?.uid ?? "nil")")
+
         // Initialize notification service
         let notificationService = container.resolve(NotificationServiceProtocol.self)
         await notificationService.initialize()
-        
+
         // Initialize data sync coordinator
         let dataSyncCoordinator = container.resolve(DataSyncCoordinator.self)
         await dataSyncCoordinator.initialize()
-        
+
+        // Setup incoming SMS listener if user is authenticated
+        if let userId = authService.currentUser?.uid {
+            print("✅ [App] User authenticated - setting up SMS listener for: \(userId)")
+            setupSMSListener(userId: userId, dataSyncCoordinator: dataSyncCoordinator)
+        } else {
+            print("⚠️ [App] User NOT authenticated - skipping SMS listener setup")
+        }
+
         print("✅ Critical services initialized successfully")
     }
     
@@ -230,9 +240,44 @@ struct HalloApp: App {
         }
     }
     
+    /// Sets up Firestore listener for incoming SMS messages
+    private func setupSMSListener(userId: String, dataSyncCoordinator: DataSyncCoordinator) {
+        print("📱 [App] Setting up SMS listener for user: \(userId)")
+
+        guard let databaseService = container.resolve(DatabaseServiceProtocol.self) as? FirebaseDatabaseService else {
+            print("❌ [App] Failed to cast DatabaseService to FirebaseDatabaseService")
+            return
+        }
+
+        // Subscribe to incoming SMS messages
+        databaseService.observeIncomingSMSMessages(userId)
+            .sink(
+                receiveCompletion: { completion in
+                    switch completion {
+                    case .finished:
+                        print("✅ [App] SMS listener completed")
+                    case .failure(let error):
+                        print("❌ [App] SMS listener error: \(error.localizedDescription)")
+                    }
+                },
+                receiveValue: { smsResponse in
+                    print("📩 [App] Received SMS response - broadcasting to DataSyncCoordinator")
+                    print("   - Profile ID: \(smsResponse.profileId ?? "unknown")")
+                    print("   - Message: \(smsResponse.textResponse ?? "no text")")
+                    print("   - Is Confirmation: \(smsResponse.isConfirmationResponse)")
+
+                    // Broadcast to all ViewModels via DataSyncCoordinator
+                    dataSyncCoordinator.broadcastSMSResponse(smsResponse)
+                }
+            )
+            .store(in: &container.cancellables) // Store in Container's cancellables
+
+        print("✅ [App] SMS listener registered successfully")
+    }
+
     private func checkPendingNotifications() {
         let notificationService = container.resolve(NotificationServiceProtocol.self)
-        
+
         _Concurrency.Task {
             await notificationService.checkPendingNotifications()
         }
