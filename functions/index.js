@@ -1,6 +1,6 @@
 const functions = require('firebase-functions');
 const {onSchedule} = require('firebase-functions/v2/scheduler');
-const {onCall} = require('firebase-functions/v2/https');
+const {onCall, onRequest} = require('firebase-functions/v2/https');
 const {defineSecret} = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const twilio = require('twilio');
@@ -643,6 +643,17 @@ exports.sendScheduledTaskReminders = onSchedule({
 
         smssSent++;
 
+        // Update nextScheduledDate for recurring habits only
+        if (habit.frequency !== 'once') {
+          const nextOccurrence = calculateNextOccurrence(habit);
+          await habitDoc.ref.update({
+            nextScheduledDate: admin.firestore.Timestamp.fromDate(nextOccurrence)
+          });
+          console.log(`📅 Updated nextScheduledDate for "${habit.title}" to ${nextOccurrence.toISOString()}`);
+        } else {
+          console.log(`⏱️ One-time habit "${habit.title}" - nextScheduledDate NOT updated`);
+        }
+
       } catch (smsError) {
         console.error(`❌ Failed to send SMS for habit ${habit.id}:`, smsError.message);
 
@@ -684,6 +695,95 @@ exports.sendScheduledTaskReminders = onSchedule({
 });
 
 /**
+ * Calculate the next scheduled occurrence for a recurring habit
+ *
+ * @param {Object} habit - Habit document data with frequency, customDays, scheduledTime
+ * @returns {Date} - Next scheduled date
+ */
+function calculateNextOccurrence(habit) {
+  const now = new Date();
+  const currentDate = habit.nextScheduledDate.toDate();
+
+  // Extract time components from scheduledTime
+  const scheduledTime = habit.scheduledTime.toDate();
+  const hours = scheduledTime.getHours();
+  const minutes = scheduledTime.getMinutes();
+  const seconds = scheduledTime.getSeconds();
+
+  switch (habit.frequency) {
+    case 'daily':
+      // Add 1 day to current nextScheduledDate
+      const nextDaily = new Date(currentDate);
+      nextDaily.setDate(nextDaily.getDate() + 1);
+      nextDaily.setHours(hours, minutes, seconds, 0);
+      return nextDaily;
+
+    case 'weekdays':
+      // Find next weekday (Monday-Friday)
+      const nextWeekday = new Date(currentDate);
+      nextWeekday.setDate(nextWeekday.getDate() + 1);
+      nextWeekday.setHours(hours, minutes, seconds, 0);
+
+      // Skip weekends (0 = Sunday, 6 = Saturday)
+      while (nextWeekday.getDay() === 0 || nextWeekday.getDay() === 6) {
+        nextWeekday.setDate(nextWeekday.getDate() + 1);
+      }
+      return nextWeekday;
+
+    case 'weekly':
+      // Add 7 days to current nextScheduledDate
+      const nextWeekly = new Date(currentDate);
+      nextWeekly.setDate(nextWeekly.getDate() + 7);
+      nextWeekly.setHours(hours, minutes, seconds, 0);
+      return nextWeekly;
+
+    case 'custom':
+      // Find next day that matches customDays array
+      const customDays = habit.customDays || [];
+      if (customDays.length === 0) {
+        // Fallback to daily if no custom days specified
+        const fallback = new Date(currentDate);
+        fallback.setDate(fallback.getDate() + 1);
+        fallback.setHours(hours, minutes, seconds, 0);
+        return fallback;
+      }
+
+      // Convert custom days to weekday numbers (0=Sunday, 1=Monday, etc.)
+      const dayMap = {
+        'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3,
+        'thursday': 4, 'friday': 5, 'saturday': 6
+      };
+      const targetDays = customDays.map(day => dayMap[day.toLowerCase()]);
+
+      // Search for next matching day (up to 14 days ahead)
+      const nextCustom = new Date(currentDate);
+      for (let i = 1; i <= 14; i++) {
+        nextCustom.setDate(currentDate.getDate() + i);
+        if (targetDays.includes(nextCustom.getDay())) {
+          nextCustom.setHours(hours, minutes, seconds, 0);
+          return nextCustom;
+        }
+      }
+
+      // Fallback if no match found
+      nextCustom.setDate(currentDate.getDate() + 1);
+      nextCustom.setHours(hours, minutes, seconds, 0);
+      return nextCustom;
+
+    case 'once':
+      // One-time habits should not be updated
+      return currentDate;
+
+    default:
+      // Fallback to daily
+      const defaultNext = new Date(currentDate);
+      defaultNext.setDate(defaultNext.getDate() + 1);
+      defaultNext.setHours(hours, minutes, seconds, 0);
+      return defaultNext;
+  }
+}
+
+/**
  * Helper: Generate task reminder message for elderly user
  *
  * @param {Object} habit - Habit document data
@@ -705,5 +805,122 @@ function getTaskReminderMessage(habit, profile) {
 
   return `Hi ${profile.name}! Time to: ${habit.title}\n\n${instructions}`;
 }
+
+/**
+ * MIGRATION: Fix existing habits with past nextScheduledDate
+ */
+exports.fixPastHabits = onRequest(async (req, res) => {
+  try {
+    console.log('🔧 Starting migration to fix past habits...');
+
+    // Get all habits
+    const allHabitsSnapshot = await admin.firestore()
+      .collectionGroup('habits')
+      .get();
+
+    const now = new Date();
+    const fixed = [];
+    const skipped = [];
+
+    for (const doc of allHabitsSnapshot.docs) {
+      const habit = doc.data();
+      const path = doc.ref.path;
+
+      // Check if nextScheduledDate is in the past
+      if (habit.nextScheduledDate && habit.nextScheduledDate.toDate() < now) {
+        console.log(`📅 Fixing: ${habit.title} (${path})`);
+
+        // Calculate new nextScheduledDate based on frequency
+        const nextOccurrence = calculateNextOccurrence(habit);
+
+        await doc.ref.update({
+          nextScheduledDate: admin.firestore.Timestamp.fromDate(nextOccurrence)
+        });
+
+        fixed.push({
+          title: habit.title,
+          oldDate: habit.nextScheduledDate.toDate().toISOString(),
+          newDate: nextOccurrence.toISOString()
+        });
+      } else {
+        skipped.push({
+          title: habit.title,
+          reason: habit.nextScheduledDate ? 'already in future' : 'missing nextScheduledDate'
+        });
+      }
+    }
+
+    console.log(`✅ Migration complete. Fixed: ${fixed.length}, Skipped: ${skipped.length}`);
+
+    res.json({
+      totalHabits: allHabitsSnapshot.size,
+      fixed: fixed.length,
+      skipped: skipped.length,
+      details: { fixed, skipped }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in fixPastHabits:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * DEBUG: Check all habits in database
+ */
+exports.debugAllHabits = onRequest(async (req, res) => {
+  try {
+    const now = admin.firestore.Timestamp.now();
+    const twoMinutesAgo = admin.firestore.Timestamp.fromDate(
+      new Date(Date.now() - 2 * 60 * 1000)
+    );
+
+    // Get ALL habits
+    const allHabitsSnapshot = await admin.firestore()
+      .collectionGroup('habits')
+      .get();
+
+    console.log(`📊 Total habits in database: ${allHabitsSnapshot.size}`);
+
+    const habitsInfo = [];
+
+    for (const doc of allHabitsSnapshot.docs) {
+      const habit = doc.data();
+      const path = doc.ref.path;
+
+      const info = {
+        path,
+        title: habit.title,
+        frequency: habit.frequency,
+        status: habit.status,
+        nextScheduledDate: habit.nextScheduledDate ? habit.nextScheduledDate.toDate().toISOString() : 'MISSING',
+        scheduledTime: habit.scheduledTime ? habit.scheduledTime.toDate().toISOString() : 'MISSING',
+        createdAt: habit.createdAt ? habit.createdAt.toDate().toISOString() : 'MISSING'
+      };
+
+      // Check if would match query
+      if (habit.status === 'active' && habit.nextScheduledDate) {
+        const inWindow = habit.nextScheduledDate >= twoMinutesAgo && habit.nextScheduledDate <= now;
+        info.wouldMatchQuery = inWindow;
+        info.queryWindow = `${twoMinutesAgo.toDate().toISOString()} to ${now.toDate().toISOString()}`;
+      } else {
+        info.wouldMatchQuery = false;
+        info.reason = habit.status !== 'active' ? 'status not active' : 'missing nextScheduledDate';
+      }
+
+      habitsInfo.push(info);
+    }
+
+    res.json({
+      totalHabits: allHabitsSnapshot.size,
+      habits: habitsInfo,
+      currentTime: now.toDate().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Error in debugAllHabits:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 

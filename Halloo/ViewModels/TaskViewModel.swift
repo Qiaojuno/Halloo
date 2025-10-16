@@ -643,6 +643,24 @@ final class TaskViewModel: ObservableObject {
 
             for (index, scheduledTime) in scheduledTimes.enumerated() {
                 print("   Creating task \(index + 1)/\(scheduledTimes.count)...")
+
+                // Calculate the correct first occurrence based on frequency
+                guard let nextScheduledDate = calculateFirstOccurrence(
+                    frequency: frequency,
+                    scheduledTime: scheduledTime,
+                    customDays: customDays
+                ) else {
+                    // This happens for one-time tasks scheduled in the past
+                    await MainActor.run {
+                        self.errorMessage = "Cannot create task with a time in the past. Please select a future time."
+                    }
+                    print("   ❌ Scheduled time is in the past for one-time task")
+                    throw TaskError.invalidScheduleTime
+                }
+
+                print("   📅 Calculated nextScheduledDate: \(nextScheduledDate)")
+                print("   ⏰ Original scheduledTime: \(scheduledTime)")
+
                 let task = Task(
                     id: IDGenerator.habitID(),
                     userId: userId,
@@ -660,9 +678,12 @@ final class TaskViewModel: ObservableObject {
                     endDate: endDate,
                     status: isActive ? .active : .paused,
                     createdAt: Date(),
-                    lastModifiedAt: Date()
+                    lastModifiedAt: Date(),
+                    nextScheduledDate: nextScheduledDate  // Use calculated date
                 )
-                print("   Task created: \(task.title) at \(scheduledTime)")
+                print("   ✅ Task created: \(task.title)")
+                print("      - Frequency: \(frequency)")
+                print("      - Next occurrence: \(nextScheduledDate)")
 
                 print("   💾 Saving to database...")
                 // Persist with family synchronization
@@ -1136,6 +1157,124 @@ final class TaskViewModel: ObservableObject {
         profileError = nil
     }
     
+    // MARK: - Scheduling Helpers
+
+    /// Calculate the first occurrence for a new task based on frequency and scheduled time
+    /// - Returns: The next valid occurrence timestamp, or nil if scheduled time is in the past for one-time tasks
+    private func calculateFirstOccurrence(
+        frequency: TaskFrequency,
+        scheduledTime: Date,
+        customDays: Set<Weekday>
+    ) -> Date? {
+        let now = Date()
+        let calendar = Calendar.current
+
+        // Extract time components (hours, minutes) from scheduledTime
+        let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: scheduledTime)
+
+        switch frequency {
+        case .once:
+            // For one-time tasks, scheduledTime must be in the future
+            if scheduledTime <= now {
+                return nil // Validation error - will be caught by caller
+            }
+            return scheduledTime
+
+        case .daily:
+            // Check if today's time hasn't passed yet
+            var components = calendar.dateComponents([.year, .month, .day], from: now)
+            components.hour = timeComponents.hour
+            components.minute = timeComponents.minute
+            components.second = timeComponents.second
+
+            let todayAtScheduledTime = calendar.date(from: components)!
+
+            if todayAtScheduledTime > now {
+                // Today's time hasn't passed - use today
+                return todayAtScheduledTime
+            } else {
+                // Today's time passed - use tomorrow
+                return calendar.date(byAdding: .day, value: 1, to: todayAtScheduledTime)!
+            }
+
+        case .weekdays:
+            // Find next weekday (Monday-Friday)
+            for daysAhead in 0...7 {
+                let futureDate = calendar.date(byAdding: .day, value: daysAhead, to: now)!
+                let weekday = calendar.component(.weekday, from: futureDate)
+
+                // Check if it's a weekday (Monday=2 through Friday=6)
+                if weekday >= 2 && weekday <= 6 {
+                    var components = calendar.dateComponents([.year, .month, .day], from: futureDate)
+                    components.hour = timeComponents.hour
+                    components.minute = timeComponents.minute
+                    components.second = timeComponents.second
+
+                    let candidate = calendar.date(from: components)!
+
+                    // Only use if it's in the future
+                    if candidate > now {
+                        return candidate
+                    }
+                }
+            }
+            return nil // Should never reach here
+
+        case .weekly:
+            // Find next occurrence of the same weekday
+            let currentWeekday = calendar.component(.weekday, from: scheduledTime)
+
+            for daysAhead in 0...14 {
+                let futureDate = calendar.date(byAdding: .day, value: daysAhead, to: now)!
+                let futureWeekday = calendar.component(.weekday, from: futureDate)
+
+                if futureWeekday == currentWeekday {
+                    var components = calendar.dateComponents([.year, .month, .day], from: futureDate)
+                    components.hour = timeComponents.hour
+                    components.minute = timeComponents.minute
+                    components.second = timeComponents.second
+
+                    let candidate = calendar.date(from: components)!
+
+                    if candidate > now {
+                        return candidate
+                    }
+                }
+            }
+            return nil // Should never reach here
+
+        case .custom:
+            // Find next day that matches customDays array
+            if customDays.isEmpty {
+                // No custom days selected - fallback to daily
+                return calculateFirstOccurrence(frequency: .daily, scheduledTime: scheduledTime, customDays: [])
+            }
+
+            // Search for next matching day (up to 14 days ahead)
+            for daysAhead in 0...14 {
+                let futureDate = calendar.date(byAdding: .day, value: daysAhead, to: now)!
+                let weekdayNum = calendar.component(.weekday, from: futureDate)
+                let weekday = Weekday.from(weekday: weekdayNum)
+
+                // Check if this day matches the custom days pattern
+                if customDays.contains(weekday) {
+                    var components = calendar.dateComponents([.year, .month, .day], from: futureDate)
+                    components.hour = timeComponents.hour
+                    components.minute = timeComponents.minute
+                    components.second = timeComponents.second
+
+                    let candidate = calendar.date(from: components)!
+
+                    // Only use if it's in the future
+                    if candidate > now {
+                        return candidate
+                    }
+                }
+            }
+            return nil // Should never reach here
+        }
+    }
+
     // MARK: - UI Actions
     func startCreateTask() {
         resetForm()
