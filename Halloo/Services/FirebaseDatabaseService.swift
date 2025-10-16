@@ -1026,7 +1026,39 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     
     // MARK: - Encoding/Decoding Helpers
 
-    /// Custom encoder that converts Swift Date objects to Firestore Timestamps
+    /**
+     Custom encoder for Firestore that intelligently converts Date fields to Firestore Timestamps.
+
+     ## Problem Solved
+     Swift's standard JSONEncoder converts Date objects to numeric timestamps (TimeInterval),
+     but Firestore expects Timestamp objects for proper indexing and querying. Simply converting
+     ALL numbers to Timestamps corrupts non-date fields (e.g., `dailySMSCount: 10` becomes
+     `{_seconds: 10}`).
+
+     ## Solution
+     This encoder uses field name heuristics to identify date-related fields and only converts
+     those to Firestore Timestamps, preserving other numeric and boolean values.
+
+     ## Supported Date Field Patterns
+     Fields containing these keywords are converted to Timestamps:
+     - `At` (createdAt, updatedAt, lastActiveAt)
+     - `Date` (nextScheduledDate, startDate, endDate)
+     - `Time` (scheduledTime, lastTime)
+     - `timestamp`, `created`, `modified`, `updated`, `last`, `next`, `scheduled`
+
+     ## Example
+     ```swift
+     let task = Task(
+         createdAt: Date(),           // → Firestore Timestamp ✅
+         nextScheduledDate: Date(),   // → Firestore Timestamp ✅
+         dailySMSCount: 5,            // → Number (preserved) ✅
+         isActive: true               // → Boolean (preserved) ✅
+     )
+     ```
+
+     - Warning: If you add a new date field, ensure its name matches one of the patterns above
+     - SeeAlso: `isDateField(_:)` for the complete pattern matching logic
+     */
     private class FirestoreEncoder {
         func encode<T: Codable>(_ value: T) throws -> [String: Any] {
             let encoder = JSONEncoder()
