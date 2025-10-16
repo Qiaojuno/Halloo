@@ -19,6 +19,7 @@ import Foundation
 import SwiftUI
 import Combine
 import SuperwallKit
+import OSLog
 
 
 /// Guides families through comprehensive onboarding and elderly care education workflow
@@ -200,10 +201,10 @@ final class OnboardingViewModel: ObservableObject {
     
     /// Database service for user profile creation and onboarding data persistence
     private let databaseService: DatabaseServiceProtocol
-    
-    /// Coordinator for onboarding-specific error handling and family communication
-    private let errorCoordinator: ErrorCoordinator
-    
+
+    /// Logger for onboarding flow tracking and error diagnosis
+    private let logger = Logger(subsystem: "com.halloo.app", category: "Onboarding")
+
     // MARK: - Internal Onboarding Coordination Properties
     
     /// Combine cancellables for reactive onboarding form validation
@@ -300,19 +301,16 @@ final class OnboardingViewModel: ObservableObject {
     ///
     /// - Parameter authService: Handles account creation and social authentication
     /// - Parameter databaseService: Manages user profile creation and quiz data persistence
-    /// - Parameter errorCoordinator: Provides onboarding-specific error handling and recovery
     init(
         authService: AuthenticationServiceProtocol,
-        databaseService: DatabaseServiceProtocol,
-        errorCoordinator: ErrorCoordinator
+        databaseService: DatabaseServiceProtocol
     ) {
         self.authService = authService
         self.databaseService = databaseService
-        self.errorCoordinator = errorCoordinator
-        
+
         // Configure real-time form validation for account security
         setupValidation()
-        
+
         // Enable visual progress feedback for family confidence
         setupProgressTracking()
     }
@@ -539,7 +537,7 @@ final class OnboardingViewModel: ObservableObject {
 
             await MainActor.run {
                 errorMessage = "Failed to complete sign in: \(error.localizedDescription)"
-                errorCoordinator.handle(error, context: "Post-authentication user check")
+                logger.error("Post-authentication user check failed: \(error.localizedDescription)")
             }
         }
     }
@@ -617,7 +615,7 @@ final class OnboardingViewModel: ObservableObject {
             
         } catch {
             errorMessage = error.localizedDescription
-            errorCoordinator.handle(error, context: "Creating family account for elderly care coordination")
+            logger.error("Creating family account failed: \(error.localizedDescription)")
         }
         
         isLoading = false
@@ -679,7 +677,7 @@ final class OnboardingViewModel: ObservableObject {
             
         } catch {
             errorMessage = error.localizedDescription
-            errorCoordinator.handle(error, context: "Completing elderly care onboarding setup")
+            logger.error("Completing onboarding failed: \(error.localizedDescription)")
         }
         
         isLoading = false
@@ -735,7 +733,7 @@ final class OnboardingViewModel: ObservableObject {
         } catch {
             await MainActor.run {
                 errorMessage = error.localizedDescription
-                errorCoordinator.handle(error, context: "Marking onboarding complete")
+                logger.error("Marking onboarding complete failed: \(error.localizedDescription)")
             }
         }
     }
@@ -836,7 +834,7 @@ final class OnboardingViewModel: ObservableObject {
             
         } catch {
             errorMessage = error.localizedDescription
-            errorCoordinator.handle(error, context: "Apple Sign In")
+            logger.error("Apple Sign In failed: \(error.localizedDescription)")
         }
         
         isLoading = false
@@ -898,7 +896,7 @@ final class OnboardingViewModel: ObservableObject {
             
         } catch {
             errorMessage = error.localizedDescription
-            errorCoordinator.handle(error, context: "Google Sign In")
+            logger.error("Google Sign In failed: \(error.localizedDescription)")
         }
         
         isLoading = false

@@ -486,3 +486,298 @@ exports.manualCleanup = functions.https.onRequest(async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+/**
+ * Cloud Scheduler: Check for due habits every minute and send SMS reminders
+ *
+ * Runs: Every 1 minute
+ * Checks: All active habits where scheduledTime <= now
+ * Sends: SMS via Twilio to elderly user's phone
+ * Logs: SMS delivery to /users/{userId}/smsLogs
+ *
+ * This is the CRITICAL MISSING PIECE that converts scheduled habits into actual SMS delivery.
+ * Without this function, 0% of habit reminders reach elderly users via SMS.
+ */
+exports.sendScheduledTaskReminders = onSchedule({
+  schedule: 'every 1 minutes',
+  timeZone: 'America/Los_Angeles',
+  secrets: [twilioAccountSid, twilioAuthToken, twilioPhoneNumber]
+}, async (event) => {
+  console.log('⏰ Running scheduled task reminder check...');
+
+  const now = admin.firestore.Timestamp.now();
+  const twoMinutesAgo = admin.firestore.Timestamp.fromDate(
+    new Date(Date.now() - 2 * 60 * 1000)
+  );
+
+  try {
+    // Find all active habits scheduled in last 2 minutes
+    const habitsSnapshot = await admin.firestore()
+      .collectionGroup('habits')
+      .where('status', '==', 'active')
+      .where('nextScheduledDate', '>=', twoMinutesAgo)
+      .where('nextScheduledDate', '<=', now)
+      .get();
+
+    console.log(`📋 Found ${habitsSnapshot.size} habits due for reminders`);
+
+    if (habitsSnapshot.empty) {
+      console.log('✅ No habits due right now');
+      return null;
+    }
+
+    let smssSent = 0;
+    let smsFailed = 0;
+    let smsSkipped = 0;
+
+    // Process each due habit
+    for (const habitDoc of habitsSnapshot.docs) {
+      const habit = habitDoc.data();
+      const habitPath = habitDoc.ref.path;
+
+      // Extract userId and profileId from path: users/{userId}/profiles/{profileId}/habits/{habitId}
+      const pathParts = habitPath.split('/');
+      if (pathParts.length < 4 || pathParts[0] !== 'users' || pathParts[2] !== 'profiles') {
+        console.warn(`⚠️ Invalid habit path structure: ${habitPath}`);
+        continue;
+      }
+
+      const userId = pathParts[1];
+      const profileId = pathParts[3];
+
+      console.log(`📝 Processing habit: ${habit.title} for user ${userId}, profile ${profileId}`);
+
+      // Get profile to retrieve phone number
+      const profileDoc = await admin.firestore()
+        .doc(`users/${userId}/profiles/${profileId}`)
+        .get();
+
+      if (!profileDoc.exists) {
+        console.warn(`⚠️ Profile not found: ${profileId}`);
+        smsSkipped++;
+        continue;
+      }
+
+      const profile = profileDoc.data();
+
+      // Check if profile is confirmed
+      if (profile.status !== 'confirmed') {
+        console.warn(`⚠️ Profile not confirmed: ${profile.name} (status: ${profile.status})`);
+        smsSkipped++;
+        continue;
+      }
+
+      // Check if profile has opted out
+      if (profile.smsOptedOut === true) {
+        console.log(`🛑 Profile has opted out of SMS: ${profile.name}`);
+        smsSkipped++;
+        continue;
+      }
+
+      // Check if phone number exists
+      if (!profile.phoneNumber) {
+        console.warn(`⚠️ No phone number for profile: ${profile.name}`);
+        smsSkipped++;
+        continue;
+      }
+
+      // Check if SMS already sent for this exact scheduled time (prevent duplicates)
+      const scheduledTimeDate = habit.nextScheduledDate.toDate();
+
+      const smsLogQuery = await admin.firestore()
+        .collection(`users/${userId}/smsLogs`)
+        .where('habitId', '==', habit.id)
+        .where('nextScheduledDate', '==', habit.nextScheduledDate)
+        .where('direction', '==', 'outbound')
+        .limit(1)
+        .get();
+
+      if (!smsLogQuery.empty) {
+        console.log(`✅ SMS already sent for habit ${habit.id} at ${scheduledTimeDate.toISOString()}`);
+        smsSkipped++;
+        continue;
+      }
+
+      // Generate task reminder message
+      const message = getTaskReminderMessage(habit, profile);
+
+      // Initialize Twilio client
+      const twilioClient = twilio(
+        twilioAccountSid.value(),
+        twilioAuthToken.value()
+      );
+
+      // Send SMS via Twilio
+      try {
+        const twilioMessage = await twilioClient.messages.create({
+          body: message,
+          from: twilioPhoneNumber.value(),
+          to: profile.phoneNumber
+        });
+
+        console.log(`✅ SMS sent: ${twilioMessage.sid} to ${profile.name}`);
+
+        // Log SMS delivery for audit trail
+        await admin.firestore()
+          .collection(`users/${userId}/smsLogs`)
+          .add({
+            habitId: habit.id,
+            profileId: profile.id,
+            to: profile.phoneNumber,
+            message: message,
+            messageType: 'taskReminder',
+            twilioSid: twilioMessage.sid,
+            status: twilioMessage.status,
+            nextScheduledDate: habit.nextScheduledDate,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+            direction: 'outbound'
+          });
+
+        // Increment user's SMS quota
+        await admin.firestore()
+          .collection('users')
+          .doc(userId)
+          .update({
+            smsQuotaUsed: admin.firestore.FieldValue.increment(1)
+          });
+
+        smssSent++;
+
+      } catch (smsError) {
+        console.error(`❌ Failed to send SMS for habit ${habit.id}:`, smsError.message);
+
+        // Log failure for debugging
+        await admin.firestore()
+          .collection(`users/${userId}/smsLogs`)
+          .add({
+            habitId: habit.id,
+            profileId: profile.id,
+            to: profile.phoneNumber,
+            message: message,
+            messageType: 'taskReminder',
+            status: 'failed',
+            errorMessage: smsError.message,
+            nextScheduledDate: habit.nextScheduledDate,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+            direction: 'outbound'
+          });
+
+        smsFailed++;
+      }
+    }
+
+    const summary = {
+      totalHabits: habitsSnapshot.size,
+      smssSent,
+      smsFailed,
+      smsSkipped,
+      timestamp: new Date().toISOString()
+    };
+
+    console.log('✅ Scheduled task reminder check complete:', JSON.stringify(summary, null, 2));
+    return summary;
+
+  } catch (error) {
+    console.error('❌ Error in sendScheduledTaskReminders:', error);
+    throw error;
+  }
+});
+
+/**
+ * Helper: Generate task reminder message for elderly user
+ *
+ * @param {Object} habit - Habit document data
+ * @param {Object} profile - Profile document data
+ * @returns {string} - Formatted SMS message
+ */
+function getTaskReminderMessage(habit, profile) {
+  let instructions = '';
+
+  if (habit.requiresPhoto && habit.requiresText) {
+    instructions = 'Reply with a photo and text when done.';
+  } else if (habit.requiresPhoto) {
+    instructions = 'Reply with a photo when done.';
+  } else if (habit.requiresText) {
+    instructions = 'Reply DONE when complete.';
+  } else {
+    instructions = 'Reply when done.';
+  }
+
+  return `Hi ${profile.name}! Time to: ${habit.title}\n\n${instructions}`;
+}
+
+
+// One-time cleanup function
+exports.deleteOldHabits = functions.https.onRequest(async (req, res) => {
+  const habitsSnapshot = await admin.firestore().collectionGroup("habits").get();
+  let deletedCount = 0;
+  let keptCount = 0;
+  const results = [];
+
+  for (const doc of habitsSnapshot.docs) {
+    const habit = doc.data();
+    const isOldFormat = typeof habit.nextScheduledDate === "number";
+
+    if (isOldFormat) {
+      await doc.ref.delete();
+      deletedCount++;
+      results.push({ title: habit.title, action: "DELETED" });
+    } else {
+      keptCount++;
+      results.push({ title: habit.title, action: "KEPT" });
+    }
+  }
+
+  res.json({ deleted: deletedCount, kept: keptCount, habits: results });
+});
+
+exports.checkProfiles = functions.https.onRequest(async (req, res) => {
+  const profilesSnapshot = await admin.firestore()
+    .collectionGroup("profiles")
+    .get();
+  
+  const profiles = [];
+  profilesSnapshot.docs.forEach(doc => {
+    profiles.push({
+      id: doc.id,
+      path: doc.ref.path,
+      data: doc.data()
+    });
+  });
+  
+  res.json({ count: profiles.length, profiles: profiles });
+});
+
+exports.fixCorruptedProfile = functions.https.onRequest(async (req, res) => {
+  const profileRef = admin.firestore().doc("users/IJue7FhdmbbIzR3WG6Tzhhf2ykD2/profiles/+17788143739");
+  
+  await profileRef.update({
+    dailySMSCount: 0,
+    dailySMSLimit: 10,
+    isEmergencyContact: false,
+    smsOptedOut: false
+  });
+  
+  const updated = await profileRef.get();
+  res.json({ success: true, profile: updated.data() });
+});
+
+exports.debugHabits = functions.https.onRequest(async (req, res) => {
+  const habitsSnapshot = await admin.firestore()
+    .collectionGroup("habits")
+    .get();
+  
+  const habits = [];
+  habitsSnapshot.docs.forEach(doc => {
+    const data = doc.data();
+    habits.push({
+      id: doc.id,
+      title: data.title,
+      nextScheduledDate: data.nextScheduledDate,
+      scheduledTime: data.scheduledTime,
+      allFields: Object.keys(data)
+    });
+  });
+  
+  res.json({ count: habits.length, habits: habits });
+});

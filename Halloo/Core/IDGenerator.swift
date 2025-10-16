@@ -52,26 +52,17 @@ enum IDGenerator {
     /// - Parameter phoneNumber: Phone number in any format (e.g., "555-123-4567", "+1 (555) 123-4567")
     /// - Returns: E.164 normalized phone number (e.g., "+15551234567")
     static func profileID(phoneNumber: String) -> String {
-        DiagnosticLogger.info(.profileId, "Generating profile ID from phone", context: [
-            "input": phoneNumber
-        ])
+        print("ℹ️ [ProfileId] Generating profile ID from phone - input: \(phoneNumber)")
 
         let normalized = phoneNumber.normalizedE164()
 
-        DiagnosticLogger.success(.profileId, "Profile ID generated", context: [
-            "input": phoneNumber,
-            "output": normalized,
-            "isE164": normalized.isE164Format
-        ])
+        print("✅ [ProfileId] Profile ID generated - input: \(phoneNumber), output: \(normalized), isE164: \(normalized.isE164Format)")
 
         assert(normalized.hasPrefix("+"), "Profile ID must be E.164 format: \(normalized)")
         assert(normalized.count >= 11, "Profile ID too short: \(normalized)")
 
         if !normalized.isE164Format {
-            DiagnosticLogger.warning(.profileId, "Generated ID not in E.164 format", context: [
-                "input": phoneNumber,
-                "output": normalized
-            ])
+            print("⚠️ [ProfileId] Generated ID not in E.164 format - input: \(phoneNumber), output: \(normalized)")
         }
 
         return normalized

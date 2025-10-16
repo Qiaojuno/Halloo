@@ -80,7 +80,7 @@ struct User: Codable, Identifiable, Hashable {
     }
 
     init(from decoder: Decoder) throws {
-        DiagnosticLogger.debug(.userModel, "Decoding User from Firestore")
+        print("🔵 Decoding User from Firestore")
 
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -102,7 +102,7 @@ struct User: Codable, Identifiable, Hashable {
         } else if let date = try? container.decode(Date.self, forKey: .createdAt) {
             createdAt = date
         } else {
-            DiagnosticLogger.warning(.userModel, "createdAt missing, using current date", context: ["userId": id])
+            print("⚠️ [User] createdAt missing for user \(id), using current date")
             createdAt = Date()
         }
 
@@ -116,7 +116,7 @@ struct User: Codable, Identifiable, Hashable {
         } else if let date = try? container.decode(Date.self, forKey: .updatedAt) {
             updatedAt = date
         } else {
-            DiagnosticLogger.warning(.userModel, "updatedAt missing, using current date", context: ["userId": id])
+            print("⚠️ [User] updatedAt missing for user \(id), using current date")
             updatedAt = Date()
         }
 
@@ -148,17 +148,11 @@ struct User: Codable, Identifiable, Hashable {
             smsQuotaPeriodEnd = Calendar.current.date(byAdding: .month, value: 1, to: Date()) ?? Date()
         }
 
-        DiagnosticLogger.success(.userModel, "User decoded successfully", context: [
-            "userId": id,
-            "email": email,
-            "profileCount": profileCount,
-            "taskCount": taskCount,
-            "smsQuota": "\(smsQuotaUsed)/\(smsQuotaLimit)"
-        ])
+        print("✅ [User] User decoded successfully - ID: \(id), Email: \(email), Profiles: \(profileCount), Tasks: \(taskCount), SMS Quota: \(smsQuotaUsed)/\(smsQuotaLimit)")
     }
 
     func encode(to encoder: Encoder) throws {
-        DiagnosticLogger.debug(.userModel, "Encoding User to Firestore", context: ["userId": id])
+        print("🔵 [User] Encoding User to Firestore - ID: \(id)")
 
         var container = encoder.container(keyedBy: CodingKeys.self)
 
@@ -180,12 +174,7 @@ struct User: Codable, Identifiable, Hashable {
         try container.encode(smsQuotaPeriodStart, forKey: .smsQuotaPeriodStart)
         try container.encode(smsQuotaPeriodEnd, forKey: .smsQuotaPeriodEnd)
 
-        DiagnosticLogger.debug(.userModel, "User encoded", context: [
-            "userId": id,
-            "profileCount": profileCount,
-            "taskCount": taskCount,
-            "smsQuota": "\(smsQuotaUsed)/\(smsQuotaLimit)"
-        ])
+        print("✅ [User] User encoded - ID: \(id), Profiles: \(profileCount), Tasks: \(taskCount), SMS Quota: \(smsQuotaUsed)/\(smsQuotaLimit)")
     }
 }
 

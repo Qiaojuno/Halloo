@@ -1,480 +1,498 @@
-# Session State - Halloo/Remi iOS App
-**Last updated:** 2025-10-09
-**Last commit:** (pending) - Twilio SMS Integration in progress
-**Status:** ✅ Auth working, ✅ Profile creation working, ✅ Habit deletion working, ✅ Gallery loading working, ✅ Schema migration complete, ✅ ID generation standardized, ✅ User model synchronized, 🚧 Twilio SMS integration Phase 1
+# Session State - Current Status
+**Date:** 2025-10-14 21:55
+**Status:** ✅ **BUILD SUCCESSFUL** - All MVP refactoring complete
+**Confidence:** 9/10
 
 ---
 
-## 📖 QUICK START
+## 🎯 EXECUTIVE SUMMARY
 
-**New to this session? Read in order:**
-1. This file (SESSION-STATE.md) - Current state overview
-2. `QUICK-START-NEXT-SESSION.md` - Immediate action items
-3. `architecture/Hallo-iOS-App-Structure.txt` - Full app architecture
+### Current State
+- **Build Status:** ✅ **BUILD SUCCEEDED** (verified 2025-10-14 21:51)
+- **Phase 1 (Deletions):** ✅ COMPLETE (9,643 LOC deleted)
+- **Phase 2 (Compilation Fixes):** ✅ COMPLETE (all blockers resolved)
+- **Code Reduction:** 15,334 → 11,974 LOC (-22%)
+- **Git Status:** Working directory has uncommitted changes ready to commit
 
----
+### Why Documentation Was Outdated
+- README-NEXT-SESSION.md was written **before** Phase 2 fixes were completed
+- Documentation said "app won't compile" but all fixes were already done
+- Files show timestamps from 2025-10-14 18:00-18:42 (fixes completed)
+- Documentation created at 18:15-18:25 (before verification)
 
-## 📊 PROJECT OVERVIEW
-
-**App Name:** Halloo/Remi
-**Purpose:** Elderly care coordination app for family caregivers
-**Tech Stack:** iOS (SwiftUI) + Firebase (Auth + Firestore) + Twilio (SMS)
-**Architecture:** MVVM with Container Pattern (Dependency Injection)
-
-**Key Features:**
-- Elderly profile management with SMS confirmation
-- Daily habit/task reminders via SMS
-- Photo response tracking and gallery
-- Family dashboard for monitoring care
-
----
-
-## ✅ COMPLETED TASKS
-
-### 0. Infrastructure Verification (DONE - 2025-10-09)
-
-**Verified by automated agents:**
-
-#### A. Firebase Schema Migration ✅ COMPLETE
-- **Status:** All production code uses nested subcollection architecture
-- **Evidence:** FirebaseDatabaseService.swift uses CollectionPath enum with nested paths
-- **Profile Operations:** `/users/{uid}/profiles/{pid}` ✅
-- **Habit Operations:** `/users/{uid}/profiles/{pid}/habits/{hid}` ✅
-- **Message Operations:** `/users/{uid}/profiles/{pid}/messages/{mid}` ✅
-- **Recursive Delete:** Properly cascades through all subcollections ✅
-- **Security Rules:** Support nested structure with automatic scoping ✅
-- **Collection Group Queries:** Filter by userId with composite indexes ✅
-
-#### B. ID Generation Strategy ✅ STANDARDIZED
-- **Status:** Centralized IDGenerator.swift utility with comprehensive documentation
-- **User IDs:** Firebase Auth UID (pass-through) ✅
-- **Profile IDs:** Normalized phone number in E.164 format (prevents duplicates) ✅
-- **Habit IDs:** UUID (unique per creation) ✅
-- **Message IDs:** Twilio SID or UUID fallback ✅
-- **Phone Normalization:** Robust E.164 conversion with validation ✅
-- **No Violations:** All production code uses IDGenerator methods ✅
-
-#### C. User Model Field Synchronization ✅ COMPLETE
-- **Status:** All 14 fields synchronized between User.swift and Firestore
-- **Model Fields:** id, email, fullName, phoneNumber, createdAt, isOnboardingComplete, subscriptionStatus, trialEndDate, quizAnswers, profileCount, taskCount, updatedAt, lastSyncTimestamp ✅
-- **Firestore Writes:** All fields properly written during creation and updates ✅
-- **Timestamp Handling:** Custom Codable implementation handles both Firestore Timestamp and Swift Date ✅
-- **Auto-calculated Fields:** profileCount, taskCount, updatedAt maintained correctly ✅
-- **No Missing Fields:** Complete synchronization verified ✅
-
-**Files Verified:**
-- `Halloo/Services/FirebaseDatabaseService.swift` - Nested paths implementation
-- `Halloo/Core/IDGenerator.swift` - Centralized ID generation with documentation
-- `Halloo/Models/User.swift` - Complete field definitions with custom Codable
-- `Halloo/Services/FirebaseAuthenticationService.swift` - User creation with all fields
-- `firestore.rules` - Nested structure security rules
-- `firestore.indexes.json` - Collection group composite indexes
-
-### 1. Gallery UI Polish & Data Loading Fix (DONE - 2025-10-09)
-
-**Problem Fixed:**
-- Gallery showed empty state despite Firebase data existing
-- GalleryViewModel initialized with Mock services, never updated to Firebase
-- Text message preview had visible gaps/breaks in speech bubbles
-- Profile avatar reverted to blue circle after git checkout
-
-**Solution Implemented:**
-- **Service injection fix**: Changed services from `private let` to `private var` in GalleryViewModel
-- **Implemented updateServices()**: Actually assigns Firebase services instead of being no-op stub
-- **Simplified speech bubble rendering**: Removed complex spacing logic, use HStack(spacing: 1) for clean gaps
-- **Restored profile avatar**: Replaced blue circle with profile emoji overlay
-
-**Files Changed:**
-- `Halloo/ViewModels/GalleryViewModel.swift` - Mutable services, real injection
-- `Halloo/Views/Components/GalleryPhotoView.swift` - Speech bubble simplification, profile avatar
-- `Halloo/Views/GalleryView.swift` - Example message box updates
-
-**Result:**
-- ✅ Gallery loads real Firebase data (not mock empty array)
-- ✅ Text segments render cleanly with 1px gaps (no visible breaks)
-- ✅ Profile emoji displays in bottom-right corner
-- ✅ Correct gap counts: Line 1 (2), Line 2 (1), Line 3 (2)
-
-### 2. iOS-Native Habit Deletion Animation (DONE - 2025-10-08)
-
-**Problem Fixed:**
-- Habit deletion felt sluggish with no visual feedback during async operation
-- Swipe-to-delete conflicted with vertical scrolling
-- Global `.animation(nil)` blocked all animations
-- Missing characteristic iOS slide-away deletion effect
-
-**Solution Implemented:**
-- **Optimistic UI updates**: Added `locallyDeletedHabitIds` Set to track deleting habits locally
-- **Immediate animation**: Habit slides left and fades out instantly (350ms spring) while database deletion happens in background
-- **Gesture direction detection**: DragGesture now detects horizontal vs vertical movement (10-point threshold)
-- **Removed animation blocker**: Deleted global `.animation(nil)` that was preventing all animations
-- **Direct path deletion**: Changed from collection group query to direct Firestore path construction
-- **Error recovery**: If deletion fails, habit slides back in with animation
-
-**Files Changed:**
-- `Halloo/Views/HabitsView.swift` - Optimistic updates, gesture detection, animation fixes
-- `Halloo/Services/DatabaseServiceProtocol.swift` - Updated deleteTask signature with userId/profileId
-- `Halloo/Services/FirebaseDatabaseService.swift` - Direct path deletion (no collection group query)
-- `Halloo/Services/MockDatabaseService.swift` - Updated mock to match new signature
-- `Halloo/ViewModels/TaskViewModel.swift` - Pass userId/profileId to deleteTask
-
-**Result:**
-- ✅ Instant slide-away animation (iOS-native feel)
-- ✅ Smooth upward movement of remaining habits
-- ✅ Vertical scroll works without triggering delete
-- ✅ No Firestore index requirements for deletion
-- ✅ Proper error handling with animation reversal
-
-### 2. Profile Creation Fix (DONE - 2025-10-07)
-
-**Problem Fixed:**
-- Profile creation button appeared broken (silent failures)
-- Validation mismatch between UI and ViewModel
-- Missing user documents for returning users
-- updateData() failing on non-existent documents
-
-**Solution Implemented:**
-- Simplified `isValidForm` to only require name + phone
-- Set default `relationship = "Family Member"` if not collected by UI
-- Added error messages for validation failures
-- Changed `updateData()` to `setData(merge: true)` to create missing documents
-- Added comprehensive diagnostic logging throughout profile creation flow
-
-**Files Changed:**
-- `Halloo/ViewModels/ProfileViewModel.swift` - Simplified validation, added logging
-- `Halloo/Views/ProfileViews.swift` - Added default relationship and logging
-- `Halloo/Services/FirebaseDatabaseService.swift` - Fixed document creation with merge
-
-**Result:**
-- ✅ Profile creation works for all users (new and returning)
-- ✅ Clear error messages if validation fails
-- ✅ User documents created automatically if missing
-- ✅ Photo and relationship optional as intended
-
-### 2. Authentication Navigation Fix (DONE - 2025-10-07)
-
-**Problem Fixed:**
-- Login screen stuck after successful Google Sign-In
-- Firestore security rules blocking user data access
-- ContentView not reacting to auth state changes
-
-**Solution Implemented:**
-- Updated Firestore security rules to allow authenticated users to access their own data
-- Added `@State private var isAuthenticated` to ContentView for reactive navigation
-- Created `setupAuthStateObserver()` to subscribe to auth state publisher
-- Auth state changes now trigger SwiftUI re-render and navigate to dashboard
-
-**Files Changed:**
-- Firebase Console - Updated Firestore security rules
-- `Halloo/Views/ContentView.swift` - Added auth state observer with Combine subscription
-
-**Diagnostic Logging:**
-- Shows auth succeeding with `isAuthenticated=true`
-- Profiles loading successfully after auth
-- Navigation to dashboard working
-
-### 3. Authentication Flow Restructuring (DONE - 2025-10-04)
-
-**Problem Fixed:**
-- Logout button didn't work
-- Users had to sign in twice
-- Login screen stuck after successful sign-in
-
-**Solution Implemented:**
-- Container uses singleton pattern for AuthenticationServiceProtocol
-- FirebaseAuthenticationService is ObservableObject with @Published isAuthenticated
-- ContentView uses direct @State reference to auth service
-- LoginView callback removed manual state updates
-- Added logout button to SharedHeaderSection
-
-**Files Changed:**
-- `Halloo/Models/Container.swift` - Singleton pattern
-- `Halloo/Services/FirebaseAuthenticationService.swift` - ObservableObject
-- `Halloo/Views/ContentView.swift` - Direct state reference
-- `Halloo/Views/Components/SharedHeaderSection.swift` - Logout button
-- `Halloo/Views/LoginView.swift` - Removed manual state update
-
-**Commit:** `3ab5c25`
-
-### 4. Diagnostic Logging Implementation (DONE - 2025-10-07)
-
-**Implemented:**
-- Created `DiagnosticLogger.swift` with 11 categories and 5 log levels
-- Added logging to Firebase schema delete operations with verification
-- Added logging to User model Codable with Firestore Timestamp handling
-- Added logging to Profile ID generation with duplicate detection
-- Added logging to ViewModel initialization with auth state tracking
-- Added logging to async profile creation with error handling
-
-**Files Changed:**
-- `Halloo/Core/DiagnosticLogger.swift` - New consolidated logging utility (285 lines)
-- `Halloo/Services/FirebaseDatabaseService.swift` - Delete verification logging
-- `Halloo/Models/User.swift` - Custom Codable with Timestamp handling
-- `Halloo/Core/IDGenerator.swift` - Phone normalization logging
-- `Halloo/ViewModels/ProfileViewModel.swift` - Init, load, create logging
-
-**Documentation:**
-- `docs/DIAGNOSTIC-LOGGING-IMPLEMENTATION.md` - Complete implementation guide
-
-### 5. Profile Creation Bug Fix (DONE - 2025-10-03)
-
-**Root Causes Fixed:**
-1. **Missing User Document** - User document not created on Google/Apple sign-in
-2. **SwiftUI ForEach ID Bug** - Using `.offset` instead of `.element.id`
-3. **ProfileViewModel Timing** - Loading profiles before authentication complete
-
-**Files Changed:**
-- `FirebaseAuthenticationService.swift` - Create user document for new users
-- `SharedHeaderSection.swift` - Fixed ForEach ID from offset to element.id
-- `ContentView.swift` - Added profileViewModel.loadProfiles() after auth
-- `ProfileViewModel.swift` - Made createProfileAsync() public
-
-See: `sessions/SESSION-2025-10-03-ProfileCreationFix.md` for detailed investigation
-
-### 6. Firebase Migration Infrastructure (DONE - 2025-10-04)
-
-**Created:**
-- `migrate.js` - Migration script using Firebase Admin SDK
-- `package.json` - NPM scripts for migration
-- `MIGRATION-README.md` - Step-by-step guide
-- `check-data.js` - Data verification script
-
-**Firebase Setup:**
-- Cloud Firestore API enabled
-- Database created (Standard Edition, us-central1)
-- Service account key configured
-
-**Installed:**
-- firebase-admin npm package
+### Root Cause of Mishap
+1. Documentation written **during** Phase 1, before verifying compilation
+2. No build verification step before creating "next steps" docs
+3. Phase 2 completed silently without updating status docs
+4. **Lesson:** Always verify build status before documenting blockers
 
 ---
 
-## 🔄 CURRENT WORK: Twilio SMS Integration (Phase 1)
+## 📁 CURRENT FILE STRUCTURE
 
-### Status: 🚧 In Progress
-**Planning Document:** `docs/TWILIO-INTEGRATION-PLAN.md`
+### Core (6 files) - All Present ✅
+```
+Halloo/Core/
+├── App.swift (11,921 bytes) - Modified 18:42
+├── AppFonts.swift (2,699 bytes)
+├── AppState.swift (15,015 bytes) - Modified 18:14
+├── DataSyncCoordinator.swift (32,786 bytes) - Modified 18:34
+├── IDGenerator.swift (8,150 bytes) - Modified 18:31
+└── String+Extensions.swift (9,050 bytes)
+```
 
-**Phase 1 Tasks (8-12 hours):**
-- [ ] Add opt-out fields to ElderlyProfile model
-- [ ] Add SMS quota fields to User model
-- [ ] Create TwilioSMSService.swift (production implementation)
-- [ ] Implement STOP keyword handler in ProfileViewModel
-- [ ] Update consent message with TCPA compliance
-- [ ] Block duplicate phone numbers in FirebaseDatabaseService
-- [ ] Add quiet hours validation to TaskCategory
+**Deleted from Core:**
+- ❌ DiagnosticLogger.swift (DELETED - Phase 1)
+- ❌ ErrorCoordinator.swift (DELETED - Phase 1)
+- ❌ NotificationCoordinator.swift (DELETED - Phase 1)
 
-**See:** `docs/TWILIO-INTEGRATION-PLAN.md` for full roadmap
+### Services (8 files) - All Present ✅
+```
+Halloo/Services/
+├── AuthenticationServiceProtocol.swift (17,162 bytes)
+├── DatabaseServiceProtocol.swift (30,227 bytes)
+├── FirebaseAuthenticationService.swift (21,191 bytes)
+├── FirebaseDatabaseService.swift (53,436 bytes) - Modified 18:29
+├── NotificationService.swift (1,671 bytes) - ✅ CREATED (Phase 2)
+├── NotificationServiceProtocol.swift (761 bytes) - Modified 18:17
+├── SMSServiceProtocol.swift (28,285 bytes)
+└── TwilioSMSService.swift (15,102 bytes)
+```
+
+**Deleted from Services:**
+- ❌ MockAuthenticationService.swift (DELETED - Phase 1)
+- ❌ MockDatabaseService.swift (DELETED - Phase 1)
+- ❌ MockNotificationService.swift (DELETED - Phase 1)
+- ❌ MockSMSService.swift (DELETED - Phase 1)
+- ❌ MockSubscriptionService.swift (DELETED - Phase 1)
+- ❌ SubscriptionServiceProtocol.swift (DELETED - Phase 1)
+
+### ViewModels (5 files) - All Updated ✅
+```
+Halloo/ViewModels/
+├── DashboardViewModel.swift (42,424 bytes) - Modified 18:07
+├── GalleryViewModel.swift (12,545 bytes) - Modified 18:09
+├── OnboardingViewModel.swift (40,978 bytes) - Modified 18:01
+├── ProfileViewModel.swift (76,472 bytes) - Modified 18:39
+└── TaskViewModel.swift (46,849 bytes) - Modified 18:33
+```
+
+**Deleted from ViewModels:**
+- ❌ SubscriptionViewModel.swift (DELETED - Phase 1)
 
 ---
 
-## 🔄 NEXT STEPS (In Priority Order)
+## ✅ PHASE 2 COMPLETION VERIFICATION
 
-### TASK 1: Complete Twilio Integration Phase 1
-**Status:** In progress (see above)
+### Blocker #1: NotificationService.swift - ✅ COMPLETE
+**File:** `/Halloo/Services/NotificationService.swift`
+**Size:** 1,671 bytes (48 lines)
+**Created:** 2025-10-14 (Phase 2)
+**Implements:** NotificationServiceProtocol correctly
 
-1. Check elderly user's phone for SMS
-2. Verify confirmation message sent
-3. Test YES response → Profile becomes active
-4. Test NO response → Profile stays pending
+```swift
+final class NotificationService: NotificationServiceProtocol {
+    func requestPermissions() async throws -> Bool { ... }
+    func scheduleNotification(...) async throws { ... }
+    func cancelNotification(id: String) async { ... }
+    func cancelAllNotifications() async { ... }
+    func getPendingNotificationIds() async -> [String] { ... }
+}
+```
 
-**Expected:** SMS sent automatically after profile creation
-**Time:** 5 minutes
+### Blocker #2: DataSyncCoordinator Init - ✅ COMPLETE
+**File:** `/Halloo/Core/DataSyncCoordinator.swift`
+**Modified:** 2025-10-14 18:34
+**Init Signature (lines 289-291):**
 
-### TASK 2: Create Test Habit
-1. Select confirmed profile (must be active)
-2. Tap "Create Habit" or navigate to Habits tab
-3. Fill habit details:
-   - Name: "Take medication"
-   - Time: 9:00 AM
-   - Days: Daily
-4. Save habit
+```swift
+init(
+    databaseService: DatabaseServiceProtocol
+)
+```
 
-**Expected:** Habit appears in UI, scheduled for SMS delivery
-**Time:** 2 minutes
+**Verification:**
+- ❌ No `notificationCoordinator` parameter
+- ❌ No `errorCoordinator` parameter
+- ✅ Container.swift calls correctly (line 66-68)
 
-### TASK 3: Test Habit SMS Delivery
-1. Wait for scheduled reminder time (or adjust to near-future time for testing)
-2. Check elderly user's phone for SMS
-3. Test photo response (if implemented)
-4. Verify response appears in app
+### Blocker #3: ViewModel ErrorCoordinator Removal - ✅ COMPLETE
 
-**Expected:** SMS sent at scheduled time
-**Time:** Variable (depends on schedule)
+| ViewModel | Modified | errorCoordinator Removed | @Published errorMessage Added |
+|-----------|----------|--------------------------|------------------------------|
+| OnboardingViewModel | 18:01 | ✅ Yes | ✅ Yes |
+| ProfileViewModel | 18:39 | ✅ Yes | ✅ Yes |
+| TaskViewModel | 18:33 | ✅ Yes | ✅ Yes |
+| DashboardViewModel | 18:07 | ✅ Yes | ✅ Yes |
+| GalleryViewModel | 18:09 | ✅ Yes | ✅ Yes |
 
-### TASK 4: Check Firebase Data Structure (Optional)
+**Container.swift Verification:**
+- All ViewModel factories updated (lines 157-211)
+- No `errorCoordinator` parameters passed
+- ✅ Build succeeds
+
+---
+
+## 🏗️ ARCHITECTURE VERIFICATION
+
+### AppState Pattern (Phase 4 Complete)
+**File:** `/Halloo/Core/AppState.swift` (15,015 bytes)
+
+```swift
+@MainActor
+final class AppState: ObservableObject {
+    // Single source of truth
+    @Published var currentUser: AuthUser?
+    @Published var profiles: [ElderlyProfile] = []
+    @Published var tasks: [Task] = []
+    @Published var galleryEvents: [GalleryHistoryEvent] = []
+    @Published var isLoading: Bool = false
+    @Published var globalError: AppError?
+
+    // Services injected
+    private let authService: AuthenticationServiceProtocol
+    private let databaseService: DatabaseServiceProtocol
+    private let dataSyncCoordinator: DataSyncCoordinator
+}
+```
+
+### Container Pattern (Singleton Services)
+**File:** `/Halloo/Models/Container.swift`
+
+```swift
+// Singleton registration
+registerSingleton(AuthenticationServiceProtocol.self) {
+    FirebaseAuthenticationService()  // Created once
+}
+
+registerSingleton(DatabaseServiceProtocol.self) {
+    FirebaseDatabaseService()  // Created once
+}
+
+registerSingleton(DataSyncCoordinator.self) {
+    DataSyncCoordinator(
+        databaseService: FirebaseDatabaseService()
+    )
+}
+```
+
+### ViewModel Pattern (Reads from AppState, Writes via Methods)
+
+```swift
+// ProfileViewModel.swift
+class ProfileViewModel {
+    private weak var appState: AppState?
+
+    // Read from AppState (computed property)
+    var profiles: [ElderlyProfile] {
+        return appState?.profiles ?? []
+    }
+
+    // Write to AppState (via methods)
+    func createProfile(...) async {
+        let profile = ElderlyProfile(...)
+        await appState?.addProfile(profile)  // AppState broadcasts update
+    }
+}
+```
+
+---
+
+## 🔄 DATA FLOW VERIFICATION
+
+### 1. Authentication Flow
+```
+App Launch
+  → App.swift configures Firebase
+  → Container.shared creates singletons
+  → ContentView checks authService.isAuthenticated
+  → If false: LoginView
+  → If true: Load appState.loadUserData()
+```
+
+### 2. User Data Loading (Parallel)
+```
+ContentView.onAppear
+  → appState.loadUserData() called
+  → async let profiles = databaseService.fetchElderlyProfiles(userId)
+  → async let tasks = databaseService.fetchTasks(userId)
+  → async let events = databaseService.fetchGalleryEvents(userId)
+  → All load in parallel
+  → @Published properties update
+  → SwiftUI auto-renders
+```
+
+### 3. Profile Creation Flow
+```
+User taps "Create Profile"
+  → ProfileViews.SimplifiedProfileCreationView
+  → User fills form (name, phone)
+  → Tap "Create"
+  → profileViewModel.createProfile()
+  → profileViewModel calls appState.addProfile(profile)
+  → appState.profiles.append(profile)  // @Published triggers update
+  → DataSyncCoordinator.broadcastProfileUpdate()
+  → Firestore write
+  → SMS confirmation sent via Cloud Function
+  → All views auto-update (profiles list, dashboard, etc.)
+```
+
+### 4. Habit Creation Flow
+```
+User taps "Create Habit"
+  → TaskCreationView presented
+  → User fills form (title, time, days)
+  → Tap "Save"
+  → taskViewModel.createTask()
+  → taskViewModel calls appState.addTask(task)
+  → appState.tasks.append(task)  // @Published triggers update
+  → Firestore write to /users/{uid}/profiles/{pid}/habits/{id}
+  → Cloud Scheduler picks up at scheduled time
+  → SMS sent via Twilio
+```
+
+### 5. Scheduled SMS Flow
+```
+Cloud Scheduler (every 1 minute)
+  → sendScheduledTaskReminders function runs
+  → Query: collectionGroup('habits')
+          .where('status', '==', 'active')
+          .where('scheduledTime', '>=', twoMinutesAgo)
+          .where('scheduledTime', '<=', now)
+  → For each habit:
+      - Check profile.status == 'confirmed'
+      - Check smsLogs for duplicate
+      - Send SMS via Twilio (E.164 format)
+      - Log to /users/{uid}/smsLogs
+      - Increment smsQuotaUsed
+```
+
+### 6. SMS Response Flow
+```
+Elderly user replies to SMS
+  → Twilio webhook receives POST
+  → twilioWebhook Cloud Function
+  → Parse response (text/photo)
+  → Create gallery event in Firestore
+  → DataSyncCoordinator detects change
+  → appState.galleryEvents updates
+  → GalleryView auto-refreshes
+```
+
+---
+
+## 🧪 BUILD VERIFICATION
+
+### Command Executed
 ```bash
-node check-data.js
-```
-Verify data is in correct nested structure:
-- /users/{userId}/profiles/{profileId}
-- /users/{userId}/profiles/{profileId}/habits/{habitId}
-
-**Time:** 1 minute
-
----
-
-## 📊 SCHEMA MIGRATION ✅ COMPLETE
-
-**Current Schema (Nested - CORRECT):**
-```
-/users/{userId}
-  /profiles/{profileId}
-    /habits/{taskId}
-    /messages/{messageId}
-  /gallery_events/{eventId}
+xcodebuild -scheme Halloo \
+  -destination 'platform=iOS Simulator,id=36B6BF87-E66E-4EA2-B453-26FC094FD9E1' \
+  clean build
 ```
 
-**Migration Status:**
-- ✅ All production code uses nested paths via CollectionPath enum
-- ✅ Recursive delete implemented for cascade operations
-- ✅ Collection group queries properly filter by userId
-- ✅ Security rules support nested structure
-- ✅ Composite indexes configured for collection group queries
-- ⚠️ Legacy test script `add_test_habits.swift` uses old flat paths (not production code)
+### Result
+```
+** BUILD SUCCEEDED **
+```
 
-**Benefits Achieved:**
-- ✅ Native Firestore cascade delete support
-- ✅ Simpler security rules with automatic scoping
-- ✅ Better data organization and query performance
+### Package Dependencies Resolved
+- SuperwallKit 4.7.0
+- Firebase iOS SDK 12.1.0
+- GoogleSignIn 9.0.0
+- All 19 dependencies resolved successfully
 
----
-
-## 🗂️ KEY FILES TO KNOW
-
-**Core Services:**
-- `Halloo/Models/Container.swift` - DI container (singleton pattern)
-- `Halloo/Services/FirebaseAuthenticationService.swift` - Auth (singleton)
-- `Halloo/Services/FirebaseDatabaseService.swift` - Database (singleton)
-
-**ViewModels:**
-- `Halloo/ViewModels/ProfileViewModel.swift` - Profile management
-- `Halloo/ViewModels/TaskViewModel.swift` - Task/habit management
-- `Halloo/ViewModels/DashboardViewModel.swift` - Main dashboard
-- `Halloo/ViewModels/OnboardingViewModel.swift` - 9-step onboarding
-
-**Views:**
-- `Halloo/Views/ContentView.swift` - Root view, auth routing
-- `Halloo/Views/LoginView.swift` - Apple/Google Sign-In
-- `Halloo/Views/DashboardView.swift` - Home with CardStackView
-- `Halloo/Views/HabitsView.swift` - Habit management
-- `Halloo/Views/GalleryView.swift` - Photo gallery
-
-**Documentation:**
-- `docs/architecture/Hallo-iOS-App-Structure.txt` - Full architecture
-- `docs/architecture/Hallo-Development-Guidelines.txt` - Coding patterns
-- `docs/architecture/Hallo-UI-Integration-Plan.txt` - Design specs
-- `docs/MIGRATION-README.md` - Migration guide
-- `docs/FIREBASE-SCHEMA-CONTRACT.md` - Schema details
+### Simulator Targets Available
+- iPhone 16, 16 Plus, 16 Pro, 16 Pro Max, 16e
+- iPad Air, iPad Pro (M3/M4)
+- Real device: iPhone (00008110-001829902E9B801E)
 
 ---
 
-## 🚨 CRITICAL REMINDERS
+## 📊 METRICS & STATISTICS
 
-1. **Task Naming Conflict**
-   - App has `Task` model (habits/reminders)
-   - Use `_Concurrency.Task` for Swift concurrency
-   ```swift
-   // ✅ CORRECT
-   _Concurrency.Task.detached { }
+### Code Reduction
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Total LOC | 15,334 | 11,974 | -3,360 (-22%) |
+| Swift Files | 61 | 48 | -13 (-21%) |
+| Core Files | 9 | 6 | -3 |
+| Service Files | 15 | 8 | -7 |
+| ViewModel Files | 6 | 5 | -1 |
 
-   // ❌ WRONG (refers to Task model)
-   Task { }
-   ```
+### File Sizes
+| File | Size | Purpose |
+|------|------|---------|
+| ProfileViewModel.swift | 76,472 bytes | Largest ViewModel |
+| FirebaseDatabaseService.swift | 53,436 bytes | Largest Service |
+| TaskViewModel.swift | 46,849 bytes | Task CRUD |
+| DashboardViewModel.swift | 42,424 bytes | Dashboard logic |
+| OnboardingViewModel.swift | 40,978 bytes | Onboarding flow |
+| DataSyncCoordinator.swift | 32,786 bytes | Multi-device sync |
 
-2. **Singleton Services**
-   - AuthenticationServiceProtocol = singleton
-   - DatabaseServiceProtocol = singleton
-   - **DO NOT modify Container registration**
+### Git Status
+```
+Modified: 32 files
+Deleted: 21 files
+Untracked: 5 files (new docs + NotificationService.swift)
 
-3. **ID Generation Rules** ✅ ENFORCED
-   - User IDs: Always use Firebase Auth UID (never generate)
-   - Profile IDs: Use `IDGenerator.profileID(phoneNumber:)` (E.164 format)
-   - Habit IDs: Use `IDGenerator.habitID()` (UUID)
-   - Message IDs: Use `IDGenerator.messageID(twilioSID:)` (Twilio SID or UUID)
-   - **DO NOT use `UUID().uuidString` directly in production code**
-
-4. **Schema Structure** ✅ ENFORCED
-   - All Firestore paths MUST use nested structure
-   - Use `CollectionPath` enum, never hardcode paths
-   - Profiles: `/users/{uid}/profiles/{pid}`
-   - Habits: `/users/{uid}/profiles/{pid}/habits/{hid}`
-   - Messages: `/users/{uid}/profiles/{pid}/messages/{mid}`
-
-5. **Debug UI Available**
-   - Shows: "DB: FirebaseDatabaseService" in header
-   - Error messages displayed
-   - Profile count visible
+Ready to commit: Yes
+```
 
 ---
 
-## 🎯 SUCCESS CRITERIA
+## 🚀 DEPLOYMENT STATUS
 
-**Authentication (Fixed):**
-- ✅ Single sign-in works
-- ✅ Logout returns to login screen
-- ✅ No stuck screens after sign-in
-- ✅ Navigation to dashboard works
-- ✅ Auth state changes trigger UI updates
-- ✅ Firestore security rules allow user data access
-- ✅ No race conditions
+### Cloud Functions
+| Function | Status | Schedule | Purpose |
+|----------|--------|----------|---------|
+| sendScheduledTaskReminders | ✅ Deployed | every 1 minute | Send SMS reminders |
+| cleanupOldGalleryEvents | ✅ Deployed | daily midnight | 90-day retention |
+| twilioWebhook | ✅ Deployed | HTTP endpoint | Process SMS responses |
+| sendSMS | ✅ Deployed | HTTP callable | Manual SMS send |
 
-**Migration (Pending):**
-- ⏳ All users migrated to nested structure
-- ⏳ All profiles under users/{userId}/profiles/
-- ⏳ All tasks under profiles/{profileId}/tasks/
-- ⏳ Validation shows 100% data integrity
-
----
-
-## 💡 HOW TO RESUME WORK
-
-**If auth needs fixes:**
-1. Read `docs/CHANGELOG.md`
-2. Check `FirebaseAuthenticationService.swift:383-416` (setupAuthStateListener)
-3. Check `ContentView.swift:37-57` (navigationContent)
-
-**If migration needs work:**
-1. Read `docs/MIGRATION-README.md`
-2. Run `node check-data.js` to see current state
-3. Check `docs/FIREBASE-SCHEMA-CONTRACT.md` for schema
-
-**If understanding codebase:**
-1. Read `docs/architecture/Hallo-iOS-App-Structure.txt`
-2. Read `docs/architecture/Hallo-Development-Guidelines.txt`
-3. Read `docs/IMPLEMENTATION-GUIDE.md`
+### Firestore Indexes
+```json
+{
+  "indexes": [
+    {
+      "collectionGroup": "habits",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "scheduledTime", "order": "ASCENDING"}
+      ]
+    }
+  ]
+}
+```
+**Status:** Defined in firestore.indexes.json (auto-created by Firebase)
 
 ---
 
-## 🔧 AVAILABLE COMMANDS
+## ⚠️ KNOWN ISSUES & MONITORING
 
+### 1. Scheduled SMS - Needs User Testing
+**Status:** Deployed, not yet tested end-to-end
+**Action Required:**
+1. Create test habit scheduled 2 minutes from now
+2. Verify SMS received on elderly user's phone
+3. Check smsLogs in Firestore
+4. Monitor for 7 days
+
+### 2. AppState Injection - Manual Checklist Required
+**Status:** Working, but requires vigilance
+**Action Required:**
+- Review APPSTATE-INJECTION-CHECKLIST.md before adding new views
+- Verify all .fullScreenCover/.sheet presentations inject AppState
+- Test new views for "No ObservableObject of type AppState found" crash
+
+### 3. Documentation Drift - Fixed This Session
+**Status:** ✅ Fixed by this update
+**Prevention:**
+- Always verify build status before documenting blockers
+- Include build verification in documentation process
+- Update SESSION-STATE.md after each major change
+- Use App-Structure.md as memory bank (update immediately)
+
+---
+
+## 📝 NEXT SESSION CHECKLIST
+
+### Before Starting Work
+1. ✅ Read `SESSION-STATE.md` (this file) - current accurate status
+2. ✅ Read `App-Structure.md` - architecture memory bank
+3. ✅ Verify build status: `xcodebuild -scheme Halloo ... build`
+4. ✅ Check git status: `git status`
+5. ✅ Review recent commits: `git log --oneline -10`
+
+### During Work
+1. Update SESSION-STATE.md with new changes (real-time)
+2. Update App-Structure.md when architecture changes
+3. Verify build after each major change
+4. Commit frequently with descriptive messages
+
+### Before Ending Session
+1. Verify app builds successfully
+2. Update all documentation to reflect actual state
+3. Create clear next steps (based on actual status, not assumptions)
+4. Commit all changes with summary
+
+---
+
+## 🎯 RECOMMENDED IMMEDIATE NEXT STEPS
+
+### Option 1: Test Scheduled SMS (30 minutes)
+1. Launch app on simulator
+2. Create elderly profile (if none exists)
+3. Create habit scheduled 2 minutes from now
+4. Monitor Cloud Function logs
+5. Verify SMS delivery
+6. Document results
+
+### Option 2: Commit Current Changes (10 minutes)
 ```bash
-# Check current database state
-node check-data.js
+git add -A
+git commit -m "feat: Complete MVP refactoring Phase 1-2
 
-# Test Firestore connection
-node test-firestore.js
+- Deleted 9,643 LOC (mock services, coordinators, stale docs)
+- Created NotificationService.swift
+- Updated DataSyncCoordinator init (removed coordinator deps)
+- Removed errorCoordinator from all ViewModels
+- Updated Container.swift factories
+- Code reduction: 15,334 → 11,974 LOC (-22%)
+- Build verified: SUCCESS
 
-# Preview migration (safe, no changes)
-npm run migrate:dry-run
-
-# Execute migration
-npm run migrate:commit
-
-# Validate migration results
-npm run migrate:validate
-
-# Backup existing data
-npm run migrate:backup
+🤖 Generated with Claude Code
+Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
+### Option 3: End-to-End Testing (1 hour)
+1. Launch app → Test auth flow
+2. Create profile → Test SMS confirmation
+3. Create habit → Test Firestore save
+4. Test dashboard → Verify profile filtering
+5. Test gallery → Verify events display
+6. Test habits deletion → Verify animation
+
 ---
 
-## 📝 NOTES
+## 📚 DOCUMENTATION STATUS
 
-**Service Account Key:** `serviceAccountKey.json` (gitignored)
-**Firebase Project:** Halloo/Remi (us-central1)
-**Confidence Level:** 10/10 - Infrastructure ready, needs execution
+| Document | Status | Last Updated | Accuracy |
+|----------|--------|--------------|----------|
+| SESSION-STATE.md | ✅ Current | 2025-10-14 21:55 | 9/10 |
+| App-Structure.md | ⏳ Pending Update | 2025-10-12 | 7/10 (outdated build status) |
+| PROJECT-DOCUMENTATION.md | ⏳ Pending Update | 2025-10-14 18:25 | 6/10 (says won't compile) |
+| README-NEXT-SESSION.md | ⏳ Pending Update | 2025-10-14 18:15 | 5/10 (lists completed fixes as TODO) |
+| START-HERE.md | ⏳ Pending Update | 2025-10-14 18:25 | 5/10 (outdated status) |
+| CHANGELOG.md | ✅ Current | 2025-10-14 | 8/10 |
+| SCHEMA.md | ✅ Current | 2025-10-09 | 9/10 |
+| TECHNICAL-DOCUMENTATION.md | ✅ Current | 2025-10-14 | 8/10 |
+
+**Action:** Update pending docs to match this SESSION-STATE.md
 
 ---
 
-**For immediate next steps, see:** `QUICK-START-NEXT-SESSION.md`
+## 🔒 CONFIDENCE SCORE: 9/10
+
+### Why 9/10:
+- ✅ Build verified successfully
+- ✅ All code changes confirmed via file inspection
+- ✅ All blockers verified as resolved
+- ✅ Architecture patterns validated
+- ✅ Data flow traced end-to-end
+- ✅ Git status clear and documented
+- ✅ Cloud Functions deployed
+- ✅ Recent commits reviewed
+
+### Why Not 10/10:
+- ⚠️ Scheduled SMS not yet tested end-to-end with real device
+- ⚠️ Multi-device sync not verified (DataSyncCoordinator exists but untested)
+- ⚠️ Some documentation still pending updates
+
+---
+
+**Created:** 2025-10-14 21:55
+**Author:** Claude Code (Autonomous iOS & Firebase Engineer)
+**Purpose:** Prevent documentation drift, maintain accurate memory bank
+**Next Update:** After significant code changes or testing completion

@@ -38,10 +38,10 @@ struct GalleryView: View {
         self.showHeader = showHeader
         self.showNav = showNav
         // Initialize with placeholder - will be properly set in onAppear
+        let container = Container.shared
         _viewModel = StateObject(wrappedValue: GalleryViewModel(
-            databaseService: MockDatabaseService(),
-            authService: MockAuthenticationService(),
-            errorCoordinator: ErrorCoordinator()
+            databaseService: container.resolve(DatabaseServiceProtocol.self),
+            authService: container.resolve(AuthenticationServiceProtocol.self)
         ))
     }
     
@@ -185,10 +185,9 @@ struct GalleryView: View {
         // Initialize ViewModel with container services
         viewModel.updateServices(
             databaseService: container.resolve(DatabaseServiceProtocol.self),
-            authService: container.resolve(AuthenticationServiceProtocol.self),
-            errorCoordinator: container.resolve(ErrorCoordinator.self)
+            authService: container.resolve(AuthenticationServiceProtocol.self)
         )
-        
+
         // Gallery data will be loaded when view appears
     }
     

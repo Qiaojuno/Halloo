@@ -904,7 +904,7 @@ struct TaskRowView: View {
     
     private func formatTime(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "ha" // This gives "5PM" or "8AM" format
+        formatter.dateFormat = "h:mm a" // Shows exact time like "5:23 PM"
         return formatter.string(from: date)
     }
 }
@@ -1166,7 +1166,7 @@ struct PreviewUpcomingSection: View {
 
     private func formatTime(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "ha"
+        formatter.dateFormat = "h:mm a"
         return formatter.string(from: date)
     }
 }
@@ -1288,7 +1288,7 @@ struct PreviewCompletedTasksSection: View {
 
     private func formatTime(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "ha"
+        formatter.dateFormat = "h:mm a"
         return formatter.string(from: date)
     }
 }
@@ -1571,17 +1571,17 @@ private struct PreviewDashboardWrapper: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             )
         }
-        .inject(container: Container.makeForTesting())
+        .inject(container: Container.shared)
     }
 }
 
 private struct PreviewHeaderWrapper: View {
     @State private var selectedProfileIndex: Int = 0
-    
+
     var body: some View {
         SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
             .background(Color(hex: "f9f9f9"))
-            .inject(container: Container.makeForTesting())
+            .inject(container: Container.shared)
     }
 }
 

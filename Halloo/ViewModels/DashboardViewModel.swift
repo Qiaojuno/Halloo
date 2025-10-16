@@ -18,6 +18,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import OSLog
 
 /// Central family dashboard for monitoring daily elderly care tasks and SMS response tracking
 ///
@@ -220,8 +221,8 @@ final class DashboardViewModel: ObservableObject {
     /// Coordinator for real-time task and SMS response synchronization
     private let dataSyncCoordinator: DataSyncCoordinator
     
-    /// Coordinator for elderly-care-aware error handling and family communication
-    private let errorCoordinator: ErrorCoordinator
+    /// Logger for dashboard operations tracking and error diagnosis
+    private let logger = Logger(subsystem: "com.halloo.app", category: "Dashboard")
 
     /// ProfileViewModel reference for accessing profiles (single source of truth)
     /// Dashboard reads profiles but does not manage them
@@ -379,18 +380,15 @@ final class DashboardViewModel: ObservableObject {
     /// - Parameter databaseService: Handles task and response data aggregation
     /// - Parameter authService: Provides family user context and permissions
     /// - Parameter dataSyncCoordinator: Synchronizes real-time care data across family devices
-    /// - Parameter errorCoordinator: Handles errors with family-friendly context
     init(
         databaseService: DatabaseServiceProtocol,
         authService: AuthenticationServiceProtocol,
         dataSyncCoordinator: DataSyncCoordinator,
-        errorCoordinator: ErrorCoordinator,
         profileViewModel: ProfileViewModel? = nil
     ) {
         self.databaseService = databaseService
         self.authService = authService
         self.dataSyncCoordinator = dataSyncCoordinator
-        self.errorCoordinator = errorCoordinator
         self.profileViewModel = profileViewModel
 
         // Enable real-time family and elderly care data synchronization
@@ -628,7 +626,7 @@ final class DashboardViewModel: ObservableObject {
 
         } catch {
             await MainActor.run {
-                self.errorCoordinator.handle(error, context: "Loading today's tasks")
+                logger.error("Loading today's tasks failed: \(error.localizedDescription)")
             }
         }
     }
@@ -645,7 +643,7 @@ final class DashboardViewModel: ObservableObject {
             
         } catch {
             await MainActor.run {
-                self.errorCoordinator.handle(error, context: "Loading recent responses")
+                logger.error("Loading recent responses failed: \(error.localizedDescription)")
             }
         }
     }
@@ -870,7 +868,7 @@ final class DashboardViewModel: ObservableObject {
         } catch {
             await MainActor.run {
                 self.errorMessage = error.localizedDescription
-                self.errorCoordinator.handle(error, context: "Marking elderly care task completed by family")
+                logger.error("Marking task completed by family failed: \(error.localizedDescription)")
             }
         }
     }

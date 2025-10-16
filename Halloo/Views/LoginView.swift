@@ -198,13 +198,13 @@ struct LoginView: View {
 #if DEBUG
 struct LoginView_Previews: PreviewProvider {
     static var previews: some View {
+        let container = Container.shared
         LoginView(onAuthenticationSuccess: {})
             .environmentObject(OnboardingViewModel(
-                authService: MockAuthenticationService(),
-                databaseService: MockDatabaseService(),
-                errorCoordinator: ErrorCoordinator()
+                authService: container.resolve(AuthenticationServiceProtocol.self),
+                databaseService: container.resolve(DatabaseServiceProtocol.self)
             ))
-            .environment(\.container, Container.makeForTesting())
+            .inject(container: container)
             .previewDisplayName("Login View")
     }
 }

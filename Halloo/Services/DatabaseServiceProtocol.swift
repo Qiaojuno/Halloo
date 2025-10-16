@@ -16,6 +16,7 @@
 //
 
 import Foundation
+import Combine
 
 /// Comprehensive database service contract for elderly care coordination and family data management
 ///
@@ -252,7 +253,7 @@ protocol DatabaseServiceProtocol {
     func deleteTask(_ taskId: String, userId: String, profileId: String) async throws
     
     /// Archives completed or discontinued care task while preserving analytics data
-    /// 
+    ///
     /// Moves task to archived status for historical reference while stopping
     /// active SMS reminders and removing from family active task dashboard.
     ///
@@ -260,7 +261,25 @@ protocol DatabaseServiceProtocol {
     /// - Throws: DatabaseError if archiving operation fails
     /// - Note: Archived tasks retain completion history for family care analytics
     func archiveTask(_ taskId: String) async throws
-    
+
+    /// Observes real-time task updates across all user profiles for multi-device sync
+    ///
+    /// Provides Combine publisher for Firebase snapshot listener on habits collection group.
+    /// Enables real-time synchronization where changes on Device A appear on Device B instantly.
+    ///
+    /// - Parameter userId: Family user ID whose tasks to observe
+    /// - Returns: Publisher emitting task arrays on each Firestore update
+    func observeUserTasks(_ userId: String) -> AnyPublisher<[Task], Error>
+
+    /// Observes real-time profile updates for multi-device sync and confirmation tracking
+    ///
+    /// Provides Combine publisher for Firebase snapshot listener on elderly profiles.
+    /// Tracks confirmation status changes when elderly user replies to SMS.
+    ///
+    /// - Parameter userId: Family user ID whose profiles to observe
+    /// - Returns: Publisher emitting profile arrays on each Firestore update
+    func observeUserProfiles(_ userId: String) -> AnyPublisher<[ElderlyProfile], Error>
+
     // MARK: - SMS Response Tracking and Analysis Operations
     
     /// Records SMS response from elderly family member for task completion tracking

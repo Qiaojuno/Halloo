@@ -199,15 +199,9 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     }
     
     // MARK: - Family Coordination Service Dependencies
-    
+
     /// Database service for persistent family coordination data storage
     private let databaseService: DatabaseServiceProtocol
-    
-    /// Notification coordinator for family alert and update management
-    private let notificationCoordinator: NotificationCoordinator
-    
-    /// Error coordinator for family-friendly sync error handling and recovery
-    private let errorCoordinator: ErrorCoordinator?
     
     // MARK: - Internal Family Coordination State Management
     
@@ -292,23 +286,21 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     /// 5. **Publisher Configuration**: Prepares real-time data broadcasting to family ViewModels
     ///
     /// - Parameter databaseService: Handles persistent storage for family coordination data
-    /// - Parameter notificationCoordinator: Manages family notifications and alert coordination
-    /// - Parameter errorCoordinator: Provides family-friendly error handling for sync failures
     init(
-        databaseService: DatabaseServiceProtocol,
-        notificationCoordinator: NotificationCoordinator,
-        errorCoordinator: ErrorCoordinator? = nil
+        databaseService: DatabaseServiceProtocol
     ) {
+        print("🔵 [DataSyncCoordinator] init() START")
         self.databaseService = databaseService
-        self.notificationCoordinator = notificationCoordinator
-        self.errorCoordinator = errorCoordinator
+        print("🔵 [DataSyncCoordinator] databaseService assigned")
 
         // NOTE: All setup moved to initialize() to avoid blocking app startup
         // setupAutoSync() will be called from initialize() after app launches
         // setupNotificationHandling() will be called from initialize() after app launches
 
         // Restore previous family coordination state (safe to do in init)
+        print("🔵 [DataSyncCoordinator] calling loadLastSyncDate()")
         loadLastSyncDate()
+        print("🔵 [DataSyncCoordinator] init() COMPLETE")
     }
     
     deinit {
@@ -317,21 +309,94 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     
     // MARK: - Initialization
 
-    /// Initializes the data sync coordinator for family coordination
-    func initialize() async {
-        // Start auto-sync timer now that app is running
+    /// Initializes the data sync coordinator with optional Firebase listeners
+    ///
+    /// - Parameter userId: Optional authenticated user ID for setting up real-time listeners
+    func initialize(userId: String? = nil) async {
+        // Start auto-sync timer (60 second fallback)
         setupAutoSync()
 
-        // Enable cross-device family notification handling
+        // Enable cross-device notification handling (foreground/background)
         setupNotificationHandling()
 
-        // Perform initial sync
+        // 🔥 Connect Firebase real-time listeners for instant sync (if user authenticated)
+        if let userId = userId {
+            setupFirebaseListeners(userId: userId)
+            print("✅ [DataSyncCoordinator] Firebase listeners connected for user: \(userId)")
+        } else {
+            print("⚠️ [DataSyncCoordinator] No userId provided - Firebase listeners not connected")
+        }
+
+        // Perform initial data sync
         await syncAllData()
     }
     
     /// Syncs all family data across devices
     func syncAllData() async {
         await forceSync()
+    }
+
+    // MARK: - Firebase Real-Time Listeners
+
+    /// Connects Firebase real-time listeners for multi-device sync
+    ///
+    /// Bridges Firebase snapshot listeners to DataSyncCoordinator broadcasts,
+    /// enabling true multi-device sync where Device B receives updates when
+    /// Device A makes changes to tasks or profiles.
+    ///
+    /// - Parameter userId: Family user ID to observe data for
+    private func setupFirebaseListeners(userId: String) {
+        print("🔥 [DataSyncCoordinator] Setting up Firebase real-time listeners for user: \(userId)")
+
+        // 1. Connect Task Updates Listener
+        // Observes all habits across user's profiles via collection group query
+        databaseService.observeUserTasks(userId)
+            .sink(
+                receiveCompletion: { completion in
+                    switch completion {
+                    case .finished:
+                        print("✅ [DataSyncCoordinator] Task listener completed")
+                    case .failure(let error):
+                        print("❌ [DataSyncCoordinator] Task listener error: \(error.localizedDescription)")
+                        // Note: Listener will auto-reconnect on network recovery
+                    }
+                },
+                receiveValue: { [weak self] tasks in
+                    print("🔄 [DataSyncCoordinator] Received \(tasks.count) tasks from Firestore")
+
+                    // Broadcast each task to AppState via publishers
+                    // This triggers AppState.handleTaskUpdate() on all devices
+                    tasks.forEach { task in
+                        self?.taskUpdatesSubject.send(task)
+                    }
+                }
+            )
+            .store(in: &cancellables)
+
+        // 2. Connect Profile Updates Listener
+        // Observes user's elderly profiles for real-time confirmation status updates
+        databaseService.observeUserProfiles(userId)
+            .sink(
+                receiveCompletion: { completion in
+                    switch completion {
+                    case .finished:
+                        print("✅ [DataSyncCoordinator] Profile listener completed")
+                    case .failure(let error):
+                        print("❌ [DataSyncCoordinator] Profile listener error: \(error.localizedDescription)")
+                    }
+                },
+                receiveValue: { [weak self] profiles in
+                    print("🔄 [DataSyncCoordinator] Received \(profiles.count) profiles from Firestore")
+
+                    // Broadcast each profile to AppState
+                    profiles.forEach { profile in
+                        self?.profileUpdatesSubject.send(profile)
+                    }
+                }
+            )
+            .store(in: &cancellables)
+
+        print("✅ [DataSyncCoordinator] Firebase listeners connected successfully")
     }
     
     /// Saves any unsaved changes before backgrounding
@@ -517,7 +582,7 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
                 operation.incrementCompleted()
             } catch {
                 operation.addError(error, context: "User sync: \(user.id)")
-                errorCoordinator?.handle(error, context: "User sync", severity: .medium)
+                print("⚠️ User sync error: \(error.localizedDescription)")
             }
         }
         
@@ -536,7 +601,7 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
                 operation.incrementCompleted()
             } catch {
                 operation.addError(error, context: "Profile sync: \(profile.id)")
-                errorCoordinator?.handle(error, context: "Profile sync", severity: .medium)
+                print("⚠️ Profile sync error: \(error.localizedDescription)")
             }
         }
         
@@ -555,7 +620,7 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
                 operation.incrementCompleted()
             } catch {
                 operation.addError(error, context: "Task sync: \(task.id)")
-                errorCoordinator?.handle(error, context: "Task sync", severity: .medium)
+                print("⚠️ Task sync error: \(error.localizedDescription)")
             }
         }
         
@@ -574,7 +639,7 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
                 operation.incrementCompleted()
             } catch {
                 operation.addError(error, context: "SMS Response sync: \(response.id)")
-                errorCoordinator?.handle(error, context: "SMS Response sync", severity: .medium)
+                print("⚠️ SMS Response sync error: \(error.localizedDescription)")
             }
         }
         
@@ -621,7 +686,7 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
             await MainActor.run {
                 syncStatus = .failed(error)
             }
-            errorCoordinator?.handle(error, context: "User-specific sync", severity: .medium)
+            print("⚠️ User-specific sync error: \(error.localizedDescription)")
         }
         
         await MainActor.run {
@@ -640,7 +705,7 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
                 self?.pendingProfileChanges.removeValue(forKey: profile.id)
             }
         } catch {
-            errorCoordinator?.handle(error, context: "Single profile sync", severity: .low)
+            print("⚠️ Single profile sync error: \(error.localizedDescription)")
         }
     }
     
@@ -653,7 +718,7 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
                 self?.pendingTaskChanges.removeValue(forKey: task.id)
             }
         } catch {
-            errorCoordinator?.handle(error, context: "Single task sync", severity: .low)
+            print("⚠️ Single task sync error: \(error.localizedDescription)")
         }
     }
     
@@ -666,7 +731,7 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
                 self?.pendingResponseChanges.removeValue(forKey: response.id)
             }
         } catch {
-            errorCoordinator?.handle(error, context: "Single SMS response sync", severity: .low)
+            print("⚠️ Single SMS response sync error: \(error.localizedDescription)")
         }
     }
     
@@ -698,16 +763,8 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
             }
             .store(in: &cancellables)
         
-        // Handle network connectivity changes
-        NotificationCenter.default.publisher(for: .networkConnectivityChanged)
-            .sink { [weak self] notification in
-                if let isConnected = notification.userInfo?["isConnected"] as? Bool, isConnected {
-                    _Concurrency.Task {
-                        await self?.performSync(isManual: false)
-                    }
-                }
-            }
-            .store(in: &cancellables)
+        // TODO: Re-implement network connectivity monitoring for MVP
+        // Note: NetworkCoordinator was removed in Phase 1 simplification
     }
     
     // MARK: - Helper Methods
@@ -742,15 +799,12 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     }
     
     private func notifySuccessfulSync(_ operation: SyncOperation) {
-        notificationCoordinator.notifyDataSyncCompleted(
-            itemsSync: operation.completedItems,
-            duration: Date().timeIntervalSince(operation.startTime)
-        )
+        print("✅ Data sync completed: \(operation.completedItems) items in \(Date().timeIntervalSince(operation.startTime))s")
     }
-    
+
     private func handleSyncError(_ error: Error, operation: SyncOperation) {
-        errorCoordinator?.handle(error, context: "Data sync operation", severity: .medium)
-        
+        print("⚠️ Data sync operation error: \(error.localizedDescription)")
+
         // Retry logic for failed sync
         if operation.retryCount < maxRetries {
             let workItem = DispatchWorkItem { [weak self] in
@@ -864,7 +918,5 @@ class DataConflictResolver {
             quizAnswers: local.quizAnswers
         )
     }
-    
-}
 
-// Using NotificationCoordinator class from NotificationCoordinator.swift
+}

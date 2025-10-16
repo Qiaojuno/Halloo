@@ -73,24 +73,6 @@ struct SharedHeaderSection: View {
             Spacer()
             
             /*
-             * 🧪 DEBUG TEST DATA BUTTON: Inject test habits (DEBUG ONLY)
-             */
-            #if DEBUG
-            Button(action: {
-                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                impactFeedback.impactOccurred()
-
-                _Concurrency.Task {
-                    await injectTestData()
-                }
-            }) {
-                Image(systemName: "flask.fill")
-                    .font(.title3)
-                    .foregroundColor(.purple)
-            }
-            #endif
-
-            /*
              * PROFILE SETTINGS BUTTON: Account/settings access
              * Shows account settings sheet with logout option
              * Icon: SF Symbol person (outlined torso) for clean appearance
@@ -123,49 +105,6 @@ struct SharedHeaderSection: View {
         }
     }
 
-    // MARK: - Debug Test Data Injection
-    #if DEBUG
-    private func injectTestData() async {
-        let authService = container.resolve(AuthenticationServiceProtocol.self)
-        let databaseService = container.resolve(DatabaseServiceProtocol.self)
-
-        do {
-            // Get current user from AuthService
-            guard let currentUser = authService.currentUser else {
-                print("❌ No user logged in")
-                return
-            }
-
-            let profiles = try await databaseService.getElderlyProfiles(for: currentUser.uid)
-            guard let profileId = profiles.first?.id else {
-                print("❌ No profile found for this user")
-                return
-            }
-
-            print("🧪 Injecting test data for user: \(currentUser.uid), profile: \(profileId)")
-
-            let injector = TestDataInjector()
-            try await injector.addTestHabits(userId: currentUser.uid, profileId: profileId)
-
-            print("✅ Test data injection complete! Refresh the app to see changes.")
-
-            // Trigger haptic success feedback
-            await MainActor.run {
-                let successFeedback = UINotificationFeedbackGenerator()
-                successFeedback.notificationOccurred(.success)
-            }
-
-        } catch {
-            print("❌ Error injecting test data: \(error.localizedDescription)")
-
-            // Trigger haptic error feedback
-            await MainActor.run {
-                let errorFeedback = UINotificationFeedbackGenerator()
-                errorFeedback.notificationOccurred(.error)
-            }
-        }
-    }
-    #endif
 }
 
 // MARK: - Account Settings View

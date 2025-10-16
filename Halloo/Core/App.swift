@@ -187,26 +187,29 @@ struct HalloApp: App {
     
     // MARK: - Service Initialization
     private func initializeCriticalServices() async {
+        print("🚀 [App] initializeCriticalServices START")
+
         // Initialize authentication state
+        print("🔍 [App] Resolving AuthenticationServiceProtocol...")
         let authService = container.resolve(AuthenticationServiceProtocol.self)
         print("🔍 [App] BEFORE initializeAuthState - currentUser: \(authService.currentUser?.uid ?? "nil")")
         await authService.initializeAuthState()
         print("🔍 [App] AFTER initializeAuthState - currentUser: \(authService.currentUser?.uid ?? "nil")")
 
-        // Initialize notification service
-        let notificationService = container.resolve(NotificationServiceProtocol.self)
-        await notificationService.initialize()
-
-        // Initialize data sync coordinator
+        // Initialize DataSyncCoordinator (with real-time listeners if user authenticated)
+        print("🔍 [App] Resolving DataSyncCoordinator...")
         let dataSyncCoordinator = container.resolve(DataSyncCoordinator.self)
-        await dataSyncCoordinator.initialize()
+        print("🔍 [App] DataSyncCoordinator resolved, calling initialize...")
+        let userId = authService.currentUser?.uid
+        await dataSyncCoordinator.initialize(userId: userId)
+        print("🔍 [App] DataSyncCoordinator.initialize() completed")
 
-        // Setup incoming SMS listener if user is authenticated
-        if let userId = authService.currentUser?.uid {
-            print("✅ [App] User authenticated - setting up SMS listener for: \(userId)")
+        if let userId = userId {
+            print("✅ [App] DataSyncCoordinator initialized with userId: \(userId)")
+            // Setup incoming SMS listener
             setupSMSListener(userId: userId, dataSyncCoordinator: dataSyncCoordinator)
         } else {
-            print("⚠️ [App] User NOT authenticated - skipping SMS listener setup")
+            print("⚠️ [App] DataSyncCoordinator initialized without user (login required for sync)")
         }
 
         print("✅ Critical services initialized successfully")
@@ -214,13 +217,9 @@ struct HalloApp: App {
     
     private func requestNotificationPermissions() async {
         let notificationService = container.resolve(NotificationServiceProtocol.self)
-        
-        do {
-            let granted = try await notificationService.requestPermission()
-            print(granted ? "✅ Notification permission granted" : "❌ Notification permission denied")
-        } catch {
-            print("❌ Failed to request notification permission: \(error)")
-        }
+
+        let granted = await notificationService.requestPermissions()
+        print(granted ? "✅ Notification permission granted" : "❌ Notification permission denied")
     }
     
     // MARK: - Data Management
@@ -276,19 +275,14 @@ struct HalloApp: App {
     }
 
     private func checkPendingNotifications() {
-        let notificationService = container.resolve(NotificationServiceProtocol.self)
-
-        _Concurrency.Task {
-            await notificationService.checkPendingNotifications()
-        }
+        // For MVP, notifications are checked when tasks are loaded
+        // No separate check needed at app foreground
+        print("ℹ️ Notification check skipped - handled by task loading")
     }
     
     private func scheduleBackgroundNotifications() {
-        let notificationCoordinator = container.resolve(NotificationCoordinator.self)
-        
-        _Concurrency.Task {
-            await notificationCoordinator.scheduleBackgroundReminders()
-        }
+        // TODO: Implement background notifications if needed
+        print("⚠️ Background notifications not yet implemented")
     }
     
     // Analytics removed - no longer tracking app events
@@ -324,8 +318,8 @@ extension HalloApp {
         
         // Show user-friendly error if needed
         _Concurrency.Task { @MainActor in
-            let errorCoordinator = container.resolve(ErrorCoordinator.self)
-            errorCoordinator.handleCriticalError(error, context: "Critical app error")
+            print("🚨 Critical app error: \(error.localizedDescription)")
+            // TODO: Display critical error to user if needed
         }
     }
 }
@@ -335,7 +329,7 @@ extension HalloApp {
 struct HalloApp_Previews: PreviewProvider {
     static var previews: some View {
         ContentView()
-            .inject(container: Container.makeForTesting())
+            .inject(container: Container.shared)
     }
 }
 #endif

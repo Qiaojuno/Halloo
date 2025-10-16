@@ -79,11 +79,7 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     // MARK: - Profile Operations
     
     func createElderlyProfile(_ profile: ElderlyProfile) async throws {
-        DiagnosticLogger.info(.profileId, "Creating profile", context: [
-            "profileId": profile.id,
-            "userId": profile.userId,
-            "phoneNumber": profile.phoneNumber
-        ])
+        print("ℹ️ [ProfileId] Creating profile - profileId: \(profile.id), userId: \(profile.userId), phoneNumber: \(profile.phoneNumber)")
 
         // Check for existing profile with same phone number (DUPLICATE PREVENTION)
         let existingProfiles = try await CollectionPath.userProfiles(userId: profile.userId)
@@ -93,11 +89,7 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
 
         if !existingProfiles.isEmpty {
             // Log details of duplicate
-            DiagnosticLogger.error(.profileId, "❌ DUPLICATE PHONE NUMBER - BLOCKING CREATION", context: [
-                "newProfileId": profile.id,
-                "phoneNumber": profile.phoneNumber,
-                "existingCount": existingProfiles.documents.count
-            ])
+            print("❌ [ProfileId] DUPLICATE PHONE NUMBER - BLOCKING CREATION - newProfileId: \(profile.id), phoneNumber: \(profile.phoneNumber), existingCount: \(existingProfiles.documents.count)")
 
             // Get existing profile details for error message
             let firstDoc = existingProfiles.documents.first!
@@ -105,11 +97,7 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             let existingName = existingData["name"] as? String ?? "Unknown"
             let existingId = firstDoc.documentID
 
-            DiagnosticLogger.info(.profileId, "Existing profile details", context: [
-                "id": existingId,
-                "name": existingName,
-                "phoneNumber": profile.phoneNumber
-            ])
+            print("ℹ️ [ProfileId] Existing profile details - id: \(existingId), name: \(existingName), phoneNumber: \(profile.phoneNumber)")
 
             // Throw error to prevent duplicate creation
             throw DatabaseError.duplicatePhoneNumber(
@@ -118,9 +106,7 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
                 existingProfileId: existingId
             )
         } else {
-            DiagnosticLogger.success(.profileId, "✅ No duplicate phone numbers found - safe to create", context: [
-                "phoneNumber": profile.phoneNumber
-            ])
+            print("✅ [ProfileId] No duplicate phone numbers found - safe to create - phoneNumber: \(profile.phoneNumber)")
         }
 
         let profileData = try encodeToFirestore(profile)
@@ -128,10 +114,7 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             .document(profile.id, in: db)
             .setData(profileData)
 
-        DiagnosticLogger.success(.database, "Profile created in Firestore", context: [
-            "profileId": profile.id,
-            "userId": profile.userId
-        ])
+        print("✅ [Database] Profile created in Firestore - profileId: \(profile.id), userId: \(profile.userId)")
 
         // Update user's profile count
         try await updateUserProfileCount(profile.userId)
@@ -171,15 +154,12 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
 
     func deleteElderlyProfile(_ profileId: String, userId: String) async throws {
-        DiagnosticLogger.info(.schema, "Profile delete requested", context: [
-            "profileId": profileId,
-            "userId": userId
-        ])
+        print("ℹ️ [Schema] Profile delete requested - profileId: \(profileId), userId: \(userId)")
 
         // ✅ Use direct path deletion (no collection group query needed)
         try await deleteProfileRecursively(profileId, userId: userId)
 
-        DiagnosticLogger.success(.schema, "Profile deleted successfully", context: ["profileId": profileId])
+        print("✅ [Schema] Profile deleted successfully - profileId: \(profileId)")
     }
 
     func getConfirmedProfiles(for userId: String) async throws -> [ElderlyProfile] {
@@ -1045,11 +1025,50 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
     
     // MARK: - Encoding/Decoding Helpers
-    
+
+    /// Custom encoder that converts Swift Date objects to Firestore Timestamps
+    private class FirestoreEncoder {
+        func encode<T: Codable>(_ value: T) throws -> [String: Any] {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .secondsSince1970
+            let data = try encoder.encode(value)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return [:]
+            }
+            return convertDatesToTimestamps(json)
+        }
+
+        private func convertDatesToTimestamps(_ dict: [String: Any]) -> [String: Any] {
+            var result: [String: Any] = [:]
+            for (key, val) in dict {
+                // Only convert fields that are likely dates based on naming
+                if isDateField(key), let timestamp = val as? TimeInterval {
+                    result[key] = Timestamp(date: Date(timeIntervalSince1970: timestamp))
+                } else if let nestedDict = val as? [String: Any] {
+                    result[key] = convertDatesToTimestamps(nestedDict)
+                } else if let array = val as? [Any] {
+                    result[key] = array.map { item -> Any in
+                        if let nestedDict = item as? [String: Any] {
+                            return convertDatesToTimestamps(nestedDict) as Any
+                        }
+                        return item
+                    }
+                } else {
+                    result[key] = val
+                }
+            }
+            return result
+        }
+
+        private func isDateField(_ key: String) -> Bool {
+            let dateFieldPatterns = ["At", "Date", "Time", "timestamp", "created", "modified", "updated", "last", "next", "scheduled"]
+            return dateFieldPatterns.contains { key.contains($0) }
+        }
+    }
+
     private func encodeToFirestore<T: Codable>(_ object: T) throws -> [String: Any] {
-        let data = try JSONEncoder().encode(object)
-        let dictionary = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        return dictionary ?? [:]
+        let encoder = FirestoreEncoder()
+        return try encoder.encode(object)
     }
     
     private func decodeFromFirestore<T: Codable>(_ data: [String: Any], as type: T.Type) throws -> T {
@@ -1157,10 +1176,7 @@ extension FirebaseDatabaseService {
     ///   - userId: The user who owns this profile (for updating counts)
     /// - Note: Uses nested subcollections - deletes habits and messages automatically
     func deleteProfileRecursively(_ profileId: String, userId: String) async throws {
-        let tracker = DiagnosticLogger.track(.schema, "Delete profile recursively", context: [
-            "profileId": profileId,
-            "userId": userId
-        ])
+        print("ℹ️ [Schema] Delete profile recursively - profileId: \(profileId), userId: \(userId)")
 
         let profileRef = CollectionPath.userProfiles(userId: userId)
             .document(profileId, in: db)
@@ -1175,21 +1191,11 @@ extension FirebaseDatabaseService {
             .whereField("profileId", isEqualTo: profileId)
             .getDocuments()
 
-        DiagnosticLogger.info(.schema, "Found nested data", context: [
-            "profileId": profileId,
-            "habitsCount": habitsSnapshot.documents.count,
-            "messagesCount": messagesSnapshot.documents.count,
-            "galleryEventsCount": galleryEventsSnapshot.documents.count,
-            "totalItems": habitsSnapshot.documents.count + messagesSnapshot.documents.count + galleryEventsSnapshot.documents.count
-        ])
+        print("ℹ️ [Schema] Found nested data - profileId: \(profileId), habitsCount: \(habitsSnapshot.documents.count), messagesCount: \(messagesSnapshot.documents.count), galleryEventsCount: \(galleryEventsSnapshot.documents.count), totalItems: \(habitsSnapshot.documents.count + messagesSnapshot.documents.count + galleryEventsSnapshot.documents.count)")
 
         let totalOps = habitsSnapshot.documents.count + messagesSnapshot.documents.count + 1
         if totalOps > 500 {
-            DiagnosticLogger.warning(.schema, "⚠️ Operations exceed batch limit", context: [
-                "totalOps": totalOps,
-                "limit": 500,
-                "willUseMultipleBatches": true
-            ])
+            print("⚠️ [Schema] Operations exceed batch limit - totalOps: \(totalOps), limit: 500, willUseMultipleBatches: true")
         }
 
         // Delete all nested subcollections under profile (habits and messages)
@@ -1197,10 +1203,7 @@ extension FirebaseDatabaseService {
 
         // Process gallery events linked to this profile
         // Strategy: Keep photos (memories), delete text-only events (sensitive data)
-        DiagnosticLogger.info(.schema, "Processing gallery events for profile", context: [
-            "profileId": profileId,
-            "galleryEventsCount": galleryEventsSnapshot.documents.count
-        ])
+        print("ℹ️ [Schema] Processing gallery events for profile - profileId: \(profileId), galleryEventsCount: \(galleryEventsSnapshot.documents.count)")
 
         var dereferencedPhotos = 0
         var deletedTextOnlyEvents = 0
@@ -1223,53 +1226,31 @@ extension FirebaseDatabaseService {
                     "profileId": FieldValue.delete()
                 ])
                 dereferencedPhotos += 1
-                DiagnosticLogger.debug(.schema, "Dereferenced photo event (kept photo)", context: [
-                    "eventId": eventDoc.documentID,
-                    "action": "removed profileId, kept photoData"
-                ])
+                print("🔵 [Schema] Dereferenced photo event (kept photo) - eventId: \(eventDoc.documentID), action: removed profileId, kept photoData")
             } else {
                 // Text-only event - safe to delete entirely (no memories lost)
                 try await eventDoc.reference.delete()
                 deletedTextOnlyEvents += 1
-                DiagnosticLogger.debug(.schema, "Deleted text-only event", context: [
-                    "eventId": eventDoc.documentID,
-                    "action": "deleted entire event"
-                ])
+                print("🔵 [Schema] Deleted text-only event - eventId: \(eventDoc.documentID), action: deleted entire event")
             }
         }
 
-        DiagnosticLogger.success(.schema, "Gallery events processed", context: [
-            "profileId": profileId,
-            "dereferencedPhotos": dereferencedPhotos,
-            "deletedTextOnlyEvents": deletedTextOnlyEvents
-        ])
+        print("✅ [Schema] Gallery events processed - profileId: \(profileId), dereferencedPhotos: \(dereferencedPhotos), deletedTextOnlyEvents: \(deletedTextOnlyEvents)")
 
         // Verify deletion of habits and messages (gallery events intentionally kept if they have photos)
         let verifyHabits = try await profileRef.collection("habits").limit(to: 1).getDocuments()
         let verifyMessages = try await profileRef.collection("messages").limit(to: 1).getDocuments()
 
         if !verifyHabits.isEmpty || !verifyMessages.isEmpty {
-            DiagnosticLogger.error(.schema, "❌ ORPHANED DATA DETECTED", context: [
-                "profileId": profileId,
-                "remainingHabits": verifyHabits.documents.count,
-                "remainingMessages": verifyMessages.documents.count
-            ])
+            print("❌ [Schema] ORPHANED DATA DETECTED - profileId: \(profileId), remainingHabits: \(verifyHabits.documents.count), remainingMessages: \(verifyMessages.documents.count)")
         } else {
-            DiagnosticLogger.success(.schema, "Profile data cleaned up successfully", context: [
-                "profileId": profileId,
-                "note": "Photo events dereferenced (kept), text-only events deleted"
-            ])
+            print("✅ [Schema] Profile data cleaned up successfully - profileId: \(profileId), note: Photo events dereferenced (kept), text-only events deleted")
         }
 
         // Update user's profile count
         try await updateUserProfileCount(userId)
 
-        tracker.end(success: true, additionalContext: [
-            "deletedHabits": habitsSnapshot.documents.count,
-            "deletedMessages": messagesSnapshot.documents.count,
-            "dereferencedPhotoEvents": dereferencedPhotos,
-            "deletedTextOnlyEvents": deletedTextOnlyEvents
-        ])
+        print("✅ [Schema] Delete profile recursively completed - deletedHabits: \(habitsSnapshot.documents.count), deletedMessages: \(messagesSnapshot.documents.count), dereferencedPhotoEvents: \(dereferencedPhotos), deletedTextOnlyEvents: \(deletedTextOnlyEvents)")
     }
 }
 

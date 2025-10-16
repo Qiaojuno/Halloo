@@ -19,6 +19,7 @@ import Foundation
 import SwiftUI
 import Combine
 import FirebaseStorage
+import OSLog
 
 /// Gallery management for elderly care photo history and family memories
 ///
@@ -105,7 +106,8 @@ final class GalleryViewModel: ObservableObject {
     // MARK: - Dependencies
     private var databaseService: DatabaseServiceProtocol
     private var authService: AuthenticationServiceProtocol
-    private var errorCoordinator: ErrorCoordinator
+    /// Logger for gallery operations tracking and error diagnosis
+    private let logger = Logger(subsystem: "com.halloo.app", category: "Gallery")
     
     // MARK: - Private Properties
     private var cancellables = Set<AnyCancellable>()
@@ -118,15 +120,12 @@ final class GalleryViewModel: ObservableObject {
     /// - Parameters:
     ///   - databaseService: Service for gallery data persistence and retrieval
     ///   - authService: Service for user authentication and authorization
-    ///   - errorCoordinator: Centralized error handling and user messaging
     init(
         databaseService: DatabaseServiceProtocol,
-        authService: AuthenticationServiceProtocol,
-        errorCoordinator: ErrorCoordinator
+        authService: AuthenticationServiceProtocol
     ) {
         self.databaseService = databaseService
         self.authService = authService
-        self.errorCoordinator = errorCoordinator
         
         setupPeriodicRefresh()
     }
@@ -161,7 +160,7 @@ final class GalleryViewModel: ObservableObject {
                 self.isLoading = false
             }
 
-            errorCoordinator.handle(error, context: "Gallery data loading")
+            logger.error("Gallery data loading failed: \(error.localizedDescription)")
         }
     }
     
@@ -170,15 +169,12 @@ final class GalleryViewModel: ObservableObject {
     /// - Parameters:
     ///   - databaseService: New database service instance
     ///   - authService: New authentication service instance
-    ///   - errorCoordinator: New error coordinator instance
     func updateServices(
         databaseService: DatabaseServiceProtocol,
-        authService: AuthenticationServiceProtocol,
-        errorCoordinator: ErrorCoordinator
+        authService: AuthenticationServiceProtocol
     ) {
         self.databaseService = databaseService
         self.authService = authService
-        self.errorCoordinator = errorCoordinator
     }
     
     /// Manual refresh trigger for pull-to-refresh functionality

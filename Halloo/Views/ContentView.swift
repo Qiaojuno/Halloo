@@ -74,7 +74,7 @@ struct ContentView: View {
     // MARK: - Navigation Content
     @ViewBuilder
     private var navigationContent: some View {
-        if onboardingViewModel != nil {
+        if let appState = appState, onboardingViewModel != nil {
             if isAuthenticated {
                 authenticatedContent
             } else {
@@ -274,6 +274,7 @@ struct ContentView: View {
                     SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
                         .environmentObject(dashboardVM)
                         .environmentObject(profileVM)
+                        .environmentObject(appState!)  // FIXED: Inject AppState
                         .background(Color(hex: "f9f9f9").opacity(0)) // Transparent background
 
                     Spacer()
@@ -309,23 +310,23 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         }
         .fullScreenCover(isPresented: $showingDirectOnboarding) {
-            if let profileVM = profileViewModel {
+            if let profileVM = profileViewModel, let appState = appState {
                 SimplifiedProfileCreationView(onDismiss: {
                     showingDirectOnboarding = false
                 })
                 .environmentObject(profileVM)
+                .environmentObject(appState)  // appState unwrapped by if-let
             }
         }
         .fullScreenCover(isPresented: $showingTaskCreation) {
-            if let dashboardVM = dashboardViewModel, let profileVM = profileViewModel {
-                TaskCreationView(
+            if let dashboardVM = dashboardViewModel, let profileVM = profileViewModel, let appState = appState {
+                TaskCreationViewWrapper(
+                    container: container,
+                    appState: appState,
                     preselectedProfileId: dashboardVM.selectedProfileId,
-                    dismissAction: {
-                        showingTaskCreation = false
-                    }
+                    profileVM: profileVM,
+                    dismissAction: { showingTaskCreation = false }
                 )
-                .environmentObject(container.makeTaskViewModel())
-                .environmentObject(profileVM)
             }
         }
     }
@@ -462,15 +463,13 @@ struct ContentView: View {
         let notificationService = container.resolve(NotificationServiceProtocol.self)
         let authService = container.resolve(AuthenticationServiceProtocol.self)
         let dataSyncCoordinator = container.resolve(DataSyncCoordinator.self)
-        let errorCoordinator = container.resolve(ErrorCoordinator.self)
 
         let viewModel = TaskViewModel(
             databaseService: dbService,
             smsService: smsService,
             notificationService: notificationService,
             authService: authService,
-            dataSyncCoordinator: dataSyncCoordinator,
-            errorCoordinator: errorCoordinator
+            dataSyncCoordinator: dataSyncCoordinator
         )
 
         // PHASE 2: Inject AppState into TaskViewModel for write consolidation
@@ -599,4 +598,37 @@ struct ContentView_Previews: PreviewProvider {
     }
 }
 #endif
+
+// MARK: - Task Creation Wrapper
+private struct TaskCreationViewWrapper: View {
+    let container: Container
+    let appState: AppState
+    let preselectedProfileId: String?
+    let profileVM: ProfileViewModel
+    let dismissAction: () -> Void
+
+    @StateObject private var taskVM: TaskViewModel
+
+    init(container: Container, appState: AppState, preselectedProfileId: String?, profileVM: ProfileViewModel, dismissAction: @escaping () -> Void) {
+        self.container = container
+        self.appState = appState
+        self.preselectedProfileId = preselectedProfileId
+        self.profileVM = profileVM
+        self.dismissAction = dismissAction
+
+        let vm = container.makeTaskViewModel()
+        vm.setAppState(appState)
+        _taskVM = StateObject(wrappedValue: vm)
+    }
+
+    var body: some View {
+        TaskCreationView(
+            preselectedProfileId: preselectedProfileId,
+            dismissAction: dismissAction
+        )
+        .environmentObject(taskVM)
+        .environmentObject(profileVM)
+        .environmentObject(appState)
+    }
+}
 

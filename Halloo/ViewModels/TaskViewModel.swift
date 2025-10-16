@@ -18,6 +18,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import OSLog
 
 /// Manages daily care tasks and SMS reminders for elderly family members
 ///
@@ -266,8 +267,8 @@ final class TaskViewModel: ObservableObject {
     /// Coordinator for real-time data sync across family members
     private let dataSyncCoordinator: DataSyncCoordinator
     
-    /// Coordinator for elderly-care-aware error handling
-    private let errorCoordinator: ErrorCoordinator
+    /// Logger for task operations tracking and error diagnosis
+    private let logger = Logger(subsystem: "com.halloo.app", category: "Task")
 
     /// PHASE 2: AppState reference for write consolidation
     /// - Injected after initialization by ContentView
@@ -409,21 +410,18 @@ final class TaskViewModel: ObservableObject {
     /// - Parameter notificationService: Creates family oversight notifications
     /// - Parameter authService: Provides family user context and permissions
     /// - Parameter dataSyncCoordinator: Synchronizes task data across family members
-    /// - Parameter errorCoordinator: Handles errors with elderly care context
     init(
         databaseService: DatabaseServiceProtocol,
         smsService: SMSServiceProtocol,
         notificationService: NotificationServiceProtocol,
         authService: AuthenticationServiceProtocol,
-        dataSyncCoordinator: DataSyncCoordinator,
-        errorCoordinator: ErrorCoordinator
+        dataSyncCoordinator: DataSyncCoordinator
     ) {
         self.databaseService = databaseService
         self.smsService = smsService
         self.notificationService = notificationService
         self.authService = authService
         self.dataSyncCoordinator = dataSyncCoordinator
-        self.errorCoordinator = errorCoordinator
         
         // Configure elderly-appropriate validation
         setupValidation()
@@ -621,6 +619,9 @@ final class TaskViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
 
+        // Track created tasks for rollback if needed
+        var createdTasks: [Task] = []
+
         do {
             print("🔍 Checking authentication...")
             print("🔍 Auth service type: \(type(of: authService))")
@@ -638,9 +639,6 @@ final class TaskViewModel: ObservableObject {
                 throw TaskError.maxTasksReached
             }
             print("✅ Can create task (under limit)")
-
-            // Create separate task for each scheduled time (allows individual tracking)
-            var createdTasks: [Task] = []
             print("📋 Creating \(scheduledTimes.count) task(s) for scheduled times")
 
             for (index, scheduledTime) in scheduledTimes.enumerated() {
@@ -671,10 +669,10 @@ final class TaskViewModel: ObservableObject {
                 try await databaseService.createTask(task)
                 print("   ✅ Saved to database")
 
-                print("   📱 Scheduling notifications...")
-                // Schedule SMS reminders and family notifications
-                try await scheduleTaskNotifications(for: task)
-                print("   ✅ Notifications scheduled")
+                // Local notifications disabled - SMS handled by Cloud Function
+                // print("   📱 Scheduling notifications...")
+                // try await scheduleTaskNotifications(for: task)
+                // print("   ✅ Notifications scheduled")
 
                 createdTasks.append(task)
             }
@@ -698,14 +696,19 @@ final class TaskViewModel: ObservableObject {
             print("❌ Error type: \(type(of: error))")
             print("❌ Error description: \(error.localizedDescription)")
             await MainActor.run {
-                // Provide family-friendly error context
-                self.errorMessage = error.localizedDescription
-                self.errorCoordinator.handle(error, context: "Creating care task for elderly family member")
+                // ROLLBACK: Remove optimistically added tasks from AppState
+                for task in createdTasks {
+                    appState?.deleteTask(task.id)
+                    print("🔄 [TaskViewModel] Rolled back task from AppState: \(task.title)")
+                }
+
+                // Show user-friendly error message
+                self.errorMessage = "Failed to create task. Please check your connection and try again."
+                logger.error("Creating care task failed: \(error.localizedDescription)")
+
+                // Reset loading state
+                self.isLoading = false
             }
-        }
-        
-        await MainActor.run {
-            self.isLoading = false
         }
     }
     
@@ -724,10 +727,13 @@ final class TaskViewModel: ObservableObject {
     
     private func updateTaskAsync() async {
         guard let task = selectedTask, isValidForm, let profile = selectedProfile else { return }
-        
+
         isLoading = true
         errorMessage = nil
-        
+
+        // Store original task for rollback
+        let originalTask = tasks.first(where: { $0.id == task.id })
+
         do {
             let updatedTask = Task(
                 id: task.id,
@@ -750,36 +756,48 @@ final class TaskViewModel: ObservableObject {
                 completionCount: task.completionCount,
                 lastCompletedAt: task.lastCompletedAt
             )
-            
+
+            // 1. OPTIMISTIC: Update AppState immediately
+            await MainActor.run {
+                appState?.updateTask(updatedTask)
+                print("⚡ [TaskViewModel] Optimistic update: \(updatedTask.title)")
+            }
+
+            // 2. Try Firebase update
             try await databaseService.updateTask(updatedTask)
-            
+
             // Reschedule notifications if schedule changed
             let scheduleChanged = task.frequency != frequency ||
                                 task.scheduledTime != (scheduledTimes.first ?? Date()) ||
                                 task.customDays != Array(customDays) ||
                                 task.status != updatedTask.status
-            
-            if scheduleChanged {
-                try await cancelTaskNotifications(for: task)
-                if updatedTask.status == .active {
-                    try await scheduleTaskNotifications(for: updatedTask)
-                }
-            }
-            
-            await MainActor.run {
-                // PHASE 4: AppState is always available - update it directly
-                appState?.updateTask(updatedTask)
-                print("✅ [TaskViewModel] Task updated in AppState: \(updatedTask.title)")
 
+            // Local notifications disabled - SMS handled by Cloud Function
+            // if scheduleChanged {
+            //     try await cancelTaskNotifications(for: task)
+            //     if updatedTask.status == .active {
+            //         try await scheduleTaskNotifications(for: updatedTask)
+            //     }
+            // }
+
+            print("✅ [TaskViewModel] Task updated in Firebase")
+
+            await MainActor.run {
                 self.resetForm()
                 self.showingEditTask = false
                 self.selectedTask = nil
             }
-            
+
         } catch {
+            // 3. ROLLBACK: Restore original task on failure
             await MainActor.run {
-                self.errorMessage = error.localizedDescription
-                self.errorCoordinator.handle(error, context: "Updating task")
+                if let original = originalTask {
+                    appState?.updateTask(original)
+                    print("🔄 [TaskViewModel] Rolled back to original task state")
+                }
+
+                self.errorMessage = "Failed to update task. Changes reverted."
+                logger.error("Updating task failed: \(error.localizedDescription)")
             }
         }
         
@@ -812,7 +830,7 @@ final class TaskViewModel: ObservableObject {
         } catch {
             await MainActor.run {
                 self.errorMessage = error.localizedDescription
-                self.errorCoordinator.handle(error, context: "Deleting task")
+                logger.error("Deleting task failed: \(error.localizedDescription)")
             }
         }
         
@@ -854,13 +872,13 @@ final class TaskViewModel: ObservableObject {
         
         do {
             try await databaseService.updateTask(updatedTask)
-            
-            // Handle notifications based on status
-            if newStatus == .active {
-                try await scheduleTaskNotifications(for: updatedTask)
-            } else {
-                try await cancelTaskNotifications(for: task)
-            }
+
+            // Local notifications disabled - SMS handled by Cloud Function
+            // if newStatus == .active {
+            //     try await scheduleTaskNotifications(for: updatedTask)
+            // } else {
+            //     try await cancelTaskNotifications(for: task)
+            // }
 
             await MainActor.run {
                 // PHASE 4: AppState is always available - update via AppState
@@ -871,7 +889,7 @@ final class TaskViewModel: ObservableObject {
         } catch {
             await MainActor.run {
                 self.errorMessage = error.localizedDescription
-                self.errorCoordinator.handle(error, context: "Toggling task status")
+                logger.error("Toggling task status failed: \(error.localizedDescription)")
             }
         }
     }
@@ -896,19 +914,33 @@ final class TaskViewModel: ObservableObject {
                 id: notificationId,
                 title: "Reminder: \(task.title)",
                 body: task.description.isEmpty ? "Time for your \(task.category.displayName.lowercased())" : task.description,
-                scheduledTime: scheduledTime,
-                userInfo: [
-                    "taskId": task.id,
-                    "profileId": task.profileId,
-                    "type": "taskReminder"
-                ]
+                scheduledTime: scheduledTime
             )
         }
     }
     
+    /// Cancels all scheduled notifications for a specific task
+    ///
+    /// Uses selective cancellation to avoid affecting other tasks' notifications.
+    /// Matches the notification ID generation pattern from scheduleTaskNotifications().
+    ///
+    /// - Parameter task: The task whose notifications should be cancelled
     private func cancelTaskNotifications(for task: Task) async throws {
-        // This would cancel all pending notifications for this task
-        try await notificationService.cancelNotifications(withPrefix: task.id)
+        print("🗑️ [TaskViewModel] Cancelling notifications for task: \(task.title)")
+
+        // Get next 30 scheduled occurrences (matches creation logic from line 885)
+        let scheduledTimes = task.getNextScheduledTimes(count: 30)
+
+        // Cancel each notification by ID (selective cancellation)
+        for scheduledTime in scheduledTimes {
+            // Notification ID format MUST match scheduleTaskNotifications() format
+            let notificationId = "\(task.id)_\(scheduledTime.timeIntervalSince1970)"
+
+            await notificationService.cancelNotification(withId: notificationId)
+            print("   ✅ Cancelled notification: \(notificationId)")
+        }
+
+        print("✅ [TaskViewModel] Cancelled \(scheduledTimes.count) notifications for task: \(task.title)")
     }
     
     // MARK: - Manual Task Completion
@@ -977,8 +1009,16 @@ final class TaskViewModel: ObservableObject {
             
         } catch {
             await MainActor.run {
-                self.errorMessage = error.localizedDescription
-                self.errorCoordinator.handle(error, context: "Marking task completed")
+                // ROLLBACK: Revert task completion status if it was optimistically updated
+                // Note: Current implementation doesn't optimistically mark complete,
+                // but add this for future-proofing
+                if let originalTask = tasks.first(where: { $0.id == task.id }) {
+                    appState?.updateTask(originalTask)
+                    print("🔄 [TaskViewModel] Rolled back task completion")
+                }
+
+                self.errorMessage = "Failed to mark task as complete. Please try again."
+                logger.error("Marking task completed failed: \(error.localizedDescription)")
             }
         }
     }

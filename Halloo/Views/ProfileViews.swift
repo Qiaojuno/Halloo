@@ -515,17 +515,13 @@ struct ImagePicker: UIViewControllerRepresentable {
 #if DEBUG
 struct ProfileViews_Previews: PreviewProvider {
     static var previews: some View {
+        let container = Container.shared
         SimplifiedProfileCreationView(onDismiss: {})
             .environmentObject(ProfileViewModel(
-                databaseService: MockDatabaseService(),
-                smsService: MockSMSService(),
-                authService: MockAuthenticationService(),
-                dataSyncCoordinator: DataSyncCoordinator(
-                    databaseService: MockDatabaseService(),
-                    notificationCoordinator: NotificationCoordinator(),
-                    errorCoordinator: ErrorCoordinator()
-                ),
-                errorCoordinator: ErrorCoordinator()
+                databaseService: container.resolve(DatabaseServiceProtocol.self),
+                smsService: container.resolve(SMSServiceProtocol.self),
+                authService: container.resolve(AuthenticationServiceProtocol.self),
+                dataSyncCoordinator: container.resolve(DataSyncCoordinator.self)
             ))
             .previewDisplayName("Simplified Profile Creation")
     }

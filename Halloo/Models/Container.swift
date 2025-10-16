@@ -35,25 +35,14 @@ final class Container: ObservableObject {
             print("📝 Debug log written to: \(logFile.path)")
         }
 
-        // Core Services - Switch between Mock and Firebase based on configuration
-        if useFirebaseServices {
-            print("🔥 Using Firebase services")
-            registerSingleton(AuthenticationServiceProtocol.self) {
-                FirebaseAuthenticationService()
-            }
+        // Core Services - Firebase only (Mock services removed for MVP)
+        print("🔥 Using Firebase services")
+        registerSingleton(AuthenticationServiceProtocol.self) {
+            FirebaseAuthenticationService()
+        }
 
-            registerSingleton(DatabaseServiceProtocol.self) {
-                FirebaseDatabaseService()
-            }
-        } else {
-            print("🧪 Using Mock services")
-            registerSingleton(AuthenticationServiceProtocol.self) {
-                MockAuthenticationService()
-            }
-
-            registerSingleton(DatabaseServiceProtocol.self) {
-                MockDatabaseService()
-            }
+        registerSingleton(DatabaseServiceProtocol.self) {
+            FirebaseDatabaseService()
         }
 
         print("✅ Container.setupServices() completed")
@@ -66,30 +55,16 @@ final class Container: ObservableObject {
             return twilioService
         }
         
+        // Notification Service - TODO: Implement real NotificationService
         register(NotificationServiceProtocol.self) {
-            MockNotificationService() // Keep mock for now, implement later
-        }
-        
-        
-        register(SubscriptionServiceProtocol.self) {
-            MockSubscriptionService() // Keep mock for now, implement StoreKit later
-        }
-        
-        // Coordination Services - Lazy initialization to avoid blocking app startup
-        register(ErrorCoordinator.self) {
-            ErrorCoordinator()
+            NotificationService()
         }
 
-        register(NotificationCoordinator.self) {
-            NotificationCoordinator()
-        }
-
+        // DataSync Coordinator - Singleton for multi-device sync
         registerSingleton(DataSyncCoordinator.self) {
             print("🔴 [Container] Creating DataSyncCoordinator SINGLETON")
             return DataSyncCoordinator(
-                databaseService: useFirebaseServices ? FirebaseDatabaseService() : MockDatabaseService(),
-                notificationCoordinator: NotificationCoordinator(),
-                errorCoordinator: ErrorCoordinator()
+                databaseService: self.resolve(DatabaseServiceProtocol.self)
             )
         }
     }
@@ -142,11 +117,14 @@ final class Container: ObservableObject {
     
     // MARK: - Singleton Registration
     private func registerSingleton<T>(_ type: T.Type, factory: @escaping () -> T) {
+        let key = String(describing: type)
+
+        // Create instance OUTSIDE the lock to avoid deadlock when factory calls resolve()
+        let instance = factory()
+
+        // Then lock only to store it
         lock.lock()
         defer { lock.unlock() }
-
-        let key = String(describing: type)
-        let instance = factory()
         singletons[key] = instance
         print("✅ Registered singleton: \(key)")
     }
@@ -182,8 +160,7 @@ final class Container: ObservableObject {
     func makeOnboardingViewModel() -> OnboardingViewModel {
         OnboardingViewModel(
             authService: resolve(AuthenticationServiceProtocol.self),
-            databaseService: resolve(DatabaseServiceProtocol.self),
-            errorCoordinator: resolve(ErrorCoordinator.self)
+            databaseService: resolve(DatabaseServiceProtocol.self)
         )
     }
     
@@ -193,11 +170,10 @@ final class Container: ObservableObject {
             databaseService: resolve(DatabaseServiceProtocol.self),
             smsService: resolve(SMSServiceProtocol.self),
             authService: resolve(AuthenticationServiceProtocol.self),
-            dataSyncCoordinator: resolve(DataSyncCoordinator.self),
-            errorCoordinator: resolve(ErrorCoordinator.self)
+            dataSyncCoordinator: resolve(DataSyncCoordinator.self)
         )
     }
-    
+
     @MainActor
     func makeProfileViewModelForCanvas() -> ProfileViewModel {
         ProfileViewModel(
@@ -205,7 +181,6 @@ final class Container: ObservableObject {
             smsService: resolve(SMSServiceProtocol.self),
             authService: resolve(AuthenticationServiceProtocol.self),
             dataSyncCoordinator: resolve(DataSyncCoordinator.self),
-            errorCoordinator: resolve(ErrorCoordinator.self),
             skipAutoLoad: true
         )
     }
@@ -217,8 +192,7 @@ final class Container: ObservableObject {
             smsService: resolve(SMSServiceProtocol.self),
             notificationService: resolve(NotificationServiceProtocol.self),
             authService: resolve(AuthenticationServiceProtocol.self),
-            dataSyncCoordinator: resolve(DataSyncCoordinator.self),
-            errorCoordinator: resolve(ErrorCoordinator.self)
+            dataSyncCoordinator: resolve(DataSyncCoordinator.self)
         )
     }
     
@@ -227,18 +201,7 @@ final class Container: ObservableObject {
         DashboardViewModel(
             databaseService: resolve(DatabaseServiceProtocol.self),
             authService: resolve(AuthenticationServiceProtocol.self),
-            dataSyncCoordinator: resolve(DataSyncCoordinator.self),
-            errorCoordinator: resolve(ErrorCoordinator.self)
-        )
-    }
-    
-    
-    @MainActor
-    func makeSubscriptionViewModel() -> SubscriptionViewModel {
-        SubscriptionViewModel(
-            subscriptionService: resolve(SubscriptionServiceProtocol.self),
-            authService: resolve(AuthenticationServiceProtocol.self),
-            errorCoordinator: resolve(ErrorCoordinator.self)
+            dataSyncCoordinator: resolve(DataSyncCoordinator.self)
         )
     }
     
@@ -246,8 +209,7 @@ final class Container: ObservableObject {
     func makeGalleryViewModel() -> GalleryViewModel {
         GalleryViewModel(
             databaseService: resolve(DatabaseServiceProtocol.self),
-            authService: resolve(AuthenticationServiceProtocol.self),
-            errorCoordinator: resolve(ErrorCoordinator.self)
+            authService: resolve(AuthenticationServiceProtocol.self)
         )
     }
 }
@@ -332,41 +294,10 @@ enum ServiceError: LocalizedError {
 // MARK: - Testing Support
 #if DEBUG
 extension Container {
-    static func makeForTesting() -> Container {
-        let container = Container()
-        
-        // Register mock services for testing
-        container.register(AuthenticationServiceProtocol.self) {
-            MockAuthenticationService()
-        }
-        
-        container.register(DatabaseServiceProtocol.self) {
-            MockDatabaseService()
-        }
-        
-        container.register(SMSServiceProtocol.self) {
-            MockSMSService()
-        }
-        
-        container.register(DataSyncCoordinator.self) {
-            DataSyncCoordinator(
-                databaseService: MockDatabaseService(),
-                notificationCoordinator: NotificationCoordinator(),
-                errorCoordinator: ErrorCoordinator()
-            )
-        }
-        
-        container.register(ErrorCoordinator.self) {
-            ErrorCoordinator()
-        }
-        
-        return container
-    }
-    
     func registerMock<T>(_ type: T.Type, mock: T) {
         lock.lock()
         defer { lock.unlock() }
-        
+
         let key = String(describing: type)
         services[key] = { mock }
     }

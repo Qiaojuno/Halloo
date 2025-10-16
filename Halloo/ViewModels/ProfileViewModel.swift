@@ -18,6 +18,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import OSLog
 
 /// Manages elderly profile creation, SMS confirmation, and family coordination workflow
 ///
@@ -211,8 +212,8 @@ final class ProfileViewModel: ObservableObject {
         dataSyncCoordinator
     }
     
-    /// Coordinator for elderly-care-aware error handling and recovery
-    private let errorCoordinator: ErrorCoordinator
+    /// Logger for profile operations tracking and error diagnosis
+    private let logger = Logger(subsystem: "com.halloo.app", category: "Profile")
 
     /// PHASE 2: AppState reference for write consolidation
     /// - Injected after initialization by ContentView
@@ -328,31 +329,18 @@ final class ProfileViewModel: ObservableObject {
     /// - Parameter smsService: Manages SMS confirmations to elderly family members
     /// - Parameter authService: Provides family user context and permissions
     /// - Parameter dataSyncCoordinator: Synchronizes profile data across family members
-    /// - Parameter errorCoordinator: Handles errors with elderly care context
     init(
         databaseService: DatabaseServiceProtocol,
         smsService: SMSServiceProtocol,
         authService: AuthenticationServiceProtocol,
-        dataSyncCoordinator: DataSyncCoordinator,
-        errorCoordinator: ErrorCoordinator
+        dataSyncCoordinator: DataSyncCoordinator
     ) {
-        print("🔵 ProfileViewModel.init START")
-        DiagnosticLogger.enter(.vmInit, "ProfileViewModel.init", context: [
-            "authStatus": authService.isAuthenticated,
-            "userId": authService.currentUser?.uid ?? "nil"
-        ])
+        logger.info("ProfileViewModel.init START")
 
-        print("🔵 Assigning services...")
         self.databaseService = databaseService
-        print("🔵 databaseService assigned")
         self.smsService = smsService
-        print("🔵 smsService assigned")
         self.authService = authService
-        print("🔵 authService assigned")
         self.dataSyncCoordinator = dataSyncCoordinator
-        print("🔵 dataSyncCoordinator assigned")
-        self.errorCoordinator = errorCoordinator
-        print("🔵 errorCoordinator assigned")
 
         // Configure elderly-appropriate validation
         print("🔵 Calling setupValidation()...")
@@ -364,15 +352,12 @@ final class ProfileViewModel: ObservableObject {
         setupDataSync()
         print("🔵 setupDataSync() complete")
 
-        DiagnosticLogger.info(.vmInit, "ProfileViewModel init complete - loadProfiles() will be called after initialization", context: [
-            "authStatus": authService.isAuthenticated,
-            "userId": authService.currentUser?.uid ?? "nil"
-        ])
+        print("ℹ️ [VmInit] ProfileViewModel init complete - loadProfiles() will be called after initialization - authStatus: \(authService.isAuthenticated), userId: \(authService.currentUser?.uid ?? "nil")")
 
         // NOTE: loadProfiles() is called explicitly in ContentView after ViewModel creation
         // to avoid crashes from async work during init
 
-        DiagnosticLogger.exit(.vmInit, "ProfileViewModel.init")
+        print("✅ [VmInit] ProfileViewModel.init exit")
         print("🔵 ProfileViewModel.init COMPLETE")
     }
     
@@ -385,21 +370,19 @@ final class ProfileViewModel: ObservableObject {
         smsService: SMSServiceProtocol,
         authService: AuthenticationServiceProtocol,
         dataSyncCoordinator: DataSyncCoordinator,
-        errorCoordinator: ErrorCoordinator,
         skipAutoLoad: Bool = false
     ) {
         self.databaseService = databaseService
         self.smsService = smsService
         self.authService = authService
         self.dataSyncCoordinator = dataSyncCoordinator
-        self.errorCoordinator = errorCoordinator
-        
+
         // Configure elderly-appropriate validation
         setupValidation()
-        
+
         // Enable real-time family and SMS synchronization
         setupDataSync()
-        
+
         // Skip automatic loading for Canvas previews
         if !skipAutoLoad {
             loadProfiles()
@@ -559,9 +542,7 @@ final class ProfileViewModel: ObservableObject {
     profile creation attempts.
     */
     func createProfileAsync() async {
-        let tracker = DiagnosticLogger.track(.asyncTask, "Create profile", context: [
-            "thread": DiagnosticLogger.threadInfo()
-        ])
+        print("🔵 [AsyncTask] Create profile - thread: \(Thread.current)")
 
         // ✅ DIAGNOSTIC: Check validation state
         print("🔍 ==================== PROFILE CREATION DEBUG ====================")
@@ -582,13 +563,7 @@ final class ProfileViewModel: ObservableObject {
 
         guard isValidForm else {
             print("❌ VALIDATION FAILED - Exiting createProfileAsync")
-            DiagnosticLogger.warning(.asyncTask, "Profile form validation failed", context: [
-                "profileName": profileName,
-                "phoneNumber": phoneNumber,
-                "relationship": relationship,
-                "hasSelectedPhoto": hasSelectedPhoto,
-                "missingRequirements": missingRequirements.joined(separator: ", ")
-            ])
+            print("⚠️ [AsyncTask] Profile form validation failed - profileName: \(profileName), phoneNumber: \(phoneNumber), relationship: \(relationship), hasSelectedPhoto: \(hasSelectedPhoto), missingRequirements: \(missingRequirements.joined(separator: ", "))")
 
             // Show error to user
             await MainActor.run {
@@ -606,25 +581,18 @@ final class ProfileViewModel: ObservableObject {
         }
 
         do {
-            DiagnosticLogger.info(.asyncTask, "Checking authentication", context: [
-                "authServiceType": String(describing: type(of: authService)),
-                "isAuthenticated": authService.isAuthenticated,
-                "hasCurrentUser": authService.currentUser != nil
-            ])
+            print("ℹ️ [AsyncTask] Checking authentication - authServiceType: \(String(describing: type(of: authService))), isAuthenticated: \(authService.isAuthenticated), hasCurrentUser: \(authService.currentUser != nil)")
 
             guard let userId = authService.currentUser?.uid else {
-                DiagnosticLogger.error(.asyncTask, "❌ Authentication check failed - no user ID")
+                print("❌ [AsyncTask] Authentication check failed - no user ID")
                 throw ProfileError.userNotAuthenticated
             }
 
-            DiagnosticLogger.success(.asyncTask, "User authenticated", context: ["userId": userId])
+            print("✅ [AsyncTask] User authenticated - userId: \(userId)")
 
             // Protective limit: Max 4 profiles per family to prevent SMS overwhelming
             guard canCreateProfile else {
-                DiagnosticLogger.warning(.asyncTask, "Max profiles limit reached", context: [
-                    "currentCount": profiles.count,
-                    "maxProfiles": maxProfiles
-                ])
+                print("⚠️ [AsyncTask] Max profiles limit reached - currentCount: \(profiles.count), maxProfiles: \(maxProfiles)")
                 throw ProfileError.maxProfilesReached
             }
 
@@ -637,37 +605,23 @@ final class ProfileViewModel: ObservableObject {
             print("📸 Checking for photo upload - selectedPhotoData: \(selectedPhotoData?.count ?? 0) bytes")
             if let photoData = selectedPhotoData {
                 print("📸 ✅ Photo data exists, starting upload...")
-                DiagnosticLogger.info(.asyncTask, "Uploading profile photo", context: [
-                    "profileId": profileId,
-                    "photoSize": photoData.count
-                ])
+                print("ℹ️ [AsyncTask] Uploading profile photo - profileId: \(profileId), photoSize: \(photoData.count)")
 
                 do {
                     print("📸 Calling databaseService.uploadProfilePhoto()...")
                     photoURLString = try await databaseService.uploadProfilePhoto(photoData, for: profileId)
                     print("📸 ✅ Photo upload SUCCESS - URL: \(photoURLString ?? "nil")")
-                    DiagnosticLogger.success(.asyncTask, "Profile photo uploaded", context: [
-                        "profileId": profileId,
-                        "photoURL": photoURLString ?? "nil"
-                    ])
+                    print("✅ [AsyncTask] Profile photo uploaded - profileId: \(profileId), photoURL: \(photoURLString ?? "nil")")
                 } catch {
                     print("📸 ❌ Photo upload FAILED - error: \(error.localizedDescription)")
-                    DiagnosticLogger.error(.asyncTask, "Failed to upload profile photo", context: [
-                        "profileId": profileId,
-                        "error": error.localizedDescription
-                    ], error: error)
+                    print("❌ [AsyncTask] Failed to upload profile photo - profileId: \(profileId), error: \(error.localizedDescription)")
                     // Continue without photo - it will fall back to initial letter
                 }
             } else {
                 print("📸 ❌ No photo data to upload (selectedPhotoData is nil)")
             }
 
-            DiagnosticLogger.info(.asyncTask, "Creating profile object", context: [
-                "name": profileName,
-                "phone": e164Phone,
-                "relationship": relationship,
-                "hasPhoto": photoURLString != nil
-            ])
+            print("ℹ️ [AsyncTask] Creating profile object - name: \(profileName), phone: \(e164Phone), relationship: \(relationship), hasPhoto: \(photoURLString != nil)")
 
             // Create profile with elderly-optimized defaults
             let profile = ElderlyProfile(
@@ -685,56 +639,36 @@ final class ProfileViewModel: ObservableObject {
                 lastActiveAt: Date()
             )
 
-            DiagnosticLogger.info(.database, "Saving profile to database", context: [
-                "profileId": profile.id,
-                "userId": userId
-            ])
+            print("ℹ️ [Database] Saving profile to database - profileId: \(profile.id), userId: \(userId)")
 
             // Persist with family synchronization
-            let dbTracker = DiagnosticLogger.track(.database, "Create elderly profile", context: [
-                "profileId": profile.id
-            ])
+            print("🔵 [Database] Create elderly profile - profileId: \(profile.id)")
 
             do {
                 try await databaseService.createElderlyProfile(profile)
-                dbTracker.end(success: true)
-                DiagnosticLogger.success(.database, "Profile saved successfully", context: [
-                    "profileId": profile.id
-                ])
+                print("✅ [Database] Profile saved successfully - profileId: \(profile.id)")
             } catch {
-                dbTracker.end(success: false, additionalContext: ["error": error.localizedDescription])
-                DiagnosticLogger.error(.database, "Failed to save profile", context: [
-                    "profileId": profile.id
-                ], error: error)
+                print("❌ [Database] Failed to save profile - profileId: \(profile.id), error: \(error.localizedDescription)")
                 throw error
             }
 
-            DiagnosticLogger.info(.asyncTask, "Broadcasting profile update")
+            print("ℹ️ [AsyncTask] Broadcasting profile update")
             // Broadcast profile creation to Dashboard and other family members
             dataSyncCoordinator.broadcastProfileUpdate(profile)
-            DiagnosticLogger.success(.asyncTask, "Profile update broadcasted")
+            print("✅ [AsyncTask] Profile update broadcasted")
 
-            DiagnosticLogger.info(.asyncTask, "Sending confirmation SMS")
+            print("ℹ️ [AsyncTask] Sending confirmation SMS")
             // Send SMS confirmation immediately (critical step)
             do {
                 try await sendConfirmationSMS(for: profile)
-                DiagnosticLogger.success(.asyncTask, "SMS sent successfully", context: [
-                    "profileId": profile.id,
-                    "phoneNumber": profile.phoneNumber
-                ])
+                print("✅ [AsyncTask] SMS sent successfully - profileId: \(profile.id), phoneNumber: \(profile.phoneNumber)")
             } catch {
-                DiagnosticLogger.error(.asyncTask, "Failed to send SMS", context: [
-                    "profileId": profile.id,
-                    "phoneNumber": profile.phoneNumber
-                ], error: error)
+                print("❌ [AsyncTask] Failed to send SMS - profileId: \(profile.id), phoneNumber: \(profile.phoneNumber), error: \(error.localizedDescription)")
                 // Don't throw - profile created, SMS failure is recoverable
             }
 
             await MainActor.run {
-                DiagnosticLogger.info(.uiUpdate, "Updating local state", context: [
-                    "oldProfileCount": self.profiles.count,
-                    "thread": DiagnosticLogger.threadInfo()
-                ])
+                print("ℹ️ [UiUpdate] Updating local state - oldProfileCount: \(self.profiles.count), thread: \(Thread.current)")
 
                 // PHASE 2: Update AppState instead of local array
                 // AppState will broadcast via DataSyncCoordinator automatically
@@ -751,40 +685,26 @@ final class ProfileViewModel: ObservableObject {
                 self.resetForm()
                 self.showingCreateProfile = false
 
-                DiagnosticLogger.success(.uiUpdate, "Profile creation complete", context: [
-                    "newProfileId": profile.id
-                ])
+                print("✅ [UiUpdate] Profile creation complete - newProfileId: \(profile.id)")
             }
 
-            tracker.end(success: true, additionalContext: [
-                "profileId": profile.id,
-                "totalProfiles": profiles.count
-            ])
+            print("✅ [AsyncTask] Profile creation successful - profileId: \(profile.id), totalProfiles: \(profiles.count)")
 
         } catch {
-            DiagnosticLogger.error(.asyncTask, "❌ Profile creation failed", context: [
-                "errorType": String(describing: type(of: error)),
-                "error": error.localizedDescription
-            ], error: error)
+            print("❌ [AsyncTask] Profile creation failed - errorType: \(String(describing: type(of: error))), error: \(error.localizedDescription)")
 
             await MainActor.run {
                 // Provide family-friendly error context
                 self.errorMessage = error.localizedDescription
-                self.errorCoordinator.handle(error, context: "Creating elderly family member profile")
+                logger.error("Creating elderly family member profile failed: \(error.localizedDescription)")
 
-                DiagnosticLogger.info(.uiUpdate, "Error message displayed to user", context: [
-                    "message": error.localizedDescription
-                ])
+                print("ℹ️ [UiUpdate] Error message displayed to user - message: \(error.localizedDescription)")
             }
-
-            tracker.end(success: false, additionalContext: [
-                "error": error.localizedDescription
-            ])
         }
 
         await MainActor.run {
             self.isLoading = false
-            DiagnosticLogger.info(.uiUpdate, "Loading state cleared")
+            print("ℹ️ [UiUpdate] Loading state cleared")
         }
     }
     
@@ -852,7 +772,7 @@ final class ProfileViewModel: ObservableObject {
         } catch {
             await MainActor.run {
                 self.errorMessage = error.localizedDescription
-                self.errorCoordinator.handle(error, context: "Updating profile")
+                logger.error("Updating profile failed: \(error.localizedDescription)")
             }
         }
         
@@ -897,7 +817,7 @@ final class ProfileViewModel: ObservableObject {
                 print("✅ [ProfileViewModel] Profile restored to AppState after delete failure")
 
                 self.errorMessage = "Failed to delete profile: \(error.localizedDescription)"
-                self.errorCoordinator.handle(error, context: "Deleting profile")
+                logger.error("Deleting profile failed: \(error.localizedDescription)")
             }
         }
     }
@@ -941,7 +861,7 @@ final class ProfileViewModel: ObservableObject {
         } catch {
             await MainActor.run {
                 self.errorMessage = error.localizedDescription
-                self.errorCoordinator.handle(error, context: "Toggling profile status")
+                logger.error("Toggling profile status failed: \(error.localizedDescription)")
             }
         }
     }
@@ -983,7 +903,7 @@ final class ProfileViewModel: ObservableObject {
             await MainActor.run {
                 self.errorMessage = error.localizedDescription
                 self.confirmationStatus[profile.id] = .failed
-                self.errorCoordinator.handle(error, context: "Resending confirmation")
+                logger.error("Resending confirmation failed: \(error.localizedDescription)")
             }
         }
     }
@@ -1631,7 +1551,7 @@ final class ProfileViewModel: ObservableObject {
             await MainActor.run {
                 self.errorMessage = error.localizedDescription
                 self.confirmationStatus[profile.id] = .failed
-                self.errorCoordinator.handle(error, context: "Sending onboarding SMS")
+                logger.error("Sending onboarding SMS failed: \(error.localizedDescription)")
             }
         }
         
@@ -1669,7 +1589,7 @@ final class ProfileViewModel: ObservableObject {
                 
             } catch {
                 // Log error but don't interrupt profile confirmation flow
-                self.errorCoordinator.handle(error, context: "Creating gallery history event for profile")
+                logger.error("Creating gallery history event for profile failed: \(error.localizedDescription)")
             }
         }
     }

@@ -349,9 +349,8 @@ struct HabitsView: View {
     
     /// Filtered habits based on selected profile and days
     private var filteredHabits: [Task] {
-        // Get all tasks from TaskViewModel (not just today's tasks)
-        guard let taskVM = taskViewModel else { return [] }
-        let allTasks = taskVM.tasks
+        // PHASE 4: Read directly from AppState (single source of truth)
+        let allTasks = appState.tasks
 
         return allTasks.filter { habit in
             // Exclude locally deleted habits for optimistic UI

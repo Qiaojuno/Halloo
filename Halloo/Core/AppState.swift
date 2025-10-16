@@ -105,7 +105,7 @@ final class AppState: ObservableObject {
     /// - ProfileViewModel.errorMessage
     /// - TaskViewModel.errorMessage
     /// - DashboardViewModel.errorMessage
-    @Published var globalError: AppError?
+    @Published var globalError: String?
 
     // MARK: - Services (Injected Once, Shared Across All Operations)
 
@@ -183,7 +183,7 @@ final class AppState: ObservableObject {
     /// that were previously called by each ViewModel independently.
     ///
     /// - Note: Uses Swift concurrency async let for parallel loading
-    /// - Throws: Re-throws Firebase errors as AppError for display
+    /// - Throws: Re-throws Firebase errors for display
     func loadUserData() async {
         guard let userId = authService.currentUser?.uid else {
             print("⚠️ [AppState] Cannot load data - no authenticated user")
@@ -211,13 +211,7 @@ final class AppState: ObservableObject {
 
         } catch {
             print("❌ [AppState] Failed to load user data: \(error.localizedDescription)")
-            self.globalError = AppError(
-                error: error,
-                context: "Failed to Load Data",
-                severity: .high,
-                timestamp: Date(),
-                userInfo: [:]
-            )
+            self.globalError = error.localizedDescription
         }
     }
 
