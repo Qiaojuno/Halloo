@@ -220,6 +220,12 @@ final class ProfileViewModel: ObservableObject {
     /// - Used to update centralized state instead of local @Published arrays
     private weak var appState: AppState?
 
+    /// Tracks which profiles have had gallery events created to prevent duplicates
+    /// - Key: profileId
+    /// - Used to ensure gallery event is only created once per profile, even when
+    ///   old SMS confirmations are replayed by the real-time listener
+    private var profilesWithGalleryEvents = Set<String>()
+
     // MARK: - Internal Coordination Properties
     
     /// Combine cancellables for reactive elderly profile coordination
@@ -1563,30 +1569,46 @@ final class ProfileViewModel: ObservableObject {
     // MARK: - Gallery History Event Creation
     
     /// Creates a gallery history event when a profile is confirmed
-    /// 
+    ///
     /// This method creates a gallery event to track profile creation in the gallery history.
     /// Called when elderly users confirm their profile via SMS response.
-    /// 
+    ///
+    /// **Important:** Uses Set-based tracking to prevent duplicate gallery entries when
+    /// old SMS confirmations are replayed by the real-time listener on app launch.
+    ///
     /// - Parameter profile: The confirmed elderly profile
     /// - Parameter profileSlot: The slot index for consistent color assignment
     private func createGalleryEventForProfile(_ profile: ElderlyProfile, profileSlot: Int) {
         guard let userId = authService.currentUser?.uid else { return }
-        
+
+        // Check if gallery event already created for this profile
+        if profilesWithGalleryEvents.contains(profile.id) {
+            print("ℹ️ [ProfileViewModel] Gallery event already created for profile \(profile.name) - skipping duplicate")
+            return
+        }
+
         // Create gallery history event for profile creation
         let galleryEvent = GalleryHistoryEvent.fromProfileCreation(
             userId: userId,
             profile: profile,
             profileSlot: profileSlot
         )
-        
+
         // Save gallery event to database
         _Concurrency.Task {
             do {
                 try await self.databaseService.createGalleryHistoryEvent(galleryEvent)
-                
+
+                // Mark this profile as having a gallery event
+                await MainActor.run {
+                    self.profilesWithGalleryEvents.insert(profile.id)
+                }
+
                 // Broadcast gallery event update to gallery views
                 self.dataSyncCoordinator.broadcastGalleryEventUpdate(galleryEvent)
-                
+
+                print("✅ [ProfileViewModel] Created gallery event for profile \(profile.name)")
+
             } catch {
                 // Log error but don't interrupt profile confirmation flow
                 logger.error("Creating gallery history event for profile failed: \(error.localizedDescription)")

@@ -30,7 +30,15 @@ struct ContentView: View {
 
     // MARK: - State Management
     // Phase 1: READ-ONLY AppState integration (keeping existing ViewModels temporarily)
-    @State private var appState: AppState?
+    // FIXED: Use @StateObject to subscribe to @Published properties for UI updates
+    @StateObject private var appState: AppState = {
+        let container = Container.shared
+        return AppState(
+            authService: container.resolve(AuthenticationServiceProtocol.self),
+            databaseService: container.resolve(DatabaseServiceProtocol.self),
+            dataSyncCoordinator: container.resolve(DataSyncCoordinator.self)
+        )
+    }()
 
     @State private var onboardingViewModel: OnboardingViewModel?
     @State private var profileViewModel: ProfileViewModel?
@@ -74,7 +82,7 @@ struct ContentView: View {
     // MARK: - Navigation Content
     @ViewBuilder
     private var navigationContent: some View {
-        if let appState = appState, onboardingViewModel != nil {
+        if onboardingViewModel != nil {
             if isAuthenticated {
                 authenticatedContent
             } else {
@@ -121,7 +129,7 @@ struct ContentView: View {
                     )
                         .environmentObject(dashboardVM)
                         .environmentObject(profileVM)
-                        .environmentObject(appState!)  // PHASE 1: Inject AppState for read-only access
+                        .environmentObject(appState)  // PHASE 1: Inject AppState for read-only access
                         .environment(\.isScrollDisabled, isHorizontalDragging)
                         .environment(\.isDragging, dragOffset != 0)
                         .offset(x: tabOffset(for: 0))
@@ -131,7 +139,7 @@ struct ContentView: View {
                     GalleryView(selectedTab: $selectedTab, showHeader: false, showNav: false)
                         .environmentObject(galleryVM) // Use real Firebase services!
                         .environmentObject(profileVM)
-                        .environmentObject(appState!)  // PHASE 1: Inject AppState for read-only access
+                        .environmentObject(appState)  // PHASE 1: Inject AppState for read-only access
                         .environment(\.isScrollDisabled, isHorizontalDragging)
                         .environment(\.isDragging, dragOffset != 0)
                         .offset(x: tabOffset(for: 1))
@@ -141,7 +149,7 @@ struct ContentView: View {
                     HabitsView(selectedTab: $selectedTab, showHeader: false, showNav: false)
                         .environmentObject(dashboardVM) // Share same instance for real-time data sync
                         .environmentObject(profileVM)
-                        .environmentObject(appState!)  // PHASE 1: Inject AppState for read-only access
+                        .environmentObject(appState)  // PHASE 1: Inject AppState for read-only access
                         .environment(\.isScrollDisabled, isHorizontalDragging)
                         .environment(\.isDragging, dragOffset != 0)
                         .offset(x: tabOffset(for: 2))
@@ -274,7 +282,7 @@ struct ContentView: View {
                     SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
                         .environmentObject(dashboardVM)
                         .environmentObject(profileVM)
-                        .environmentObject(appState!)  // FIXED: Inject AppState
+                        .environmentObject(appState)  // FIXED: Inject AppState
                         .background(Color(hex: "f9f9f9").opacity(0)) // Transparent background
 
                     Spacer()
@@ -310,16 +318,16 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         }
         .fullScreenCover(isPresented: $showingDirectOnboarding) {
-            if let profileVM = profileViewModel, let appState = appState {
+            if let profileVM = profileViewModel {
                 SimplifiedProfileCreationView(onDismiss: {
                     showingDirectOnboarding = false
                 })
                 .environmentObject(profileVM)
-                .environmentObject(appState)  // appState unwrapped by if-let
+                .environmentObject(appState)
             }
         }
         .fullScreenCover(isPresented: $showingTaskCreation) {
-            if let dashboardVM = dashboardViewModel, let profileVM = profileViewModel, let appState = appState {
+            if let dashboardVM = dashboardViewModel, let profileVM = profileViewModel {
                 TaskCreationViewWrapper(
                     container: container,
                     appState: appState,
@@ -369,25 +377,18 @@ struct ContentView: View {
     // MARK: - Initialization Methods
     @MainActor
     private func initializeViewModels() {
+        print("🔵 [ContentView] initializeViewModels() CALLED")
+
         // Only initialize once - prevent recreating ViewModels on every render
         guard profileViewModel == nil else {
             print("⚠️ [ContentView] ViewModels already initialized - skipping")
             return
         }
 
-        print("🔵 [ContentView] Initializing ViewModels...")
+        print("🔵 [ContentView] Initializing ViewModels for FIRST TIME...")
 
-        // PHASE 1: Initialize AppState with injected services
-        let authSvc = container.resolve(AuthenticationServiceProtocol.self)
-        let dbSvc = container.resolve(DatabaseServiceProtocol.self)
-        let syncCoordinator = container.resolve(DataSyncCoordinator.self)
-
-        appState = AppState(
-            authService: authSvc,
-            databaseService: dbSvc,
-            dataSyncCoordinator: syncCoordinator
-        )
-        print("✅ [ContentView] AppState created")
+        // AppState is now initialized as @StateObject at declaration time
+        print("✅ [ContentView] AppState already initialized as @StateObject")
 
         // Create ViewModels using Container (all factory methods are @MainActor)
         onboardingViewModel = container.makeOnboardingViewModel()
@@ -396,9 +397,7 @@ struct ContentView: View {
         print("✅ [ContentView] ProfileViewModel created")
 
         // PHASE 2: Inject AppState into ProfileViewModel for write consolidation
-        if let appState = appState, let profileVM = profileViewModel {
-            profileVM.setAppState(appState)
-        }
+        profileViewModel?.setAppState(appState)
 
         // Load profiles after ViewModel is fully initialized
         profileViewModel?.loadProfiles()
@@ -407,9 +406,7 @@ struct ContentView: View {
         galleryViewModel = container.makeGalleryViewModel()
 
         // PHASE 4: Inject AppState into DashboardViewModel
-        if let appState = appState, let dashboardVM = dashboardViewModel {
-            dashboardVM.setAppState(appState)
-        }
+        dashboardViewModel?.setAppState(appState)
 
         // Store auth service reference (singleton)
         authService = container.resolve(AuthenticationServiceProtocol.self) as? FirebaseAuthenticationService
@@ -423,11 +420,17 @@ struct ContentView: View {
             try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
 
             await MainActor.run {
+                print("🔵 [ContentView] Checking auth on launch...")
                 if authService?.isAuthenticated == true {
+                    print("✅ [ContentView] User is authenticated on launch")
                     isAuthenticated = true
-                    // Reload profiles now that user is authenticated
-                    profileViewModel?.loadProfiles()
+                    // Load all user data and setup real-time listeners
+                    _Concurrency.Task {
+                        print("🔵 [ContentView] Calling appState.loadUserData()...")
+                        await appState.loadUserData()
+                    }
                 } else {
+                    print("⚠️ [ContentView] User is NOT authenticated on launch")
                     isAuthenticated = false
                 }
             }
@@ -446,7 +449,7 @@ struct ContentView: View {
                 if newAuthState {
                     // PHASE 1: Load data into AppState (single source of truth)
                     _Concurrency.Task { @MainActor in
-                        await self.appState?.loadUserData()
+                        await self.appState.loadUserData()
                     }
 
                     // Keep existing ViewModel loads temporarily (Phase 2 will remove)
@@ -473,9 +476,7 @@ struct ContentView: View {
         )
 
         // PHASE 2: Inject AppState into TaskViewModel for write consolidation
-        if let appState = appState {
-            viewModel.setAppState(appState)
-        }
+        viewModel.setAppState(appState)
 
         return viewModel
     }

@@ -9,6 +9,7 @@
 1. [Phone Number Format - E.164 Compliance](#phone-number-format---e164-compliance)
 2. [Data Migration - Fix Task ProfileIds](#data-migration---fix-task-profileids)
 3. [Archived Photos Feature - 90-Day Retention](#archived-photos-feature---90-day-retention)
+4. [Real-Time Gallery Updates Fix](#real-time-gallery-updates-fix)
 
 ---
 
@@ -681,4 +682,125 @@ If issues occur:
 
 ---
 
-*Last Updated: 2025-10-14*
+# Real-Time Gallery Updates Fix
+
+## Issue
+Gallery UI was not updating in real-time when SMS responses created gallery events, despite successful data flow through Firestore → Real-time listener → AppState chain.
+
+## Root Causes
+
+### 1. SwiftUI Property Wrapper Bug
+**File:** `ContentView.swift:33`
+
+AppState was declared as `@State` instead of `@StateObject`:
+- `@State` only watches variable reassignment, doesn't subscribe to `@Published` properties
+- `@StateObject` subscribes to all `@Published` properties in ObservableObject
+- Result: Data reached AppState but SwiftUI wasn't watching it
+
+### 2. Event Type Rendering Bug
+**File:** `GalleryView.swift:360`
+
+Gallery hardcoded to only render `taskResponse` events:
+- Ignored `profileCreated` events entirely
+- Needed switch statement to handle multiple event types
+- Added `galleryEventView(for:)` helper function
+
+### 3. Listener Crash on Malformed Data
+**File:** `FirebaseDatabaseService.swift:735`
+
+Listener crashed on single bad event, blocking all new events:
+- Old events had `photoData: "<null>"` (JS null) causing decode failure
+- Changed from `map { try }` to `compactMap { try? }` for fault tolerance
+- Skip bad events instead of crashing entire listener
+
+### 4. Duplicate Profile Creation Events
+**File:** `ProfileViewModel.swift:1068`
+
+Gallery events duplicated 20+ times on app launch:
+- SMS listener replays all historical messages on launch
+- Time-based deduplication insufficient (old timestamps bypass check)
+- Implemented Set-based tracking: `profilesWithGalleryEvents = Set<String>()`
+
+## Solution
+
+### ContentView.swift
+```swift
+// Changed from @State to @StateObject with inline initialization
+@StateObject private var appState: AppState = {
+    let container = Container.shared
+    return AppState(
+        authService: container.resolve(AuthenticationServiceProtocol.self),
+        databaseService: container.resolve(DatabaseServiceProtocol.self),
+        dataSyncCoordinator: container.resolve(DataSyncCoordinator.self)
+    )
+}()
+```
+
+### GalleryView.swift
+```swift
+@ViewBuilder
+private func galleryEventView(for event: GalleryHistoryEvent) -> some View {
+    switch event.eventData {
+    case .taskResponse:
+        GalleryPhotoView.taskResponse(...)
+    case .profileCreated:
+        GalleryPhotoView.profilePhoto(...)
+    }
+}
+```
+
+### FirebaseDatabaseService.swift
+```swift
+// Fault-tolerant listener - skip bad events instead of crashing
+let events = documents.compactMap { document -> GalleryHistoryEvent? in
+    do {
+        return try self.decodeFromFirestore(document.data(), as: GalleryHistoryEvent.self)
+    } catch {
+        print("❌ Failed to decode gallery event \(document.documentID) - SKIPPING")
+        return nil
+    }
+}
+subject.send(events)
+```
+
+### ProfileViewModel.swift
+```swift
+// Set-based deduplication
+private var profilesWithGalleryEvents = Set<String>()
+
+private func createGalleryEventForProfile(_ profile: ElderlyProfile, profileSlot: Int) {
+    guard !profilesWithGalleryEvents.contains(profile.id) else { return }
+
+    // Create event...
+
+    await MainActor.run {
+        self.profilesWithGalleryEvents.insert(profile.id)
+    }
+}
+```
+
+## Related Files
+
+### iOS
+- `/Halloo/Views/ContentView.swift` - @StateObject fix
+- `/Halloo/Views/GalleryView.swift` - Event type rendering
+- `/Halloo/Services/FirebaseDatabaseService.swift` - Fault-tolerant listener
+- `/Halloo/ViewModels/ProfileViewModel.swift` - Set-based deduplication
+
+### Documentation
+- `/Halloo/docs/sessions/SESSION-2025-10-20-RealTimeGalleryFix.md` - Detailed session notes
+
+### Cleanup Scripts (Temporary)
+- `/cleanup-gallery-duplicates.js` - Remove duplicate events from Firestore
+- `/UI-UPDATE-FIX.md` - UI update debugging notes
+
+## Key Learnings
+
+1. **@State vs @StateObject:** Using wrong property wrapper silently breaks reactive updates
+2. **Fault tolerance:** Use `compactMap` for real-time listeners with legacy data
+3. **Set-based deduplication:** More robust than time-based checks for replayed events
+4. **Type-specific rendering:** Don't hardcode single type when data model supports multiple
+
+---
+
+*Last Updated: 2025-10-20*

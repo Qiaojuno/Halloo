@@ -674,7 +674,7 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
                     subject.send([])
                     return
                 }
-                
+
                 do {
                     let profiles = try documents.map { document in
                         try self.decodeFromFirestore(document.data(), as: ElderlyProfile.self)
@@ -684,7 +684,61 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
                     subject.send(completion: .failure(error))
                 }
             }
-        
+
+        listeners.append(listener)
+        return subject.eraseToAnyPublisher()
+    }
+
+    func observeUserGalleryEvents(_ userId: String) -> AnyPublisher<[GalleryHistoryEvent], Error> {
+        let subject = PassthroughSubject<[GalleryHistoryEvent], Error>()
+
+        // Observe gallery_events collection under user
+        let listener = CollectionPath.userGalleryEvents(userId: userId)
+            .collection(in: db)
+            .order(by: "createdAt", descending: true)
+            .addSnapshotListener { snapshot, error in
+                if let error = error {
+                    subject.send(completion: .failure(error))
+                    return
+                }
+
+                guard let documents = snapshot?.documents else {
+                    subject.send([])
+                    return
+                }
+
+                // Use compactMap to skip events that fail to decode (old schema, corrupted data)
+                let events = documents.compactMap { document -> GalleryHistoryEvent? in
+                    do {
+                        return try self.decodeFromFirestore(document.data(), as: GalleryHistoryEvent.self)
+                    } catch {
+                        print("❌ [FirebaseDatabaseService] Failed to decode gallery event \(document.documentID) - SKIPPING")
+                        print("📄 Raw Firestore data: \(document.data())")
+                        print("🔍 Decoding error: \(error)")
+                        if let decodingError = error as? DecodingError {
+                            switch decodingError {
+                            case .keyNotFound(let key, let context):
+                                print("   Missing key: \(key.stringValue)")
+                                print("   Context: \(context.debugDescription)")
+                            case .valueNotFound(let type, let context):
+                                print("   Missing value for type: \(type)")
+                                print("   Context: \(context.debugDescription)")
+                            case .typeMismatch(let type, let context):
+                                print("   Type mismatch for: \(type)")
+                                print("   Context: \(context.debugDescription)")
+                            case .dataCorrupted(let context):
+                                print("   Data corrupted: \(context.debugDescription)")
+                            @unknown default:
+                                print("   Unknown decoding error")
+                            }
+                        }
+                        // Return nil to skip this event instead of crashing the listener
+                        return nil
+                    }
+                }
+                subject.send(events)
+            }
+
         listeners.append(listener)
         return subject.eraseToAnyPublisher()
     }

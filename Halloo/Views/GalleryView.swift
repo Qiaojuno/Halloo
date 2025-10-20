@@ -91,7 +91,8 @@ struct GalleryView: View {
             initializeViewModel()
         }
         .task {
-            await viewModel.loadGalleryData()
+            // PHASE 4: AppState handles gallery event loading via real-time listener
+            // No need to manually load - data comes from appState.galleryEvents
             await viewModel.loadArchivedPhotos()
         }
         .overlay(
@@ -157,8 +158,9 @@ struct GalleryView: View {
             }
         )
         .fullScreenCover(item: $selectedEventForDetail) { event in
-            let currentIndex = viewModel.galleryEvents.firstIndex(where: { $0.id == event.id }) ?? 0
-            let totalEvents = viewModel.galleryEvents.count
+            // PHASE 4: Read from AppState instead of ViewModel
+            let currentIndex = appState.galleryEvents.firstIndex(where: { $0.id == event.id }) ?? 0
+            let totalEvents = appState.galleryEvents.count
 
             GalleryDetailView(
                 event: event,
@@ -192,18 +194,20 @@ struct GalleryView: View {
     }
     
     private func navigateToPrevious(from currentEvent: GalleryHistoryEvent) {
-        guard let currentIndex = viewModel.galleryEvents.firstIndex(where: { $0.id == currentEvent.id }),
+        // PHASE 4: Read from AppState instead of ViewModel
+        guard let currentIndex = appState.galleryEvents.firstIndex(where: { $0.id == currentEvent.id }),
               currentIndex > 0 else { return }
-        
-        let previousEvent = viewModel.galleryEvents[currentIndex - 1]
+
+        let previousEvent = appState.galleryEvents[currentIndex - 1]
         selectedEventForDetail = previousEvent
     }
-    
-    private func navigateToNext(from currentEvent: GalleryHistoryEvent) {
-        guard let currentIndex = viewModel.galleryEvents.firstIndex(where: { $0.id == currentEvent.id }),
-              currentIndex < viewModel.galleryEvents.count - 1 else { return }
 
-        let nextEvent = viewModel.galleryEvents[currentIndex + 1]
+    private func navigateToNext(from currentEvent: GalleryHistoryEvent) {
+        // PHASE 4: Read from AppState instead of ViewModel
+        guard let currentIndex = appState.galleryEvents.firstIndex(where: { $0.id == currentEvent.id }),
+              currentIndex < appState.galleryEvents.count - 1 else { return }
+
+        let nextEvent = appState.galleryEvents[currentIndex + 1]
         selectedEventForDetail = nextEvent
     }
 
@@ -223,6 +227,25 @@ struct GalleryView: View {
             return nil
         }
         return index
+    }
+
+    /// Render appropriate gallery view based on event type
+    @ViewBuilder
+    private func galleryEventView(for event: GalleryHistoryEvent) -> some View {
+        switch event.eventData {
+        case .taskResponse:
+            GalleryPhotoView.taskResponse(
+                event: event,
+                profileInitial: getProfileInitial(for: event.profileId),
+                profileSlot: getProfileSlot(for: event.profileId)
+            )
+        case .profileCreated:
+            GalleryPhotoView.profilePhoto(
+                event: event,
+                profileInitial: getProfileInitial(for: event.profileId),
+                profileSlot: getProfileSlot(for: event.profileId)
+            )
+        }
     }
 }
 
@@ -353,14 +376,11 @@ extension GalleryView {
                         // Photo grid for this date
                         LazyVGrid(columns: gridColumns, spacing: 4) {
                             ForEach(dateGroup.events) { event in
-                                GalleryPhotoView.taskResponse(
-                                    event: event,
-                                    profileInitial: getProfileInitial(for: event.profileId),
-                                    profileSlot: getProfileSlot(for: event.profileId)
-                                )
-                                .onTapGesture {
-                                    selectedEventForDetail = event
-                                }
+                                // Render appropriate view based on event type
+                                galleryEventView(for: event)
+                                    .onTapGesture {
+                                        selectedEventForDetail = event
+                                    }
                             }
                         }
                         .padding(.horizontal, 12)
@@ -453,30 +473,50 @@ extension GalleryView {
     
     // Group events by date
     private var groupedEventsByDate: [(date: Date, events: [GalleryHistoryEvent])] {
+        print("🎨 [GalleryView] groupedEventsByDate computed")
+        print("🎨 [GalleryView] filteredEvents.count = \(filteredEvents.count)")
+
         let calendar = Calendar.current
         let grouped = Dictionary(grouping: filteredEvents) { event in
             calendar.startOfDay(for: event.createdAt)
         }
-        
-        return grouped.map { (date: $0.key, events: $0.value.sorted { $0.createdAt > $1.createdAt }) }
+
+        let result = grouped.map { (date: $0.key, events: $0.value.sorted { $0.createdAt > $1.createdAt }) }
             .sorted { $0.date > $1.date }
+
+        print("🎨 [GalleryView] groupedEventsByDate.count = \(result.count)")
+        print("🎨 [GalleryView] groupedEventsByDate.isEmpty = \(result.isEmpty)")
+
+        return result
     }
     
     // Filter events based on selected filter
+    // PHASE 4: Read from AppState (single source of truth) instead of ViewModel
     private var filteredEvents: [GalleryHistoryEvent] {
+        print("🎨 [GalleryView] filteredEvents computed")
+        print("🎨 [GalleryView] appState.galleryEvents.count = \(appState.galleryEvents.count)")
+        print("🎨 [GalleryView] selectedFilter = \(selectedFilter)")
+
+        if !appState.galleryEvents.isEmpty {
+            print("🎨 [GalleryView] Gallery events available:")
+            for event in appState.galleryEvents {
+                print("   - Event ID: \(event.id), Type: \(event.eventType), Created: \(event.createdAt)")
+            }
+        }
+
         switch selectedFilter {
         case .all:
-            return viewModel.galleryEvents
+            return appState.galleryEvents
         case .photos:
-            return viewModel.galleryEvents.filter { $0.photoData != nil }
+            return appState.galleryEvents.filter { $0.photoData != nil }
         case .sms:
-            return viewModel.galleryEvents.filter { $0.hasTextResponse }
+            return appState.galleryEvents.filter { $0.hasTextResponse }
         case .profiles:
-            return viewModel.galleryEvents.filter { 
-                if case .profileCreated(_) = $0.eventData { 
-                    return true 
-                } 
-                return false 
+            return appState.galleryEvents.filter {
+                if case .profileCreated(_) = $0.eventData {
+                    return true
+                }
+                return false
             }
         }
     }
