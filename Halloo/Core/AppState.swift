@@ -170,6 +170,14 @@ final class AppState: ObservableObject {
                 self?.handleSMSResponse(response)
             }
             .store(in: &cancellables)
+
+        // Gallery event updates (webhook creates new events)
+        dataSyncCoordinator.galleryEventUpdates
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                self?.handleGalleryEventUpdate(event)
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Data Loading (Called Once by ContentView on Auth Success)
@@ -185,10 +193,14 @@ final class AppState: ObservableObject {
     /// - Note: Uses Swift concurrency async let for parallel loading
     /// - Throws: Re-throws Firebase errors for display
     func loadUserData() async {
+        print("🔵 [AppState] loadUserData() called")
+
         guard let userId = authService.currentUser?.uid else {
             print("⚠️ [AppState] Cannot load data - no authenticated user")
             return
         }
+
+        print("🔵 [AppState] User ID: \(userId)")
 
         // Prevent duplicate loads if already loading
         guard !isLoading else {
@@ -200,14 +212,27 @@ final class AppState: ObservableObject {
         defer { isLoading = false }
 
         do {
-            // Load profiles and tasks in parallel for faster startup
+            print("🔵 [AppState] Starting to load profiles, tasks, and gallery events...")
+
+            // Load profiles, tasks, and gallery events in parallel for faster startup
+            // IMPORTANT: Gallery events must be loaded BEFORE setupFirebaseListeners()
+            // to prevent duplicate gallery events when SMS listener replays old confirmations
             async let profilesTask = databaseService.getElderlyProfiles(for: userId)
             async let tasksTask = databaseService.getTasks(for: userId)
+            async let galleryEventsTask = databaseService.getGalleryHistoryEvents(for: userId)
 
             self.profiles = try await profilesTask
             self.tasks = try await tasksTask
+            self.galleryEvents = try await galleryEventsTask
 
-            print("✅ [AppState] Loaded data: \(profiles.count) profiles, \(tasks.count) tasks")
+            print("✅ [AppState] Loaded data: \(profiles.count) profiles, \(tasks.count) tasks, \(galleryEvents.count) gallery events")
+            print("🔵 [AppState] About to call setupFirebaseListeners...")
+
+            // Setup Firebase real-time listeners for multi-device sync
+            // This enables automatic updates when data changes on other devices or via webhooks
+            dataSyncCoordinator.setupFirebaseListeners(userId: userId)
+
+            print("✅ [AppState] setupFirebaseListeners completed")
 
         } catch {
             print("❌ [AppState] Failed to load user data: \(error.localizedDescription)")
@@ -365,6 +390,22 @@ final class AppState: ObservableObject {
             tasks[taskIndex] = task
 
             print("🔄 [AppState] Task completed via SMS: \(task.title)")
+        }
+    }
+
+    /// Handle gallery event update from Twilio webhook
+    ///
+    /// When webhook creates a new gallery event (task response/profile creation),
+    /// add or update it in the gallery events array for real-time UI updates.
+    private func handleGalleryEventUpdate(_ event: GalleryHistoryEvent) {
+        if let index = galleryEvents.firstIndex(where: { $0.id == event.id }) {
+            galleryEvents[index] = event
+            print("🔄 [AppState] Updated gallery event: \(event.id)")
+        } else {
+            galleryEvents.append(event)
+            // Keep sorted by creation date (most recent first)
+            galleryEvents.sort { $0.createdAt > $1.createdAt }
+            print("🔄 [AppState] Added new gallery event: \(event.id)")
         }
     }
 

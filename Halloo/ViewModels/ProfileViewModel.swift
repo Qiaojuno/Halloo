@@ -407,6 +407,31 @@ final class ProfileViewModel: ObservableObject {
     func setAppState(_ appState: AppState) {
         self.appState = appState
         print("✅ [ProfileViewModel] AppState reference injected")
+
+        // Populate profilesWithGalleryEvents Set from existing gallery events
+        // This prevents duplicate gallery events when app relaunches and SMS listener replays old confirmations
+        populateGalleryEventTrackingSet(from: appState.galleryEvents)
+    }
+
+    /// Populate the duplicate prevention Set from existing gallery events
+    ///
+    /// When the app relaunches, the profilesWithGalleryEvents Set is empty (it's not persisted).
+    /// This method rebuilds the Set from existing gallery events to prevent duplicates when
+    /// the SMS listener replays historical confirmation messages.
+    ///
+    /// **Called by:**
+    /// - setAppState() during ProfileViewModel initialization (may be empty if data not loaded yet)
+    /// - ContentView after appState.loadUserData() completes (ensures Set is up-to-date)
+    ///
+    /// - Parameter existingEvents: Array of gallery events from AppState
+    func populateGalleryEventTrackingSet(from existingEvents: [GalleryHistoryEvent]) {
+        let profileCreatedEvents = existingEvents.filter { $0.eventType == .profileCreated }
+        profilesWithGalleryEvents = Set(profileCreatedEvents.map { $0.profileId })
+
+        print("✅ [ProfileViewModel] Populated gallery event tracking set with \(profilesWithGalleryEvents.count) profile IDs")
+        if !profilesWithGalleryEvents.isEmpty {
+            print("   Profile IDs with gallery events: \(profilesWithGalleryEvents)")
+        }
     }
 
     // MARK: - Setup Methods
@@ -482,6 +507,19 @@ final class ProfileViewModel: ObservableObject {
             }
         cancellables.insert(smsCancellable)
         print("✅ [ProfileViewModel] SMS responses subscription stored")
+
+        // Listen for gallery event updates to keep the duplicate prevention Set in sync
+        let galleryCancellable = dataSyncCoordinator.galleryEventUpdates
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                // When a new gallery event is created, add its profileId to the Set
+                if event.eventType == .profileCreated {
+                    self?.profilesWithGalleryEvents.insert(event.profileId)
+                    print("🔵 [ProfileViewModel] Added profile \(event.profileId) to gallery event tracking set (now has \(self?.profilesWithGalleryEvents.count ?? 0) profiles)")
+                }
+            }
+        cancellables.insert(galleryCancellable)
+        print("✅ [ProfileViewModel] Gallery event updates subscription stored")
 
         print("✅ [ProfileViewModel] DataSync subscriptions established - total cancellables: \(cancellables.count)")
     }

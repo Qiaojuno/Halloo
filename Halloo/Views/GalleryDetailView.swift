@@ -263,23 +263,24 @@ struct GalleryDetailView: View {
     // MARK: - SMS Conversation View
     private var smsConversationView: some View {
         VStack(spacing: 20) {
-            
+
             // Conversation bubbles container
             VStack(spacing: 16) {
-                
+
                 // Outgoing message (what we sent) - right aligned, blue
+                // Derive the sent message from the task information
                 HStack {
                     Spacer(minLength: UIScreen.main.bounds.width * 0.2) // 20% left margin
-                    
+
                     SpeechBubbleView(
-                        text: "Reminder: It's time to take your morning medication with breakfast. Please confirm when completed.",
+                        text: constructSentMessage(),
                         isOutgoing: true,
                         backgroundColor: Color(hex: "007AFF"), // iOS blue
                         textColor: .white
                     )
                 }
-                
-                // Incoming message (their response) - left aligned, gray  
+
+                // Incoming message (their response) - left aligned, gray
                 HStack {
                     SpeechBubbleView(
                         text: event.textResponse ?? "OK",
@@ -287,12 +288,23 @@ struct GalleryDetailView: View {
                         backgroundColor: Color(hex: "E5E5EA"), // iOS gray
                         textColor: .black
                     )
-                    
+
                     Spacer(minLength: UIScreen.main.bounds.width * 0.2) // 20% right margin
                 }
             }
         }
         .padding(.horizontal, 16) // Add minimal padding for SMS chat bubbles
+    }
+
+    // MARK: - Helper: Construct Sent Message
+    /// Reconstructs the sent message from the task title
+    /// Matches the format used by TwilioSMSService.getTaskReminderMessage()
+    private func constructSentMessage() -> String {
+        let taskTitle = event.originalTaskTitle.isEmpty ? "task reminder" : event.originalTaskTitle
+
+        // Match the template from TwilioSMSService.getTaskReminderMessage()
+        // Format: "Hi [name]! Time to: [task]\n\nReply DONE when complete."
+        return "Hi! Time to: \(taskTitle)\n\nReply DONE when complete."
     }
     
     // MARK: - Profile Created View

@@ -428,6 +428,13 @@ struct ContentView: View {
                     _Concurrency.Task {
                         print("🔵 [ContentView] Calling appState.loadUserData()...")
                         await appState.loadUserData()
+
+                        // CRITICAL: Re-populate the duplicate prevention Set AFTER data is loaded
+                        // This prevents duplicate gallery events when SMS listener replays old confirmations
+                        await MainActor.run {
+                            print("🔵 [ContentView] Re-populating gallery event tracking set after data load...")
+                            self.profileViewModel?.populateGalleryEventTrackingSet(from: appState.galleryEvents)
+                        }
                     }
                 } else {
                     print("⚠️ [ContentView] User is NOT authenticated on launch")
@@ -450,6 +457,10 @@ struct ContentView: View {
                     // PHASE 1: Load data into AppState (single source of truth)
                     _Concurrency.Task { @MainActor in
                         await self.appState.loadUserData()
+
+                        // CRITICAL: Re-populate the duplicate prevention Set AFTER data is loaded
+                        // This prevents duplicate gallery events when SMS listener replays old confirmations
+                        self.profileViewModel?.populateGalleryEventTrackingSet(from: self.appState.galleryEvents)
                     }
 
                     // Keep existing ViewModel loads temporarily (Phase 2 will remove)
