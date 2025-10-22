@@ -180,7 +180,16 @@ struct CardStackView: View {
                 Spacer()
                 
                 // Content
-                if event.hasPhoto {
+                if event.hasPhoto, let photoData = event.photoData, let uiImage = UIImage(data: photoData) {
+                    // Display actual photo from MMS response
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: cardWidth - 40, height: cardHeight - 100)
+                        .clipped()
+                        .cornerRadius(12)
+                } else if event.hasPhoto {
+                    // Fallback: Photo exists but couldn't be loaded
                     Image(systemName: "photo")
                         .font(.system(size: 60, weight: .light))
                         .foregroundColor(.white.opacity(0.6))
