@@ -610,42 +610,22 @@ struct DashboardView: View {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
 
-        print("🔍 [Dashboard] Filtering gallery events for card stack")
-        print("🔍 [Dashboard] Total gallery events: \(appState.galleryEvents.count)")
-        print("🔍 [Dashboard] Selected profile ID: \(selectedProfile?.id ?? "none")")
-
-        let filtered = appState.galleryEvents.filter { event in
+        return appState.galleryEvents.filter { event in
             // Only show task response events (not profile creation)
-            guard event.eventType == .taskResponse else {
-                print("  ❌ Event \(event.id) filtered: not taskResponse (type: \(event.eventType))")
-                return false
-            }
+            guard event.eventType == .taskResponse else { return false }
 
             // Only show events from today
             let eventDate = calendar.startOfDay(for: event.createdAt)
-            guard eventDate == today else {
-                print("  ❌ Event \(event.id) filtered: not today (date: \(event.createdAt))")
-                return false
-            }
+            guard eventDate == today else { return false }
 
             // Filter by selected profile if one is selected
             if let selectedProfile = selectedProfile {
-                let matches = event.profileId == selectedProfile.id
-                if !matches {
-                    print("  ❌ Event \(event.id) filtered: profileId mismatch")
-                    print("     Event profileId: \(event.profileId)")
-                    print("     Selected profileId: \(selectedProfile.id)")
-                }
-                return matches
+                return event.profileId == selectedProfile.id
             }
 
-            print("  ✅ Event \(event.id) passed all filters")
             return true
         }
         .sorted { $0.createdAt > $1.createdAt } // Most recent first
-
-        print("🔍 [Dashboard] Filtered events for card stack: \(filtered.count)")
-        return filtered
     }
     
     // MARK: - ✅ OLD Completed Tasks Section (REPLACED BY CARD STACK)
