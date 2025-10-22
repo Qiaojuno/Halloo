@@ -415,6 +415,14 @@ final class DashboardViewModel: ObservableObject {
                 self?.updateProfileSelection(from: profiles)
             }
             .store(in: &cancellables)
+
+        // Subscribe to task changes from AppState (single source of truth)
+        appState.$tasks
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] tasks in
+                self?.updateTasksFromAppState(tasks: tasks, profiles: appState.profiles)
+            }
+            .store(in: &cancellables)
     }
 
     /// DEPRECATED: Set ProfileViewModel reference (use setAppState instead)
@@ -448,6 +456,54 @@ final class DashboardViewModel: ObservableObject {
             // Just update UI if no profiles yet
             self.updateDashboardSummary()
         }
+    }
+
+    /// Update tasks from AppState (single source of truth)
+    /// Called when AppState.tasks changes due to real-time updates
+    private func updateTasksFromAppState(tasks: [Task], profiles: [ElderlyProfile]) {
+        // Transform AppState tasks into DashboardTasks for today
+        let dashboardTasks = tasks.compactMap { task -> DashboardTask? in
+            guard task.status == .active else {
+                return nil
+            }
+
+            guard let profile = profiles.first(where: { $0.id == task.profileId }) else {
+                return nil
+            }
+
+            guard profile.status == .confirmed else {
+                return nil
+            }
+
+            // Check if task is scheduled for selected date
+            guard task.isScheduledFor(date: selectedDate) else {
+                return nil
+            }
+
+            let scheduledTime = task.getScheduledTimeFor(date: selectedDate)
+
+            // Note: SMS responses are not available in this sync path
+            // Tasks will show as incomplete until SMS response arrives separately
+            return DashboardTask(
+                task: task,
+                profile: profile,
+                scheduledTime: scheduledTime,
+                response: nil,  // Will be populated by SMS response handler
+                isOverdue: isTaskOverdue(task: task, scheduledTime: scheduledTime)
+            )
+        }
+
+        self.todaysTasks = dashboardTasks.sorted { $0.scheduledTime < $1.scheduledTime }
+
+        // Invalidate cache when tasks change
+        self.cachedCompletedTasks = nil
+        self.cacheTimestamp = nil
+
+        // Update dashboard summary and overdue tasks
+        self.updateDashboardSummary()
+        self.identifyOverdueTasks()
+
+        print("✅ [DashboardViewModel] Updated \(dashboardTasks.count) tasks from AppState")
     }
     
     deinit {
