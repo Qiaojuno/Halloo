@@ -270,12 +270,22 @@ final class AppState: ObservableObject {
     /// Add a newly created profile
     ///
     /// **Flow:**
-    /// 1. Append to profiles array (immediate UI update)
-    /// 2. Broadcast via DataSyncCoordinator (notify other devices)
+    /// 1. Check if profile already exists (prevent duplicates)
+    /// 2. Append to profiles array (immediate UI update) OR update existing
+    /// 3. Broadcast via DataSyncCoordinator (notify other devices)
     ///
     /// - Parameter profile: The newly created ElderlyProfile
     /// - Note: Profile must already be saved to Firestore by caller
+    /// - Note: Idempotent - safe to call multiple times with same profile
     func addProfile(_ profile: ElderlyProfile) {
+        // Check for duplicates (prevents double-add from local + listener)
+        if let existingIndex = profiles.firstIndex(where: { $0.id == profile.id }) {
+            print("⚠️ [AppState] Profile already exists, updating instead: \(profile.id)")
+            profiles[existingIndex] = profile
+            dataSyncCoordinator.broadcastProfileUpdate(profile)
+            return
+        }
+
         profiles.append(profile)
         dataSyncCoordinator.broadcastProfileUpdate(profile)
 
