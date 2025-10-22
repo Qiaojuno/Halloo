@@ -446,7 +446,7 @@ final class AppState: ObservableObject {
 
             // Pre-cache new photo for card stack performance
             // This ensures the photo is cached before the user swipes to it
-            Task {
+            Task<Void, Never> {
                 await imageCache.preloadGalleryPhotos([event])
             }
         }

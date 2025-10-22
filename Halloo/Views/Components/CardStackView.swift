@@ -151,16 +151,96 @@ struct CardStackView: View {
     }
     
     private func cardView(for event: GalleryHistoryEvent, cardIndex: Int) -> some View {
-        // Calculate progressive lightening for text cards only
-        let baseColor: Double = 0.08  // Darker: reduced from 0.12 to 0.08
-        let lighteningAmount = event.hasPhoto ? 0.0 : Double(cardIndex) * 0.05
+        // Photo cards: Full-bleed photo as card background
+        // Text cards: Dark background with speech bubbles
+        if event.hasPhoto {
+            return AnyView(photoCardView(for: event))
+        } else {
+            return AnyView(textCardView(for: event, cardIndex: cardIndex))
+        }
+    }
+
+    private func photoCardView(for event: GalleryHistoryEvent) -> some View {
+        ZStack {
+            // Photo fills entire card (background layer)
+            Group {
+                // Try cached image first (fast path - no decoding needed)
+                if let cachedImage = imageCache.getCachedGalleryImage(for: event.id) {
+                    Image(uiImage: cachedImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else if let photoData = event.photoData, let uiImage = UIImage(data: photoData) {
+                    // Fallback: Decode on-the-fly if cache miss (slow path)
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    // Photo exists but couldn't be loaded - dark fallback
+                    Color(red: 0.08, green: 0.08, blue: 0.08)
+                    Image(systemName: "photo")
+                        .font(.system(size: 60, weight: .light))
+                        .foregroundColor(.white.opacity(0.6))
+                }
+            }
+            .frame(width: cardWidth, height: cardHeight)
+            .clipped()
+
+            // Overlay header and circle on top of photo
+            VStack {
+                // Header with semi-transparent background for readability
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Done for today: \(stackedEvents.count)")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+
+                        Text(event.responseMethod)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                    }
+                    .padding(.leading, 20)
+                    .padding(.top, 20)
+                    Spacer()
+                }
+                .background(
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.4), Color.clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 80)
+                )
+
+                Spacer()
+
+                // Circle at bottom right
+                HStack {
+                    Spacer()
+                    Circle()
+                        .fill(Color(red: 0x43/255, green: 0x43/255, blue: 0x43/255).opacity(0.8))
+                        .frame(width: 35, height: 36)
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 16)
+                }
+            }
+        }
+        .frame(width: cardWidth, height: cardHeight)
+        .cornerRadius(20)
+    }
+
+    private func textCardView(for event: GalleryHistoryEvent, cardIndex: Int) -> some View {
+        // Calculate progressive lightening for text cards
+        let baseColor: Double = 0.08
+        let lighteningAmount = Double(cardIndex) * 0.05
         let cardColor = Color(red: baseColor + lighteningAmount,
                              green: baseColor + lighteningAmount,
                              blue: baseColor + lighteningAmount)
-        
+
         return ZStack {
             cardColor
-            
+
             VStack {
                 // Header
                 HStack {
@@ -177,64 +257,39 @@ struct CardStackView: View {
                     .padding(.top, 20)
                     Spacer()
                 }
-                
-                Spacer()
-                
-                // Content
-                if event.hasPhoto {
-                    // Try cached image first (fast path - no decoding needed)
-                    if let cachedImage = imageCache.getCachedGalleryImage(for: event.id) {
-                        Image(uiImage: cachedImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: cardWidth - 40, height: cardHeight - 100)
-                            .clipped()
-                            .cornerRadius(12)
-                    } else if let photoData = event.photoData, let uiImage = UIImage(data: photoData) {
-                        // Fallback: Decode on-the-fly if cache miss (slow path)
-                        Image(uiImage: uiImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: cardWidth - 40, height: cardHeight - 100)
-                            .clipped()
-                            .cornerRadius(12)
-                    } else {
-                        // Photo exists but couldn't be loaded
-                        Image(systemName: "photo")
-                            .font(.system(size: 60, weight: .light))
-                            .foregroundColor(.white.opacity(0.6))
-                    }
-                } else {
-                    VStack(spacing: 18) {  // Reduced from 24 to 18
-                        HStack {
-                            Spacer(minLength: 0)
-                            SpeechBubbleView(
-                                text: "Reminder: \(event.title). Please confirm when completed.",
-                                isOutgoing: true,
-                                backgroundColor: Color.blue,
-                                textColor: .white,
-                                maxWidth: 287,  // Blue bubble: 95% of content area (302pt × 0.95)
-                                scale: 0.85  // 15% reduction: text 15.3pt, corners 15.3pt, tail 12.75pt
-                            )
-                        }
 
-                        HStack {
-                            SpeechBubbleView(
-                                text: event.textResponse ?? "Completed!",
-                                isOutgoing: false,
-                                backgroundColor: Color(red: 0.9, green: 0.9, blue: 0.9),
-                                textColor: .black,
-                                maxWidth: 242,  // Grey bubble: 80% of content area (302pt × 0.8)
-                                scale: 0.85  // 15% reduction: text 15.3pt, corners 15.3pt, tail 12.75pt
-                            )
-                            Spacer(minLength: 0)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-                
                 Spacer()
-                
+
+                // SMS bubbles
+                VStack(spacing: 18) {
+                    HStack {
+                        Spacer(minLength: 0)
+                        SpeechBubbleView(
+                            text: "Reminder: \(event.title). Please confirm when completed.",
+                            isOutgoing: true,
+                            backgroundColor: Color.blue,
+                            textColor: .white,
+                            maxWidth: 287,
+                            scale: 0.85
+                        )
+                    }
+
+                    HStack {
+                        SpeechBubbleView(
+                            text: event.textResponse ?? "Completed!",
+                            isOutgoing: false,
+                            backgroundColor: Color(red: 0.9, green: 0.9, blue: 0.9),
+                            textColor: .black,
+                            maxWidth: 242,
+                            scale: 0.85
+                        )
+                        Spacer(minLength: 0)
+                    }
+                }
+                .padding(.horizontal, 16)
+
+                Spacer()
+
                 // Circle
                 HStack {
                     Spacer()
