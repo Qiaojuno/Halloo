@@ -112,6 +112,10 @@ final class AppState: ObservableObject {
     private let authService: AuthenticationServiceProtocol
     private let databaseService: DatabaseServiceProtocol
     private let dataSyncCoordinator: DataSyncCoordinator
+
+    /// Public accessor for image cache (used by ProfileImageView)
+    let imageCache: ImageCacheService
+
     private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Initialization
@@ -125,14 +129,17 @@ final class AppState: ObservableObject {
     ///   - authService: Firebase authentication service (singleton)
     ///   - databaseService: Firestore database service (singleton)
     ///   - dataSyncCoordinator: Multi-device sync coordinator (singleton)
+    ///   - imageCache: Profile photo cache service (singleton)
     init(
         authService: AuthenticationServiceProtocol,
         databaseService: DatabaseServiceProtocol,
-        dataSyncCoordinator: DataSyncCoordinator
+        dataSyncCoordinator: DataSyncCoordinator,
+        imageCache: ImageCacheService
     ) {
         self.authService = authService
         self.databaseService = databaseService
         self.dataSyncCoordinator = dataSyncCoordinator
+        self.imageCache = imageCache
 
         // Set initial user if already authenticated
         self.currentUser = authService.currentUser
@@ -226,6 +233,16 @@ final class AppState: ObservableObject {
             self.galleryEvents = try await galleryEventsTask
 
             print("✅ [AppState] Loaded data: \(profiles.count) profiles, \(tasks.count) tasks, \(galleryEvents.count) gallery events")
+
+            // Pre-load all photos into memory cache to prevent AsyncImage flicker
+            // Load both profile photos and gallery photos in parallel for faster startup
+            async let profilePhotosTask: Void = imageCache.preloadProfileImages(profiles)
+            
+            async let galleryPhotosTask: Void = imageCache.preloadGalleryPhotos(galleryEvents)
+
+            _ = await profilePhotosTask
+            _ = await galleryPhotosTask
+
             print("🔵 [AppState] About to call setupFirebaseListeners...")
 
             // Setup Firebase real-time listeners for multi-device sync

@@ -14,16 +14,14 @@ struct AppFonts {
     }
     
     private static func registerFont(named fontName: String, extension: String) {
-        guard let fontURL = Bundle.main.url(forResource: fontName, withExtension: `extension`),
-              let fontData = NSData(contentsOf: fontURL),
-              let provider = CGDataProvider(data: fontData),
-              let font = CGFont(provider) else {
+        guard let fontURL = Bundle.main.url(forResource: fontName, withExtension: `extension`) else {
             print("❌ Failed to load \(fontName).\(`extension`)")
             return
         }
-        
+
         var error: Unmanaged<CFError>?
-        if !CTFontManagerRegisterGraphicsFont(font, &error) {
+        // Use CTFontManagerRegisterFontsForURL (iOS 13+) instead of deprecated CTFontManagerRegisterGraphicsFont (iOS 18+)
+        if !CTFontManagerRegisterFontsForURL(fontURL as CFURL, .process, &error) {
             print("❌ Failed to register \(fontName): \(error.debugDescription)")
         } else {
             print("✅ Successfully registered \(fontName)")

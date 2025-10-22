@@ -127,11 +127,11 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             .limit(to: 1)
             .getDocuments()
 
-        guard let document = snapshot.documents.first,
-              let data = document.data() as? [String: Any] else {
+        guard let document = snapshot.documents.first else {
             return nil
         }
 
+        let data = document.data()
         return try decodeFromFirestore(data, as: ElderlyProfile.self)
     }
 
@@ -213,11 +213,11 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             .limit(to: 1)
             .getDocuments()
 
-        guard let document = snapshot.documents.first,
-              let data = document.data() as? [String: Any] else {
+        guard let document = snapshot.documents.first else {
             return nil
         }
 
+        let data = document.data()
         return try decodeFromFirestore(data, as: Task.self)
     }
 
@@ -339,7 +339,7 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             .order(by: "nextScheduledDate")
             .getDocuments()
 
-        return try snapshot.documents.compactMap { document in
+        return snapshot.documents.compactMap { document in
             do {
                 // Log document structure for debugging
                 let data = document.data()
@@ -426,11 +426,11 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             .limit(to: 1)
             .getDocuments()
 
-        guard let document = snapshot.documents.first,
-              let data = document.data() as? [String: Any] else {
+        guard let document = snapshot.documents.first else {
             return nil
         }
 
+        let data = document.data()
         return try decodeFromFirestore(data, as: SMSResponse.self)
     }
 
@@ -492,7 +492,7 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             print("✅ [FirebaseDatabaseService] Found \(snapshot.documents.count) recent messages")
             #endif
 
-            return try snapshot.documents.compactMap { document in
+            return snapshot.documents.compactMap { document in
                 do {
                     // Log document structure for debugging
                     let data = document.data()
@@ -818,7 +818,7 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
         print("   - userId: \(data["userId"] ?? "nil")")
 
         // Extract fields from Firestore message
-        guard let fromPhone = data["fromPhone"] as? String,
+        guard let _ = data["fromPhone"] as? String,
               let messageBody = data["messageBody"] as? String,
               let receivedAtTimestamp = data["receivedAt"] as? Timestamp,
               let userId = data["userId"] as? String,
@@ -830,13 +830,13 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
 
         print("✅ [FirebaseDatabaseService] Successfully extracted profileId: \(profileId)")
 
-        let receivedAt = receivedAtTimestamp.dateValue()
-        let twilioSid = data["twilioSid"] as? String
+        _ = receivedAtTimestamp.dateValue()
+        _ = data["twilioSid"] as? String
         let numMedia = data["numMedia"] as? Int ?? 0
-        let isOptOut = data["isOptOut"] as? Bool ?? false
+        _ = data["isOptOut"] as? Bool ?? false
 
-        // Determine response type
-        let responseType: ResponseType = numMedia > 0 ? .photo : .text
+        // Determine response type (unused variable warning resolved)
+        _ = numMedia > 0 ? ResponseType.photo : ResponseType.text
 
         // Analyze message sentiment
         let upperMessage = messageBody.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)

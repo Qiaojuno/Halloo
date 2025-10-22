@@ -41,6 +41,9 @@ struct GalleryPhotoView: View {
         GalleryPhotoView(event: nil, mockPhoto: mockPhoto, type: .preview, profileInitial: nil, profileSlot: nil)
     }
     
+    // MARK: - Environment
+    @EnvironmentObject private var appState: AppState
+
     // MARK: - Configuration
     private let photoSize: CGFloat = 112 // Standard gallery photo size
     private let cornerRadius: CGFloat = 3 // Figma spec
@@ -116,15 +119,26 @@ struct GalleryPhotoView: View {
     private var profilePhotoContent: some View {
         if let event = event {
             if let photoURL = event.photoURL, !photoURL.isEmpty {
-            AsyncImage(url: URL(string: photoURL)) { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: photoSize, height: photoSize)
-                    .clipped()
-            } placeholder: {
-                loadingPlaceholder
-            }
+                // Try cache first to avoid AsyncImage flicker
+                if let cachedImage = appState.imageCache.getCachedImage(for: photoURL) {
+                    // Use cached image directly - synchronous, no placeholder
+                    Image(uiImage: cachedImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: photoSize, height: photoSize)
+                        .clipped()
+                } else {
+                    // Fallback to AsyncImage for first load or cache miss
+                    AsyncImage(url: URL(string: photoURL)) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: photoSize, height: photoSize)
+                            .clipped()
+                    } placeholder: {
+                        loadingPlaceholder
+                    }
+                }
             } else {
                 // Initial letter fallback for profile photos
                 initialPlaceholder(for: event)

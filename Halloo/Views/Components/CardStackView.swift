@@ -29,11 +29,11 @@ struct CardStackView: View {
             stackedEvents = events
             currentTopEvent = stackedEvents.first
         }
-        .onChange(of: events) { newEvents in
+        .onChange(of: events) { oldEvents, newEvents in
             stackedEvents = newEvents
             currentTopEvent = newEvents.first
         }
-        .onChange(of: stackedEvents) { _ in
+        .onChange(of: stackedEvents) { oldEvents, newEvents in
             currentTopEvent = stackedEvents.first
         }
     }
@@ -232,7 +232,7 @@ struct CardStackView: View {
 }
 
 #Preview {
-    @State var topEvent: GalleryHistoryEvent? = nil
+    // Remove unused @State variable (not used in preview)
     return CardStackView(events: [], currentTopEvent: .constant(nil))
         .padding()
 }

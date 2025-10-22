@@ -22,6 +22,7 @@ struct Task: Codable, Identifiable, Hashable {
     var completionCount: Int
     var lastCompletedAt: Date?
     var nextScheduledDate: Date
+    var lastSMSSentAt: Date?  // Track when SMS reminder was last sent
 
     // Custom decoder to handle old documents missing new fields
     init(from decoder: Decoder) throws {
@@ -46,6 +47,7 @@ struct Task: Codable, Identifiable, Hashable {
         lastModifiedAt = try container.decodeIfPresent(Date.self, forKey: .lastModifiedAt) ?? Date()
         completionCount = try container.decodeIfPresent(Int.self, forKey: .completionCount) ?? 0
         lastCompletedAt = try container.decodeIfPresent(Date.self, forKey: .lastCompletedAt)
+        lastSMSSentAt = try container.decodeIfPresent(Date.self, forKey: .lastSMSSentAt)
 
         // nextScheduledDate: use stored value or fall back to scheduledTime
         nextScheduledDate = try container.decodeIfPresent(Date.self, forKey: .nextScheduledDate) ?? scheduledTime
@@ -71,7 +73,8 @@ struct Task: Codable, Identifiable, Hashable {
         lastModifiedAt: Date = Date(),
         completionCount: Int = 0,
         lastCompletedAt: Date? = nil,
-        nextScheduledDate: Date? = nil
+        nextScheduledDate: Date? = nil,
+        lastSMSSentAt: Date? = nil
     ) {
         self.id = id
         self.userId = userId
@@ -93,6 +96,7 @@ struct Task: Codable, Identifiable, Hashable {
         self.completionCount = completionCount
         self.lastCompletedAt = lastCompletedAt
         self.nextScheduledDate = nextScheduledDate ?? scheduledTime
+        self.lastSMSSentAt = lastSMSSentAt
     }
 }
 

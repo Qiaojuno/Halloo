@@ -90,11 +90,6 @@ struct GalleryView: View {
         .onAppear {
             initializeViewModel()
         }
-        .task {
-            // PHASE 4: AppState handles gallery event loading via real-time listener
-            // No need to manually load - data comes from appState.galleryEvents
-            await viewModel.loadArchivedPhotos()
-        }
         .overlay(
             // Clean dropdown overlay positioned below filter button
             Group {
@@ -381,77 +376,6 @@ extension GalleryView {
                                     .onTapGesture {
                                         selectedEventForDetail = event
                                     }
-                            }
-                        }
-                        .padding(.horizontal, 12)
-                    }
-                }
-            }
-
-            // Archived Memories Section (photos older than 90 days)
-            if !viewModel.archivedPhotos.isEmpty || viewModel.isLoadingArchive {
-                VStack(alignment: .leading, spacing: 8) {
-                    // Section header
-                    HStack {
-                        Text("Archived Memories (90+ days)")
-                            .tracking(-1)
-                            .font(.system(size: 15, weight: .regular))
-                            .foregroundColor(Color(hex: "9f9f9f"))
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-
-                    if viewModel.isLoadingArchive {
-                        // Loading indicator
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle())
-                            Spacer()
-                        }
-                        .padding(.vertical, 20)
-                    } else if viewModel.archivedPhotos.isEmpty {
-                        // Empty state
-                        Text("No archived photos yet")
-                            .font(.system(size: 14))
-                            .foregroundColor(Color(hex: "9f9f9f"))
-                            .padding(.horizontal, 12)
-                    } else {
-                        // Archived photo grid
-                        LazyVGrid(columns: gridColumns, spacing: 4) {
-                            ForEach(viewModel.archivedPhotos) { photo in
-                                AsyncImage(url: photo.url) { phase in
-                                    switch phase {
-                                    case .empty:
-                                        Rectangle()
-                                            .fill(Color(hex: "f0f0f0"))
-                                            .aspectRatio(1, contentMode: .fill)
-                                            .overlay(
-                                                ProgressView()
-                                                    .progressViewStyle(CircularProgressViewStyle(tint: Color(hex: "9f9f9f")))
-                                            )
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                            .frame(maxWidth: .infinity)
-                                            .aspectRatio(1, contentMode: .fill)
-                                            .clipped()
-                                            .cornerRadius(3)
-                                    case .failure:
-                                        Rectangle()
-                                            .fill(Color(hex: "f0f0f0"))
-                                            .aspectRatio(1, contentMode: .fill)
-                                            .overlay(
-                                                Image(systemName: "photo")
-                                                    .foregroundColor(Color(hex: "9f9f9f"))
-                                            )
-                                    @unknown default:
-                                        EmptyView()
-                                    }
-                                }
-                                .cornerRadius(3)
                             }
                         }
                         .padding(.horizontal, 12)

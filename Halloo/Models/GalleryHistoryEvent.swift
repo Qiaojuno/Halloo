@@ -228,10 +228,10 @@ extension GalleryHistoryEvent {
 
     var responseMethod: String {
         switch eventData {
-        case .taskResponse(let data):
+        case .taskResponse:
             // Default to SMS if no specific type
             return "With SMS"
-        case .profileCreated(_):
+        case .profileCreated:
             return "With SMS"
         }
     }

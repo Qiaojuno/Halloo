@@ -36,7 +36,8 @@ struct ContentView: View {
         return AppState(
             authService: container.resolve(AuthenticationServiceProtocol.self),
             databaseService: container.resolve(DatabaseServiceProtocol.self),
-            dataSyncCoordinator: container.resolve(DataSyncCoordinator.self)
+            dataSyncCoordinator: container.resolve(DataSyncCoordinator.self),
+            imageCache: container.resolve(ImageCacheService.self)
         )
     }()
 

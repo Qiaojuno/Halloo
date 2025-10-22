@@ -116,7 +116,7 @@ struct HabitsView: View {
                         taskViewModel?.loadTasks()
                     }
                 }
-                .onChange(of: taskViewModel?.tasks.count) { newCount in
+                .onChange(of: taskViewModel?.tasks.count) { oldCount, newCount in
                     print("🔄 [HabitsView] Tasks count changed to: \(newCount ?? 0)")
                     // Force view refresh by updating a local state
                     refreshID = UUID()
@@ -194,7 +194,7 @@ struct HabitsView: View {
                 }
             }
         }
-        .onChange(of: viewModel.selectedProfileId) { newProfileId in
+        .onChange(of: viewModel.selectedProfileId) { oldProfileId, newProfileId in
             // PHASE 3: Sync selectedProfileIndex when ViewModel auto-selects a profile
             if let newId = newProfileId,
                let index = appState.profiles.firstIndex(where: { $0.id == newId }) {

@@ -24,6 +24,7 @@ struct GalleryDetailView: View {
     @Binding var isTransitioning: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.container) private var container
+    @EnvironmentObject private var appState: AppState
 
     // Navigation state
     let currentIndex: Int
@@ -312,20 +313,31 @@ struct GalleryDetailView: View {
         // Profile picture fills the entire content area like regular photos
         Group {
             if let photoURL = event.photoURL, !photoURL.isEmpty {
-                AsyncImage(url: URL(string: photoURL)) { image in
-                    image
+                // Try cache first to avoid AsyncImage flicker
+                if let cachedImage = appState.imageCache.getCachedImage(for: photoURL) {
+                    // Use cached image directly - synchronous, no placeholder
+                    Image(uiImage: cachedImage)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.width)
                         .clipped()
-                } placeholder: {
-                    Rectangle()
-                        .fill(Color(hex: "f0f0f0"))
-                        .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.width)
-                        .overlay(
-                            ProgressView()
-                                .tint(Color(hex: "9f9f9f"))
-                        )
+                } else {
+                    // Fallback to AsyncImage for first load or cache miss
+                    AsyncImage(url: URL(string: photoURL)) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.width)
+                            .clipped()
+                    } placeholder: {
+                        Rectangle()
+                            .fill(Color(hex: "f0f0f0"))
+                            .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.width)
+                            .overlay(
+                                ProgressView()
+                                    .tint(Color(hex: "9f9f9f"))
+                            )
+                    }
                 }
             } else {
                 // Emoji fallback as full-size photo

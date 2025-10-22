@@ -345,7 +345,7 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     /// Device A makes changes to tasks or profiles.
     ///
     /// - Parameter userId: Family user ID to observe data for
-    private func setupFirebaseListeners(userId: String) {
+    func setupFirebaseListeners(userId: String) {
         print("🔥 [DataSyncCoordinator] Setting up Firebase real-time listeners for user: \(userId)")
 
         // 1. Connect Task Updates Listener
@@ -391,6 +391,33 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
                     // Broadcast each profile to AppState
                     profiles.forEach { profile in
                         self?.profileUpdatesSubject.send(profile)
+                    }
+                }
+            )
+            .store(in: &cancellables)
+
+        // 3. Connect Gallery Events Listener
+        // Observes gallery_events collection for real-time updates from Twilio webhook
+        print("🔵 [DataSyncCoordinator] Setting up gallery events listener for user: \(userId)")
+        databaseService.observeUserGalleryEvents(userId)
+            .sink(
+                receiveCompletion: { completion in
+                    switch completion {
+                    case .finished:
+                        print("✅ [DataSyncCoordinator] Gallery events listener completed")
+                    case .failure(let error):
+                        print("❌ [DataSyncCoordinator] Gallery events listener error: \(error.localizedDescription)")
+                    }
+                },
+                receiveValue: { [weak self] events in
+                    print("🔄 [DataSyncCoordinator] Received \(events.count) gallery events from Firestore")
+                    print("🔵 [DataSyncCoordinator] Gallery event IDs: \(events.map { $0.id })")
+
+                    // Broadcast each event to AppState via publisher
+                    // This triggers AppState.handleGalleryEventUpdate() on all devices
+                    events.forEach { event in
+                        print("🔵 [DataSyncCoordinator] Broadcasting gallery event: \(event.id)")
+                        self?.galleryEventUpdatesSubject.send(event)
                     }
                 }
             )

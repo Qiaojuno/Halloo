@@ -280,6 +280,15 @@ protocol DatabaseServiceProtocol {
     /// - Returns: Publisher emitting profile arrays on each Firestore update
     func observeUserProfiles(_ userId: String) -> AnyPublisher<[ElderlyProfile], Error>
 
+    /// Observes real-time gallery event updates for multi-device sync and webhook integration
+    ///
+    /// Provides Combine publisher for Firebase snapshot listener on gallery events.
+    /// Tracks new events created by Twilio webhook when elderly user replies to SMS.
+    ///
+    /// - Parameter userId: Family user ID whose gallery events to observe
+    /// - Returns: Publisher emitting gallery event arrays on each Firestore update
+    func observeUserGalleryEvents(_ userId: String) -> AnyPublisher<[GalleryHistoryEvent], Error>
+
     // MARK: - SMS Response Tracking and Analysis Operations
     
     /// Records SMS response from elderly family member for task completion tracking

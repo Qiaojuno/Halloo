@@ -175,7 +175,7 @@ struct DashboardView: View {
 
             loadData()
         }
-        .onChange(of: viewModel.selectedProfileId) { newProfileId in
+        .onChange(of: viewModel.selectedProfileId) { oldProfileId, newProfileId in
             // PHASE 3: Sync selectedProfileIndex when ViewModel auto-selects a profile
             // Read from appState (single source of truth)
             if let newId = newProfileId,
@@ -604,12 +604,28 @@ struct DashboardView: View {
     }
     
     // MARK: - Card Stack Data Conversion
+    /// Today's completed task gallery events from AppState (single source of truth)
+    /// Filters appState.galleryEvents to show only task responses from today
     private var completedTaskEvents: [GalleryHistoryEvent] {
-        let events: [GalleryHistoryEvent] = viewModel.todaysCompletedTasks.compactMap { task in
-            guard let response = task.response, response.isCompleted else { return nil }
-            return GalleryHistoryEvent.fromSMSResponse(response)
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        return appState.galleryEvents.filter { event in
+            // Only show task response events (not profile creation)
+            guard event.eventType == .taskResponse else { return false }
+
+            // Only show events from today
+            let eventDate = calendar.startOfDay(for: event.createdAt)
+            guard eventDate == today else { return false }
+
+            // Filter by selected profile if one is selected
+            if let selectedProfile = selectedProfile {
+                return event.profileId == selectedProfile.id
+            }
+
+            return true
         }
-        return events
+        .sorted { $0.createdAt > $1.createdAt } // Most recent first
     }
     
     // MARK: - ✅ OLD Completed Tasks Section (REPLACED BY CARD STACK)

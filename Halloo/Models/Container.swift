@@ -67,6 +67,12 @@ final class Container: ObservableObject {
                 databaseService: self.resolve(DatabaseServiceProtocol.self)
             )
         }
+
+        // Image Cache Service - Singleton for profile photo caching
+        registerSingleton(ImageCacheService.self) {
+            print("🖼️ [Container] Creating ImageCacheService SINGLETON")
+            return ImageCacheService()
+        }
     }
     
     // MARK: - Firebase Configuration Check

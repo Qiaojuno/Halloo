@@ -89,28 +89,47 @@ struct ProfileImageView: View {
         return String(profile.name.prefix(1)).uppercased()
     }
 
+    // MARK: - Environment
+    @EnvironmentObject private var appState: AppState
+
     // MARK: - Body
     var body: some View {
-        AsyncImage(url: URL(string: profile.photoURL ?? "")) { image in
-            image
+        // Try to get cached image first (no flicker!)
+        if let cachedUIImage = appState.imageCache.getCachedImage(for: profile.photoURL) {
+            // Use cached image directly - synchronous, no placeholder
+            Image(uiImage: cachedUIImage)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
-        } placeholder: {
-            // Placeholder with initial letter (no emoji)
-            ZStack {
-                profileColor // Always use profile color for background (full opacity)
-                Text(profileInitial)
-                    .font(.system(size: size.emojiSize, weight: .bold))
-                    .foregroundColor(.black)
+                .frame(width: size.dimension, height: size.dimension)
+                .clipShape(Circle())
+                .overlay(
+                    Circle()
+                        .stroke(borderColor, lineWidth: isSelected ? size.borderWidth : 0)
+                )
+                .opacity(profile.status == .confirmed ? 1.0 : 0.5)
+        } else {
+            // Fallback to AsyncImage (first load or cache miss)
+            AsyncImage(url: URL(string: profile.photoURL ?? "")) { image in
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } placeholder: {
+                // Placeholder with initial letter (no emoji)
+                ZStack {
+                    profileColor // Always use profile color for background (full opacity)
+                    Text(profileInitial)
+                        .font(.system(size: size.emojiSize, weight: .bold))
+                        .foregroundColor(.black)
+                }
             }
+            .frame(width: size.dimension, height: size.dimension)
+            .clipShape(Circle())
+            .overlay(
+                Circle()
+                    .stroke(borderColor, lineWidth: isSelected ? size.borderWidth : 0)
+            )
+            .opacity(profile.status == .confirmed ? 1.0 : 0.5) // Gray out unconfirmed
         }
-        .frame(width: size.dimension, height: size.dimension)
-        .clipShape(Circle())
-        .overlay(
-            Circle()
-                .stroke(borderColor, lineWidth: isSelected ? size.borderWidth : 0)
-        )
-        .opacity(profile.status == .confirmed ? 1.0 : 0.5) // Gray out unconfirmed
     }
 }
 

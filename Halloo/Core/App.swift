@@ -28,12 +28,8 @@ struct HalloApp: App {
         // Skip heavy initialization during Canvas/Preview execution
         if !ProcessInfo.processInfo.environment.keys.contains("XCODE_RUNNING_FOR_PREVIEWS") {
             // Configure Firebase FIRST, before Container initialization
-            do {
-                HalloApp.configureFirebase()
-                print("✅ Firebase configuration completed successfully")
-            } catch {
-                print("❌ Firebase configuration failed: \(error)")
-            }
+            HalloApp.configureFirebase()
+            print("✅ Firebase configuration completed successfully")
         }
 
         // Initialize Container AFTER Firebase is configured
