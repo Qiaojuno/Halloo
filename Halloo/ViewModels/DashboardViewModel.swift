@@ -461,6 +461,10 @@ final class DashboardViewModel: ObservableObject {
     /// Update tasks from AppState (single source of truth)
     /// Called when AppState.tasks changes due to real-time updates
     private func updateTasksFromAppState(tasks: [Task], profiles: [ElderlyProfile]) {
+        let calendar = Calendar.current
+        let selectedDayStart = calendar.startOfDay(for: selectedDate)
+        let selectedDayEnd = calendar.date(byAdding: .day, value: 1, to: selectedDayStart)!
+
         // Transform AppState tasks into DashboardTasks for today
         let dashboardTasks = tasks.compactMap { task -> DashboardTask? in
             guard task.status == .active else {
@@ -478,6 +482,15 @@ final class DashboardViewModel: ObservableObject {
             // Check if task is scheduled for selected date
             guard task.isScheduledFor(date: selectedDate) else {
                 return nil
+            }
+
+            // Filter out tasks completed today - they should not appear in "upcoming habits"
+            // For recurring tasks, check if lastCompletedAt is within today's date range
+            if let lastCompletedAt = task.lastCompletedAt {
+                if lastCompletedAt >= selectedDayStart && lastCompletedAt < selectedDayEnd {
+                    // Task was completed today, don't show in upcoming list
+                    return nil
+                }
             }
 
             let scheduledTime = task.getScheduledTimeFor(date: selectedDate)
