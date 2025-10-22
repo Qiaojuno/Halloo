@@ -48,8 +48,10 @@ final class ImageCacheService: ObservableObject {
 
     init() {
         // Configure cache limits
-        cache.countLimit = 20 // Max 20 images (4 profiles × up to 5 images each)
-        cache.totalCostLimit = 50 * 1024 * 1024 // 50MB limit for profile photos
+        // Account for: Profile photos (4-10) + Gallery photos (20-50) + Card stack (5-10)
+        cache.countLimit = 100 // Max 100 images in memory
+        cache.totalCostLimit = 150 * 1024 * 1024 // 150MB limit for all photos
+        // NSCache will automatically evict oldest images when memory pressure occurs
     }
 
     // MARK: - Public API
@@ -61,6 +63,15 @@ final class ImageCacheService: ObservableObject {
     func getCachedImage(for url: String?) -> UIImage? {
         guard let url = url, !url.isEmpty else { return nil }
         return cache.object(forKey: url as NSString)
+    }
+
+    /// Get cached image for a gallery event (by event ID)
+    ///
+    /// - Parameter eventId: The gallery event ID
+    /// - Returns: Cached UIImage if available, nil otherwise
+    func getCachedGalleryImage(for eventId: String) -> UIImage? {
+        let cacheKey = "gallery-event-\(eventId)"
+        return cache.object(forKey: cacheKey as NSString)
     }
 
     /// Pre-load profile images into cache
@@ -99,9 +110,9 @@ final class ImageCacheService: ObservableObject {
     /// Pre-load gallery photos into cache
     ///
     /// Call this when gallery events are loaded to pre-populate the cache.
-    /// Only caches profile creation photos (photoURL), not task response photos (photoData).
+    /// Caches both profile creation photos (photoURL) and task response photos (photoData).
     ///
-    /// - Parameter events: Array of gallery events with photoURL to cache
+    /// - Parameter events: Array of gallery events with photos to cache
     func preloadGalleryPhotos(_ events: [GalleryHistoryEvent]) async {
         print("🖼️ [ImageCache] Pre-loading gallery photos...")
 
@@ -110,29 +121,71 @@ final class ImageCacheService: ObservableObject {
         // Load all gallery photos in parallel
         await withTaskGroup(of: Void.self) { group in
             for event in events {
-                // Only cache profile creation events with photoURL
-                // Task response photos use photoData (already fast, no cache needed)
-                guard case .profileCreated(let data) = event.eventData,
-                      let urlString = data.photoURL,
-                      !urlString.isEmpty,
-                      let url = URL(string: urlString) else {
-                    continue
-                }
+                switch event.eventData {
+                case .profileCreated(let data):
+                    // Profile creation photos (photoURL) - download from Firebase Storage
+                    guard let urlString = data.photoURL,
+                          !urlString.isEmpty,
+                          let url = URL(string: urlString) else {
+                        continue
+                    }
 
-                // Skip if already cached (might be a profile photo too!)
-                if cache.object(forKey: urlString as NSString) != nil {
-                    print("✅ [ImageCache] Gallery photo already cached: \(event.id)")
-                    continue
-                }
+                    // Skip if already cached (might be a profile photo too!)
+                    if cache.object(forKey: urlString as NSString) != nil {
+                        continue
+                    }
 
-                photoCount += 1
-                group.addTask {
-                    await self.loadAndCacheImage(url: url, key: urlString, profileName: "Gallery-\(event.id)")
+                    photoCount += 1
+                    group.addTask {
+                        await self.loadAndCacheImage(url: url, key: urlString, profileName: "Gallery-\(event.id)")
+                    }
+
+                case .taskResponse(let data):
+                    // Task response photos (photoData) - already downloaded, just cache UIImage
+                    guard let photoData = data.photoData else {
+                        continue
+                    }
+
+                    // Use event ID as cache key for photoData
+                    let cacheKey = "gallery-event-\(event.id)"
+
+                    // Skip if already cached
+                    if cache.object(forKey: cacheKey as NSString) != nil {
+                        continue
+                    }
+
+                    photoCount += 1
+                    group.addTask {
+                        await self.cacheImageFromData(photoData, key: cacheKey, eventId: event.id)
+                    }
                 }
             }
         }
 
         print("✅ [ImageCache] Gallery photos pre-loaded - \(photoCount) new, \(loadedImages.count) total cached")
+    }
+
+    /// Cache a UIImage from Data (for photoData from MMS responses)
+    ///
+    /// - Parameters:
+    ///   - data: The image data (already decoded from base64)
+    ///   - key: The cache key (event ID)
+    ///   - eventId: Event ID for logging
+    private func cacheImageFromData(_ data: Data, key: String, eventId: String) async {
+        // Create UIImage from data
+        guard let image = UIImage(data: data) else {
+            print("❌ [ImageCache] Failed to create image from photoData for event \(eventId)")
+            return
+        }
+
+        // Cache the image with cost (estimated memory size)
+        let cost = data.count
+        await MainActor.run {
+            cache.setObject(image, forKey: key as NSString, cost: cost)
+            loadedImages.insert(key)
+        }
+
+        print("✅ [ImageCache] Cached photoData image for event \(eventId) (\(cost / 1024)KB)")
     }
 
     /// Load a single image and cache it

@@ -510,10 +510,14 @@ struct DashboardView: View {
      */
     private var cardStackSection: some View {
         // CARD STACK - Full width for proper centering
-        CardStackView(events: completedTaskEvents, currentTopEvent: $currentTopCardEvent)
-            .padding(.top, 20)  // Only top padding to avoid double padding with task details
-            .offset(y: 8)  // Move down slightly
-            .frame(maxWidth: .infinity) // Allow full width for internal centering
+        CardStackView(
+            events: completedTaskEvents,
+            currentTopEvent: $currentTopCardEvent,
+            imageCache: appState.imageCache
+        )
+        .padding(.top, 20)  // Only top padding to avoid double padding with task details
+        .offset(y: 8)  // Move down slightly
+        .frame(maxWidth: .infinity) // Allow full width for internal centering
     }
     
     // MARK: - 📋 Task Details Section

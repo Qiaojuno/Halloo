@@ -443,6 +443,12 @@ final class AppState: ObservableObject {
             // Keep sorted by creation date (most recent first)
             galleryEvents.sort { $0.createdAt > $1.createdAt }
             print("🔄 [AppState] Added new gallery event: \(event.id)")
+
+            // Pre-cache new photo for card stack performance
+            // This ensures the photo is cached before the user swipes to it
+            Task {
+                await imageCache.preloadGalleryPhotos([event])
+            }
         }
     }
 
