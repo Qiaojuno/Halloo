@@ -630,10 +630,13 @@ exports.manualCleanup = functions.https.onRequest(async (req, res) => {
 /**
  * Cloud Scheduler: Check for due habits every minute and send SMS reminders
  *
- * Runs: Every 1 minute
- * Checks: All active habits where scheduledTime <= now
+ * Runs: Every 1 minute (Cloud Scheduler minimum interval)
+ * Checks: All active habits scheduled in last 90 seconds (optimized window)
  * Sends: SMS via Twilio to elderly user's phone
  * Logs: SMS delivery to /users/{userId}/smsLogs
+ *
+ * Note: 90-second window (vs 2 minutes) reduces false positives while maintaining
+ * reliability if Cloud Scheduler occasionally skips a minute.
  *
  * This is the CRITICAL MISSING PIECE that converts scheduled habits into actual SMS delivery.
  * Without this function, 0% of habit reminders reach elderly users via SMS.
@@ -643,19 +646,19 @@ exports.sendScheduledTaskReminders = onSchedule({
   timeZone: 'America/Los_Angeles',
   secrets: [twilioAccountSid, twilioAuthToken, twilioPhoneNumber]
 }, async (event) => {
-  console.log('⏰ Running scheduled task reminder check...');
+  console.log('⏰ Running scheduled task reminder check (1-min interval, 90s window)...');
 
   const now = admin.firestore.Timestamp.now();
-  const twoMinutesAgo = admin.firestore.Timestamp.fromDate(
-    new Date(Date.now() - 2 * 60 * 1000)
+  const ninetySecondsAgo = admin.firestore.Timestamp.fromDate(
+    new Date(Date.now() - 90 * 1000)
   );
 
   try {
-    // Find all active habits scheduled in last 2 minutes
+    // Find all active habits scheduled in last 90 seconds
     const habitsSnapshot = await admin.firestore()
       .collectionGroup('habits')
       .where('status', '==', 'active')
-      .where('nextScheduledDate', '>=', twoMinutesAgo)
+      .where('nextScheduledDate', '>=', ninetySecondsAgo)
       .where('nextScheduledDate', '<=', now)
       .get();
 
@@ -1042,8 +1045,8 @@ exports.fixPastHabits = onRequest(async (req, res) => {
 exports.debugAllHabits = onRequest(async (req, res) => {
   try {
     const now = admin.firestore.Timestamp.now();
-    const twoMinutesAgo = admin.firestore.Timestamp.fromDate(
-      new Date(Date.now() - 2 * 60 * 1000)
+    const ninetySecondsAgo = admin.firestore.Timestamp.fromDate(
+      new Date(Date.now() - 90 * 1000)
     );
 
     // Get ALL habits
@@ -1069,11 +1072,11 @@ exports.debugAllHabits = onRequest(async (req, res) => {
         createdAt: habit.createdAt ? habit.createdAt.toDate().toISOString() : 'MISSING'
       };
 
-      // Check if would match query
+      // Check if would match query (90-second window to match new scheduler)
       if (habit.status === 'active' && habit.nextScheduledDate) {
-        const inWindow = habit.nextScheduledDate >= twoMinutesAgo && habit.nextScheduledDate <= now;
+        const inWindow = habit.nextScheduledDate >= ninetySecondsAgo && habit.nextScheduledDate <= now;
         info.wouldMatchQuery = inWindow;
-        info.queryWindow = `${twoMinutesAgo.toDate().toISOString()} to ${now.toDate().toISOString()}`;
+        info.queryWindow = `${ninetySecondsAgo.toDate().toISOString()} to ${now.toDate().toISOString()}`;
       } else {
         info.wouldMatchQuery = false;
         info.reason = habit.status !== 'active' ? 'status not active' : 'missing nextScheduledDate';
