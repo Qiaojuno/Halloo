@@ -1,8 +1,69 @@
 # Hallo iOS App - Development Guidelines & Patterns
-# Last Updated: 2025-10-03
+# Last Updated: 2025-10-21
 # Critical patterns and fixes for future development
 
-## RECENT LESSONS LEARNED (2025-10-03)
+## RECENT LESSONS LEARNED (2025-10-21)
+
+### Image Caching Pattern
+
+**Critical Pattern:** Use NSCache-based image service to eliminate AsyncImage flicker
+
+```swift
+// ❌ WRONG - AsyncImage reloads on every view appearance
+AsyncImage(url: URL(string: profile.photoURL)) { image in
+    image.resizable()
+} placeholder: {
+    ProgressView() // Shows every time user switches tabs
+}
+
+// ✅ CORRECT - Cache-first lookup for instant display
+if let cachedImage = appState.imageCache.getCachedImage(for: profile.photoURL) {
+    // Synchronous, no loading state
+    Image(uiImage: cachedImage)
+        .resizable()
+} else {
+    // Fallback to AsyncImage only on first load
+    AsyncImage(url: URL(string: profile.photoURL)) { /* ... */ }
+}
+```
+
+**Best Practices:**
+- Preload images in parallel on app launch (`async let`)
+- Use NSCache for automatic memory management (50MB limit)
+- Provide cache-first lookup in all image views
+- Keep AsyncImage as fallback for cache misses
+
+### iOS 17+ onChange Syntax
+
+**Critical Pattern:** Use two-parameter closure for onChange modifier
+
+```swift
+// ❌ DEPRECATED - Single parameter (iOS 14-16)
+.onChange(of: selectedProfile) { newValue in
+    updateView(with: newValue)
+}
+
+// ✅ CORRECT - Two parameters (iOS 17+)
+.onChange(of: selectedProfile) { oldValue, newValue in
+    updateView(with: newValue)
+}
+```
+
+### iOS 18 Font Registration
+
+**Critical Pattern:** Use URL-based font registration instead of deprecated API
+
+```swift
+// ❌ DEPRECATED - CTFontManagerRegisterGraphicsFont (iOS 18+)
+guard let font = CGFont(provider) else { return }
+CTFontManagerRegisterGraphicsFont(font, &error)
+
+// ✅ CORRECT - CTFontManagerRegisterFontsForURL (iOS 13+)
+guard let fontURL = Bundle.main.url(forResource: fontName, withExtension: ext) else { return }
+CTFontManagerRegisterFontsForURL(fontURL as CFURL, .process, &error)
+```
+
+## PREVIOUS LESSONS LEARNED (2025-10-03)
 
 ### Profile Creation & User Document Management
 

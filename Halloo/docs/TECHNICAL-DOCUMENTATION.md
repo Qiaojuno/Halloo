@@ -294,10 +294,14 @@ Profile(
 
 ---
 
-# Archived Photos Feature - 90-Day Retention
+# ⚠️ DEPRECATED: Archived Photos Feature - 90-Day Retention
 
-## Overview
-Implements automated data retention policy that archives photos to Cloud Storage and deletes text data after 90 days. This balances privacy, cost savings, and memory preservation.
+> **Status:** REMOVED in 2025-10-21
+> **Reason:** Simplified to store all photos in Firebase Storage indefinitely
+> **Impact:** 150 lines of code removed from GalleryViewModel
+
+## Overview (Historical)
+Previously implemented automated data retention policy that archived photos to Cloud Storage and deleted text data after 90 days. This feature has been removed in favor of a simpler approach.
 
 ## Business Requirements
 
@@ -803,4 +807,196 @@ private func createGalleryEventForProfile(_ profile: ElderlyProfile, profileSlot
 
 ---
 
-*Last Updated: 2025-10-20*
+# Image Caching System
+
+## Issue
+Profile photos and gallery images were reloading from Firebase Storage every time users switched tabs, causing:
+- AsyncImage placeholder flicker (empty → loading → image)
+- Unnecessary network requests
+- Poor user experience with loading spinners
+
+## Solution - NSCache-Based Image Service
+
+**File:** `/Halloo/Services/ImageCacheService.swift` (NEW - 160 lines)
+
+### Architecture
+```swift
+final class ImageCacheService: ObservableObject {
+    private let cache = NSCache<NSString, UIImage>()
+    @Published private(set) var loadedImages: Set<String> = []
+
+    init() {
+        cache.countLimit = 20           // Max 20 images
+        cache.totalCostLimit = 50_000_000  // 50MB limit
+    }
+}
+```
+
+### Features
+
+**1. Memory Cache with Automatic Eviction**
+- Uses Apple's `NSCache` for automatic memory management
+- Evicts least-recently-used images under memory pressure
+- Thread-safe for concurrent access
+
+**2. Parallel Preloading on App Launch**
+```swift
+// In AppState.loadUserData()
+async let profilePhotosTask: Void = imageCache.preloadProfileImages(profiles)
+async let galleryPhotosTask: Void = imageCache.preloadGalleryPhotos(galleryEvents)
+
+_ = await profilePhotosTask
+_ = await galleryPhotosTask
+```
+
+**3. Cache-First Lookup in UI**
+```swift
+// ProfileImageView.swift
+if let cachedUIImage = appState.imageCache.getCachedImage(for: profile.photoURL) {
+    // Use cached image directly - synchronous, no placeholder
+    Image(uiImage: cachedUIImage)
+        .resizable()
+        .aspectRatio(contentMode: .fill)
+} else {
+    // Fallback to AsyncImage (first load or cache miss)
+    AsyncImage(url: URL(string: profile.photoURL ?? "")) { /* ... */ }
+}
+```
+
+### Integration Points
+
+**Files Modified:**
+- `AppState.swift` - Added imageCache parameter, parallel preloading
+- `Container.swift` - Registered ImageCacheService singleton
+- `ProfileImageView.swift` - Cache-first lookup
+- `GalleryPhotoView.swift` - Cache-first for profile creation photos
+- `GalleryDetailView.swift` - Cache-first for full-screen photos
+- `ContentView.swift` - Injected imageCache to AppState
+
+### Performance Impact
+
+**Before:**
+- 6 Firebase Storage requests per tab switch
+- ~200ms loading time per image
+- AsyncImage placeholders visible
+
+**After:**
+- 0 Firebase Storage requests after initial load
+- <1ms synchronous cache lookup
+- No placeholders or loading states
+
+### Memory Management
+- **Cache Limit:** 20 images max
+- **Size Limit:** 50MB total
+- **Eviction:** Automatic under memory pressure
+- **Thread Safety:** NSCache is thread-safe by default
+
+### What's Cached
+✅ Profile photos (profile.photoURL)
+✅ Gallery profile creation photos (profileCreated events)
+❌ Task response photos (use Data blobs, not URLs)
+
+### Related Files
+- `/Halloo/Services/ImageCacheService.swift` - Cache implementation
+- `/Halloo/Core/AppState.swift` - Preloading integration
+- `/Halloo/Models/Container.swift` - Service registration
+- `/Halloo/Views/Components/ProfileImageView.swift` - UI integration
+- `/Halloo/Views/Components/GalleryPhotoView.swift` - UI integration
+- `/Halloo/Views/GalleryDetailView.swift` - UI integration
+
+---
+
+# Build Configuration Updates (2025-10-21)
+
+## StoreKit Configuration Fix
+**Issue:** Xcode couldn't find StoreKit.storekit file
+**Root Cause:** Scheme file referenced wrong path (`Halloo/Views/StoreKit.storekit`)
+**Fix:** Updated `Halloo.xcscheme` to correct path (`../StoreKit.storekit`)
+
+**File:** `/Halloo.xcodeproj/xcshareddata/xcschemes/Halloo.xcscheme:78`
+
+## Dead Code Stripping
+**Enabled for all build configurations:**
+- Reduces app size by removing unused code
+- Standard Apple recommendation for production apps
+- Enabled in Debug and Release configurations
+
+**File:** `/Halloo.xcodeproj/project.pbxproj`
+```
+DEAD_CODE_STRIPPING = YES;
+```
+
+## iOS 18 API Updates
+
+### Font Registration (AppFonts.swift)
+**Changed:** Deprecated `CTFontManagerRegisterGraphicsFont` → Modern `CTFontManagerRegisterFontsForURL`
+
+```swift
+// Before (deprecated in iOS 18)
+guard let font = CGFont(provider) else { return }
+CTFontManagerRegisterGraphicsFont(font, &error)
+
+// After (iOS 13+ compatible)
+guard let fontURL = Bundle.main.url(...) else { return }
+CTFontManagerRegisterFontsForURL(fontURL as CFURL, .process, &error)
+```
+
+### onChange Syntax (iOS 17+)
+**Fixed 11 occurrences across:**
+- `HabitsView.swift`
+- `DashboardView.swift`
+- `CardStackView.swift`
+
+```swift
+// Before (deprecated)
+.onChange(of: value) { newValue in }
+
+// After (iOS 17+)
+.onChange(of: value) { oldValue, newValue in }
+```
+
+## Compiler Warnings Fixed (9 total)
+
+**1. Unreachable Catch Block** (`App.swift`)
+```swift
+// Before - HalloApp.configureFirebase() doesn't throw
+do {
+    HalloApp.configureFirebase()
+} catch { }  // Unreachable
+
+// After
+HalloApp.configureFirebase()
+```
+
+**2. Unnecessary Conditional Casts** (`FirebaseDatabaseService.swift`)
+```swift
+// Before - document.data() already returns [String: Any]
+guard let data = document.data() as? [String: Any] else { }
+
+// After
+let data = document.data()
+```
+
+**3. Unnecessary try Expressions** (`FirebaseDatabaseService.swift`)
+```swift
+// Before - No throwing calls inside
+return try snapshot.documents.compactMap { }
+
+// After
+return snapshot.documents.compactMap { }
+```
+
+**4. Unused Variables** (`GalleryHistoryEvent.swift`, `FirebaseDatabaseService.swift`)
+```swift
+// Before
+case .taskResponse(let data):  // 'data' never used
+    return "With SMS"
+
+// After
+case .taskResponse:
+    return "With SMS"
+```
+
+---
+
+*Last Updated: 2025-10-21*

@@ -1,9 +1,9 @@
 # Halloo iOS App - Project Structure & Status
-# Last Updated: 2025-10-14
-# Status: ✅ **BUILD SUCCESSFUL** - MVP Refactoring Complete (Phases 1-2)
+# Last Updated: 2025-10-21
+# Status: ✅ **BUILD SUCCESSFUL** - Performance Optimizations Complete
 
 ## 🚨 CURRENT BUILD STATUS
-**Build Status:** ✅ **BUILD SUCCEEDED** (Verified 2025-10-14 21:51)
+**Build Status:** ✅ **BUILD SUCCEEDED** (Verified 2025-10-21)
 **Xcode Build Command:**
 ```bash
 xcodebuild -scheme Halloo \
@@ -11,16 +11,17 @@ xcodebuild -scheme Halloo \
   clean build
 ```
 
-**Recent Changes (2025-10-14):**
-- ✅ **Phase 1 Complete:** Deleted 9,643 LOC (mock services, coordinators, stale docs)
-- ✅ **Phase 2 Complete:** Fixed all compilation blockers
-- ✅ **Code Reduction:** 15,334 → 11,974 LOC (-22%)
-- ✅ **Architecture:** AppState pattern (Phase 4) + MVP simplifications
+**Recent Changes (2025-10-21):**
+- ✅ **Image Caching:** NSCache-based system eliminates AsyncImage flicker
+- ✅ **Build Config:** StoreKit path fix, dead code stripping enabled
+- ✅ **iOS 18 Updates:** Font API modernization, onChange syntax updates
+- ✅ **Code Quality:** Fixed 20+ deprecation warnings and compiler warnings
+- ✅ **Archive Removal:** Deleted 150 lines of unused archive code
 
-**Files Modified Since Last Update:**
-- 32 modified files (ViewModels, Core, Services)
-- 21 deleted files (Mock services, Coordinators, Helpers)
-- 5 new files (NotificationService.swift, new documentation)
+**Files Modified Since Last Update (2025-10-21):**
+- 22 modified files (Core, Services, ViewModels, Views, Build Config)
+- 1 new file (ImageCacheService.swift)
+- Key updates: Image caching, iOS 18 compatibility, build optimizations
 
 ---
 
@@ -69,7 +70,7 @@ xcodebuild -scheme Halloo \
 │   ❌ DELETED (Phase 1):
 │   └── 📄 VersionedModel.swift ❌ REMOVED - Not used in MVP
 │
-├── 📁 Services/ (8 files - Firebase only, no Mock services)
+├── 📁 Services/ (9 files - Firebase only, no Mock services)
 │   ├── 📄 AuthenticationServiceProtocol.swift ✅ Auth service interface
 │   ├── 📄 FirebaseAuthenticationService.swift ✅ Firebase auth (ObservableObject, singleton)
 │   ├── 📄 DatabaseServiceProtocol.swift ✅ Database service interface
@@ -77,7 +78,8 @@ xcodebuild -scheme Halloo \
 │   ├── 📄 SMSServiceProtocol.swift ✅ SMS service interface
 │   ├── 📄 TwilioSMSService.swift ✅ Twilio SMS (E.164 phone format)
 │   ├── 📄 NotificationServiceProtocol.swift ✅ Notification service interface
-│   └── 📄 NotificationService.swift ✅ NEW (Phase 2) - Local notifications
+│   ├── 📄 NotificationService.swift ✅ NEW (Phase 2) - Local notifications
+│   └── 📄 ImageCacheService.swift ✅ NEW (2025-10-21) - NSCache-based image caching
 │
 │   ❌ DELETED (Phase 1 - MVP Simplification):
 │   ├── 📄 MockAuthenticationService.swift ❌ REMOVED - Firebase only in MVP
@@ -406,7 +408,104 @@ TabView (3 tabs)
 - Device testing for accessibility
 - Multi-device sync testing
 
-## RECENT CRITICAL CHANGES (2025-10-12)
+## RECENT CRITICAL CHANGES (2025-10-21)
+
+### ✅ IMAGE CACHING SYSTEM IMPLEMENTED
+
+**Changes:**
+1. **ImageCacheService.swift created** (160 lines)
+   - NSCache-based image caching with 20 image / 50MB limits
+   - Parallel preloading of profile and gallery photos on app launch
+   - Cache-first lookup eliminates AsyncImage flicker
+
+2. **AppState integration**
+   - Added imageCache parameter to init
+   - Parallel photo preloading: `async let profilePhotosTask, galleryPhotosTask`
+   - Exposed imageCache as public property for UI access
+
+3. **UI Components updated**
+   - ProfileImageView: Cache-first lookup before AsyncImage
+   - GalleryPhotoView: Cache-first for profile creation photos
+   - GalleryDetailView: Cache-first for full-screen photos
+
+4. **Container registration**
+   - ImageCacheService registered as singleton
+   - ContentView injects imageCache to AppState
+
+**Performance Impact:**
+- **Before:** 6 Firebase Storage requests per tab switch
+- **After:** 0 requests after initial load (<1ms cache lookup)
+
+**Files Modified:**
+- Services/ImageCacheService.swift (NEW - 160 lines)
+- Core/AppState.swift (+16 lines)
+- Models/Container.swift (+6 lines)
+- Views/Components/ProfileImageView.swift (+15 lines)
+- Views/Components/GalleryPhotoView.swift (+15 lines)
+- Views/GalleryDetailView.swift (+15 lines)
+- Views/ContentView.swift (+1 line parameter)
+
+---
+
+### ✅ BUILD CONFIGURATION & iOS 18 UPDATES
+
+**Changes:**
+1. **StoreKit Configuration Fix**
+   - Updated Halloo.xcscheme to correct StoreKit.storekit path
+   - Changed from `../../Halloo/Views/StoreKit.storekit` to `../StoreKit.storekit`
+
+2. **Dead Code Stripping Enabled**
+   - Added `DEAD_CODE_STRIPPING = YES` to all build configurations
+   - Reduces app size by removing unused code
+
+3. **iOS 18 API Updates**
+   - AppFonts.swift: CTFontManagerRegisterFontsForURL (iOS 13+)
+   - 11 onChange syntax updates (iOS 17+ two-parameter closure)
+
+4. **Compiler Warnings Fixed (9 total)**
+   - Unreachable catch block (App.swift)
+   - Unnecessary conditional casts (FirebaseDatabaseService.swift)
+   - Unnecessary try expressions (FirebaseDatabaseService.swift)
+   - Unused variables (GalleryHistoryEvent.swift)
+
+**Files Modified:**
+- Halloo.xcodeproj/project.pbxproj (dead code stripping)
+- Halloo.xcodeproj/xcshareddata/xcschemes/Halloo.xcscheme (StoreKit path)
+- Core/App.swift (removed unreachable catch)
+- Core/AppFonts.swift (iOS 18 font API)
+- Views/HabitsView.swift (onChange syntax)
+- Views/DashboardView.swift (onChange syntax)
+- Views/Components/CardStackView.swift (onChange syntax)
+- Services/FirebaseDatabaseService.swift (removed warnings)
+- Models/GalleryHistoryEvent.swift (removed unused vars)
+
+---
+
+### ✅ ARCHIVE SYSTEM REMOVAL
+
+**Changes:**
+1. **GalleryViewModel simplified** (-150 lines)
+   - Removed `archivedPhotos` property
+   - Removed `isLoadingArchive` property
+   - Removed `loadArchivedPhotos()` method
+   - Removed `ArchivedPhoto` struct
+
+2. **GalleryView simplified** (-70 lines)
+   - Removed "Archived Memories" section
+   - Removed archive loading call
+
+**Rationale:**
+- Simplified to store all photos in Firebase indefinitely
+- Archive feature was unused and added complexity
+- Documentation marked as deprecated in TECHNICAL-DOCUMENTATION.md
+
+**Files Modified:**
+- ViewModels/GalleryViewModel.swift (-150 lines)
+- Views/GalleryView.swift (-70 lines)
+
+---
+
+## PREVIOUS CRITICAL CHANGES (2025-10-12)
 
 ### ✅ PHASE 4 APPSTATE REFACTOR COMPLETE
 

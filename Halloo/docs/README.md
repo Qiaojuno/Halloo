@@ -296,6 +296,14 @@ grep -r "2025-10" docs/
 
 ---
 
-**Last updated:** 2025-10-07
+**Last updated:** 2025-10-21
 **Maintained by:** Claude Code
 **Project:** Halloo/Remi iOS App
+
+## Recent Updates (2025-10-21)
+- ✅ Image caching system implemented (ImageCacheService)
+- ✅ StoreKit configuration fixed
+- ✅ iOS 18 compatibility updates
+- ✅ Build optimizations (dead code stripping)
+- ✅ 20+ deprecation warnings fixed
+- ✅ Archive system removed (150 lines)
