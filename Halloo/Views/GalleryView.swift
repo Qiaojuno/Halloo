@@ -271,10 +271,10 @@ extension GalleryView {
         .padding(.horizontal, 26)
         .padding(.top, 20)
         .padding(.bottom, 10)
-        .sheet(isPresented: $showingAccountSettings) {
-            AccountSettingsView()
-                .presentationDetents([.height(200)])
-                .presentationDragIndicator(.visible)
+        .fullScreenCover(isPresented: $showingAccountSettings) {
+            SettingsView()
+                .environmentObject(appState)
+                .environmentObject(profileViewModel)
         }
     }
 
