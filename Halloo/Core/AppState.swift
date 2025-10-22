@@ -446,9 +446,11 @@ final class AppState: ObservableObject {
 
             // Pre-cache new photo for card stack performance
             // This ensures the photo is cached before the user swipes to it
-            // Using Task.detached to avoid naming conflict with Task model
-            Task.detached { [imageCache] in
-                await imageCache.preloadGalleryPhotos([event])
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                _Concurrency.Task {
+                    await self.imageCache.preloadGalleryPhotos([event])
+                }
             }
         }
     }
