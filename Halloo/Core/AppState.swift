@@ -323,12 +323,22 @@ final class AppState: ObservableObject {
     /// Add a newly created task
     ///
     /// **Flow:**
-    /// 1. Append to tasks array (immediate UI update)
-    /// 2. Broadcast via DataSyncCoordinator (notify other devices)
+    /// 1. Check if task already exists (prevent duplicates)
+    /// 2. Append to tasks array (immediate UI update) OR update existing
+    /// 3. Broadcast via DataSyncCoordinator (notify other devices)
     ///
     /// - Parameter task: The newly created Task
     /// - Note: Task must already be saved to Firestore by caller
+    /// - Note: Idempotent - safe to call multiple times with same task
     func addTask(_ task: Task) {
+        // Check for duplicates (prevents double-add from local + listener)
+        if let existingIndex = tasks.firstIndex(where: { $0.id == task.id }) {
+            print("⚠️ [AppState] Task already exists, updating instead: \(task.id)")
+            tasks[existingIndex] = task
+            dataSyncCoordinator.broadcastTaskUpdate(task)
+            return
+        }
+
         tasks.append(task)
         dataSyncCoordinator.broadcastTaskUpdate(task)
 
