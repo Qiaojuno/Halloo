@@ -195,7 +195,7 @@ exports.twilioWebhook = onRequest(
     memory: '256MiB',
     timeoutSeconds: 60,
     maxInstances: 10,  // Rate limiting via max concurrent instances
-    secrets: [twilioAuthToken]  // Access to auth token for signature validation
+    secrets: [twilioAccountSid, twilioAuthToken]  // Access to credentials for signature validation and photo download
   },
   async (req, res) => {
     console.log('📱 Twilio webhook received');
@@ -368,12 +368,61 @@ exports.twilioWebhook = onRequest(
       const taskResponseData = {
         taskId: habitDoc.id,
         textResponse: messageBody,
-        responseType: 'text',  // 'text', 'photo', or 'both'
+        responseType: 'text',  // Will be updated if photo exists
         taskTitle: habit.title
       };
 
-      // Only include photoData if it exists (Swift Data? requires absent field, not null)
-      // TODO: Download MMS photo if numMedia > 0 and add it here
+      // Download MMS photo if attached
+      if (parseInt(numMedia) > 0) {
+        console.log(`📸 Processing ${numMedia} MMS media attachment(s)...`);
+
+        try {
+          // Extract media URL from Twilio webhook payload
+          const mediaUrl = req.body.MediaUrl0;
+          const mediaType = req.body.MediaContentType0 || 'image/jpeg';
+
+          console.log(`📥 Downloading media from: ${mediaUrl}`);
+          console.log(`📄 Media type: ${mediaType}`);
+
+          // Fetch photo from Twilio's URL (requires Basic Auth)
+          const authHeader = 'Basic ' + Buffer.from(
+            twilioAccountSid.value() + ':' + twilioAuthToken.value()
+          ).toString('base64');
+
+          const photoResponse = await fetch(mediaUrl, {
+            headers: {
+              'Authorization': authHeader
+            }
+          });
+
+          if (!photoResponse.ok) {
+            throw new Error(`Failed to download photo: ${photoResponse.status} ${photoResponse.statusText}`);
+          }
+
+          // Convert photo to base64 for Firestore storage
+          const photoArrayBuffer = await photoResponse.arrayBuffer();
+          const photoBuffer = Buffer.from(photoArrayBuffer);
+          const photoDataBase64 = photoBuffer.toString('base64');
+
+          // Add photo to response data
+          taskResponseData.photoData = photoDataBase64;
+
+          // Update response type based on what was sent
+          if (messageBody && messageBody.trim().length > 0) {
+            taskResponseData.responseType = 'both';  // Text + Photo
+          } else {
+            taskResponseData.responseType = 'photo';  // Photo only
+          }
+
+          console.log(`✅ Downloaded photo: ${photoBuffer.length} bytes (${mediaType})`);
+          console.log(`📋 Response type: ${taskResponseData.responseType}`);
+
+        } catch (photoError) {
+          console.error(`❌ Failed to download MMS photo: ${photoError.message}`);
+          // Continue without photo - don't fail entire webhook
+          // Response type stays as 'text' if text exists, otherwise task completion still recorded
+        }
+      }
 
       await galleryEventRef.set({
         id: galleryEventRef.id,
