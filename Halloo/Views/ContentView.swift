@@ -663,9 +663,10 @@ struct StandardTabBar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Super light grey line at top
-            Divider()
-                .background(Color(hex: "f0f0f0")) // Super light grey
+            // Super light grey line at top with opacity
+            Rectangle()
+                .fill(Color(hex: "f0f0f0").opacity(0.5))
+                .frame(height: 1)
 
             HStack(spacing: 0) {
                 // Home Tab
@@ -707,11 +708,11 @@ struct StandardTabBar: View {
                 }
             }
             .frame(height: 70)
-            .padding(.top, 5) // Small padding at top
+            .padding(.top, 0) // No top padding
             .background(Color.white) // White background behind the tabs
         }
         .background(Color.white) // White background extends to bottom
-        .padding(.bottom, -15) // Move entire bar down 15pt
+        .padding(.bottom, -20) // Move entire bar down 20pt
         .edgesIgnoringSafeArea(.bottom)
     }
 }

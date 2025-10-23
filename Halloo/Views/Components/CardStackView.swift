@@ -12,10 +12,20 @@ struct CardStackView: View {
     @State private var stackedEvents: [GalleryHistoryEvent] = []
     @State private var isDragging: Bool = false
     @State private var dragOffset: CGSize = .zero
+
+    // MARK: - Environment
+    @EnvironmentObject private var appState: AppState
     
     // MARK: - Constants
-    private let cardWidth: CGFloat = 334
-    private let cardHeight: CGFloat = 453
+    private let sidePadding: CGFloat = 20 // Padding on each side
+    private var cardWidth: CGFloat {
+        // Card width: screen width minus side padding, optimized for engagement (~95% of available width)
+        (UIScreen.main.bounds.width - (sidePadding * 2)) * 0.95
+    }
+    private var cardHeight: CGFloat {
+        // Card height: taller than wide for vertical card shape (aspect ratio ~1.4:1)
+        cardWidth * 1.4
+    }
     private let swipeThreshold: CGFloat = 100
     
     var body: some View {
@@ -26,6 +36,7 @@ struct CardStackView: View {
                 cardStack
             }
         }
+        .frame(width: cardWidth, height: cardHeight) // Enforce vertical card ratio
         .onAppear {
             stackedEvents = events
             currentTopEvent = stackedEvents.first
@@ -54,7 +65,7 @@ struct CardStackView: View {
         }
         .frame(width: cardWidth, height: cardHeight)
         .background(Color(red: 0.108, green: 0.108, blue: 0.108)) // 0.12 × 0.9 = 0.108 (10% darker)
-        .cornerRadius(20)
+        .cornerRadius(10)
     }
     
     private var cardStack: some View {
@@ -121,24 +132,29 @@ struct CardStackView: View {
     private func getCardScale(for index: Int) -> CGFloat {
         switch index {
         case 0: return 1.0      // Front card: full size
-        case 1, 2: return 0.95  // Cards 1&2: 95% size
-        default: return 0.50    // Cards 3+: 50% size
+        case 1, 2: return 0.98  // Cards 1&2: 98% size (bigger)
+        case 3, 4: return 0.96  // Cards 3&4: 96% size (bigger)
+        default: return 0.50    // Cards 5+: 50% size
         }
     }
 
     private func getCardXOffset(for index: Int) -> CGFloat {
         switch index {
-        case 1: return -8       // Card 1: left fan
-        case 2: return 8        // Card 2: right fan
-        default: return CGFloat(index % 2 == 0 ? -4 : 4)  // Cards 3+: minimal fan
+        case 1: return -12      // Card 1: left
+        case 2: return 12       // Card 2: right
+        case 3: return 0        // Card 3: center
+        case 4: return -6       // Card 4: slight left
+        default: return CGFloat(index % 2 == 0 ? -4 : 4)
         }
     }
 
     private func getCardYOffset(for index: Int) -> CGFloat {
         switch index {
-        case 1: return -24      // Card 1: raised higher for more peek
-        case 2: return -34      // Card 2: raised even higher
-        default: return CGFloat(-index * 2)     // Cards 3+: minimal offset
+        case 1: return -16      // Card 1: peek from top
+        case 2: return -16      // Card 2: peek from top
+        case 3: return 16       // Card 3: peek from bottom
+        case 4: return -8       // Card 4: slight top
+        default: return CGFloat(-index * 2)
         }
     }
 
@@ -154,13 +170,13 @@ struct CardStackView: View {
         // Photo cards: Full-bleed photo as card background
         // Text cards: Dark background with speech bubbles
         if event.hasPhoto {
-            return AnyView(photoCardView(for: event))
+            return AnyView(photoCardView(for: event, cardIndex: cardIndex))
         } else {
             return AnyView(textCardView(for: event, cardIndex: cardIndex))
         }
     }
 
-    private func photoCardView(for event: GalleryHistoryEvent) -> some View {
+    private func photoCardView(for event: GalleryHistoryEvent, cardIndex: Int) -> some View {
         ZStack {
             // Photo fills entire card (background layer)
             Group {
@@ -189,19 +205,18 @@ struct CardStackView: View {
             VStack {
                 // Header with semi-transparent background for readability
                 HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Done for today: \(stackedEvents.count)")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.white)
-                            .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
-
-                        Text(event.responseMethod)
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.white)
-                            .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
-                    }
-                    .padding(.leading, 20)
-                    .padding(.top, 20)
+                    // Clean card counter: "1/5" format in rounded pill
+                    Text("\(cardIndex + 1)/\(stackedEvents.count)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(Color.black.opacity(0.5))
+                        )
+                        .padding(.leading, 16)
+                        .padding(.top, 16)
                     Spacer()
                 }
                 .background(
@@ -215,19 +230,53 @@ struct CardStackView: View {
 
                 Spacer()
 
-                // Circle at bottom right
-                HStack {
+                // Bottom banner with task info
+                HStack(spacing: 12) {
+                    // Profile image using ProfileImageView (single source of truth)
+                    if let profile = appState.profiles.first(where: { $0.id == event.profileId }),
+                       let profileSlot = appState.profiles.firstIndex(where: { $0.id == event.profileId }) {
+                        ProfileImageView(
+                            profile: profile,
+                            profileSlot: profileSlot,
+                            isSelected: false,
+                            size: .custom(45)
+                        )
+                    }
+
+                    // Task name
+                    Text(event.title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
                     Spacer()
-                    Circle()
-                        .fill(Color(red: 0x43/255, green: 0x43/255, blue: 0x43/255).opacity(0.8))
-                        .frame(width: 35, height: 36)
-                        .padding(.trailing, 16)
-                        .padding(.bottom, 16)
+
+                    // Completion time
+                    Text(formatEventTime(event.createdAt))
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white.opacity(0.9))
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    LinearGradient(
+                        colors: [Color.clear, Color.black.opacity(0.6)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 100)
+                )
             }
         }
         .frame(width: cardWidth, height: cardHeight)
-        .cornerRadius(20)
+        .cornerRadius(10)
+    }
+
+    // MARK: - Helper: Format Event Time
+    private func formatEventTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: date)
     }
 
     private func textCardView(for event: GalleryHistoryEvent, cardIndex: Int) -> some View {
@@ -244,17 +293,18 @@ struct CardStackView: View {
             VStack {
                 // Header
                 HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Done for today: \(stackedEvents.count)")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.white)
-
-                        Text(event.responseMethod)
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.white)
-                    }
-                    .padding(.leading, 20)
-                    .padding(.top, 20)
+                    // Clean card counter: "1/5" format in rounded pill
+                    Text("\(cardIndex + 1)/\(stackedEvents.count)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(Color.black.opacity(0.5))
+                        )
+                        .padding(.leading, 16)
+                        .padding(.top, 16)
                     Spacer()
                 }
 
@@ -290,19 +340,41 @@ struct CardStackView: View {
 
                 Spacer()
 
-                // Circle
-                HStack {
+                // Bottom banner with task info
+                HStack(spacing: 12) {
+                    // Profile image using ProfileImageView (single source of truth)
+                    if let profile = appState.profiles.first(where: { $0.id == event.profileId }),
+                       let profileSlot = appState.profiles.firstIndex(where: { $0.id == event.profileId }) {
+                        ProfileImageView(
+                            profile: profile,
+                            profileSlot: profileSlot,
+                            isSelected: false,
+                            size: .custom(45)
+                        )
+                    }
+
+                    // Task name
+                    Text(event.title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
                     Spacer()
-                    Circle()
-                        .fill(Color(red: 0x43/255, green: 0x43/255, blue: 0x43/255))
-                        .frame(width: 35, height: 36)
-                        .padding(.trailing, 16)
-                        .padding(.bottom, 16)
+
+                    // Completion time
+                    Text(formatEventTime(event.createdAt))
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white.opacity(0.9))
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    Color.black.opacity(0.3)  // Solid overlay for text cards (no gradient needed)
+                )
             }
         }
         .frame(width: cardWidth, height: cardHeight)
-        .cornerRadius(20)
+        .cornerRadius(10)
     }
 }
 

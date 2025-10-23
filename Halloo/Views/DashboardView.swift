@@ -121,18 +121,9 @@ struct DashboardView: View {
 
                         // ✅ COMPLETED: Interactive card stack showing task evidence
                         // Replaces detailed view system with swipeable playing card stack
-                        VStack(spacing: 18) {  // VStack spacing between card and task details (30pt total with TaskRowView padding)
-                            cardStackSection
-
-                            // 📋 TASK DETAILS: Shows current top card's habit information
-                            // Only visible when there are cards in the stack
-                            if currentTopCardEvent != nil {
-                                taskDetailsSection
-                                    .padding(.bottom, 8)  // Bottom padding to match top (total 20pt each side)
-                            }
-                        }
-                        .padding(.bottom, -8.33) // Half the spacing to upcoming (3.33 - 6.67 = -3.33, halved from -6.67)
-                        .padding(.top, showHeader ? 0 : 100) // Add top padding when header is hidden (static header height)
+                        cardStackSection
+                            .padding(.top, showHeader ? 0 : 100) // Add top padding when header is hidden (static header height)
+                            .padding(.bottom, 24) // Clean spacing to upcoming section
 
                         // ⏰ UPCOMING: Today's pending tasks for selected profile only
                         // Shows tasks that still need to be completed today
@@ -332,17 +323,14 @@ struct DashboardView: View {
     
     // MARK: - ⏰ Upcoming Section
     
-    /// Dynamic header text based on task count and selected profile
+    /// Dynamic header text based on task count - simplified and scannable
     private func getUpcomingHeaderText() -> String {
         let taskCount = viewModel.todaysUpcomingTasks.count
-        
+
         if taskCount == 0 {
-            return "All steps completed today!"
+            return "All done today!"
         } else {
-            // Get selected profile name
-            let profileName = selectedProfile?.name ?? "Profile"
-            let checkInText = taskCount == 1 ? "check-in" : "check-ins"
-            return "\(profileName) has \(taskCount) \(checkInText) left!"
+            return "\(taskCount) upcoming"
         }
     }
     
@@ -518,93 +506,6 @@ struct DashboardView: View {
         .padding(.top, 20)  // Only top padding to avoid double padding with task details
         .offset(y: 8)  // Move down slightly
         .frame(maxWidth: .infinity) // Allow full width for internal centering
-    }
-    
-    // MARK: - 📋 Task Details Section
-    /**
-     * CURRENT CARD DETAILS: Shows the habit information for the top card
-     * 
-     * PURPOSE: Displays the task details corresponding to the currently 
-     * visible card in the stack, providing context about what the card represents
-     * 
-     * UI BEHAVIOR:
-     * - Shows profile image, name, task title, and scheduled time
-     * - Uses standard TaskRowView without view button
-     * - Only appears when there are cards in the stack
-     * - Updates dynamically as user swipes through cards
-     */
-    private var taskDetailsSection: some View {
-        VStack(spacing: 0) {
-            // Find the matching completed task for the current top card event
-            if let topEvent = currentTopCardEvent {
-                if let matchingTask = viewModel.todaysCompletedTasks.first(where: { task in
-                    task.response?.id == topEvent.id ||
-                    (task.response != nil && GalleryHistoryEvent.fromSMSResponse(task.response!).id == topEvent.id)
-                }) {
-                    // Real task data
-                    TaskRowView(
-                        task: matchingTask.task,
-                        profile: matchingTask.profile,
-                        showViewButton: false,
-                        onViewButtonTapped: nil
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 12)
-                } else {
-                    // Mock data fallback - show basic info without full Task creation
-                    HStack(spacing: 16) {
-                        // PHASE 3: Connected profile circle - find profile by profileId from AppState
-                        let profile = appState.profiles.first(where: { $0.id == topEvent.profileId })
-                        
-                        AsyncImage(url: URL(string: profile?.photoURL ?? "")) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            ZStack {
-                                // Use profile-specific color based on profile ID hash
-                                let colorIndex = abs((profile?.id ?? topEvent.profileId).hashValue) % 4
-                                let profileColor = [Color(hex: "B9E3FF"), Color.red, Color.green, Color.purple][colorIndex]
-                                profileColor // Full opacity background
-                                Text(String((profile?.name ?? "G").prefix(1)).uppercased())
-                                    .font(.custom("Inter", size: 14))
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.black)
-                            }
-                        }
-                        .frame(width: 32, height: 32)
-                        .clipShape(Circle())
-                        
-                        // Task details
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(profile?.name ?? "Grandma Smith")
-                                .font(.system(size: 16, weight: .heavy))
-                                .foregroundColor(.black)
-                            
-                            HStack(spacing: 4) {
-                                Text(topEvent.title)
-                                    .font(.custom("Inter", size: 13))
-                                    .fontWeight(.regular)
-                                    .foregroundColor(.black)
-                                
-                                Text("•")
-                                    .font(.custom("Inter", size: 14))
-                                    .foregroundColor(Color(hex: "9f9f9f"))
-                                
-                                Text("10AM")
-                                    .font(.custom("Inter", size: 13))
-                                    .fontWeight(.regular)
-                                    .foregroundColor(.black)
-                            }
-                        }
-                        
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 12)
-                }
-            }
-        }
     }
     
     // MARK: - Card Stack Data Conversion
