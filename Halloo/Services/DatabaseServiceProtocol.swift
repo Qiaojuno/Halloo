@@ -1,6 +1,6 @@
 //
 //  DatabaseServiceProtocol.swift
-//  Hallo
+//  Remi
 //
 //  Purpose: Defines comprehensive database operations for elderly care coordination and family data management
 //  Key Features: 
@@ -12,7 +12,7 @@
 //  Business Context: Central data contract enabling all elderly care features and family synchronization
 //  Critical Paths: Profile creation → Task scheduling → SMS response tracking → Analytics generation
 //
-//  Created by Claude Code on 2025-07-28
+//  Created on 2025-07-28
 //
 
 import Foundation

@@ -114,330 +114,196 @@ struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var profileViewModel: ProfileViewModel
 
-    @State private var notificationsEnabled = true
-    @State private var smsRemindersEnabled = true
-    @State private var showingEditName = false
-    @State private var showingDeleteAccountConfirmation = false
     @State private var showingSignOutConfirmation = false
-    @State private var newDisplayName = ""
+    @State private var showingNotifications = false
+    @State private var showingSubscription = false
+    @State private var showingFAQs = false
+    @State private var showingFeedback = false
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header with close button
-            headerSection
-
-            ScrollView {
-                VStack(spacing: 24) {
-                    // Profile Section
-                    profileSection
-
-                    // Notifications Section
-                    notificationsSection
-
-                    // Account Management Section
-                    accountManagementSection
-
-                    // About Section
-                    aboutSection
-
-                    // Sign Out Button
-                    signOutButton
-                }
-                .padding(.horizontal, 26)
-                .padding(.top, 20)
-                .padding(.bottom, 40)
-            }
-        }
-        .background(Color(hex: "f9f9f9"))
-        .alert("Edit Display Name", isPresented: $showingEditName) {
-            TextField("Display Name", text: $newDisplayName)
-            Button("Cancel", role: .cancel) {}
-            Button("Save") {
-                // TODO: Implement update display name
-            }
-        }
-        .alert("Delete Account", isPresented: $showingDeleteAccountConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                // TODO: Implement account deletion
-            }
-        } message: {
-            Text("Are you sure you want to delete your account? This action cannot be undone.")
-        }
-        .alert("Sign Out", isPresented: $showingSignOutConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Sign Out", role: .destructive) {
-                performSignOut()
-            }
-        } message: {
-            Text("Are you sure you want to sign out?")
-        }
-    }
-
-    // MARK: - Header Section
-    private var headerSection: some View {
-        HStack {
-            Spacer()
+            // Back button header
             HStack {
                 Button(action: {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     dismiss()
                 }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 14, weight: .medium))
-                        Text("Back")
-                            .font(.system(size: 16, weight: .light))
-                    }
-                    .foregroundColor(.gray)
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(.black)
                 }
+                .padding(.leading, 20)
 
                 Spacer()
+            }
+            .frame(height: 60)
+            .background(Color(hex: "f9f9f9"))
 
-                Text("Settings")
-                    .font(.system(size: 20, weight: .semibold))
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Profile Header with photo and name
+                    profileHeaderSection
+                        .padding(.top, 20)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 30)
+
+                    // Settings List - White card with dividers
+                    VStack(spacing: 0) {
+                        settingsListItem(
+                            icon: "bell",
+                            title: "Notifications",
+                            showChevron: true
+                        ) {
+                            showingNotifications = true
+                        }
+
+                        Divider()
+                            .padding(.leading, 62) // Indent to align with text
+
+                        settingsListItem(
+                            icon: "creditcard",
+                            title: "Manage Subscription",
+                            showChevron: true
+                        ) {
+                            showingSubscription = true
+                        }
+
+                        Divider()
+                            .padding(.leading, 62)
+
+                        settingsListItem(
+                            icon: "questionmark.circle",
+                            title: "FAQs",
+                            showChevron: true
+                        ) {
+                            showingFAQs = true
+                        }
+
+                        Divider()
+                            .padding(.leading, 62)
+
+                        settingsListItem(
+                            icon: "bubble.left",
+                            title: "Give us feedback",
+                            showChevron: true
+                        ) {
+                            showingFeedback = true
+                        }
+
+                        Divider()
+                            .padding(.leading, 62)
+
+                        // Log out (no chevron, no divider after)
+                        settingsListItem(
+                            icon: "rectangle.portrait.and.arrow.right",
+                            title: "Log out",
+                            showChevron: false
+                        ) {
+                            showingSignOutConfirmation = true
+                        }
+                    }
+                    .background(Color.white)
+                    .cornerRadius(12)
+                    .padding(.horizontal, 20)
+                }
+            }
+        }
+        .background(Color(hex: "f9f9f9"))
+        .alert("Log Out", isPresented: $showingSignOutConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Log Out", role: .destructive) {
+                performSignOut()
+            }
+        } message: {
+            Text("Are you sure you want to log out?")
+        }
+        .fullScreenCover(isPresented: $showingNotifications) {
+            NotificationsSettingsView()
+        }
+        .fullScreenCover(isPresented: $showingSubscription) {
+            ManageSubscriptionView()
+        }
+        .fullScreenCover(isPresented: $showingFAQs) {
+            FAQsView()
+        }
+        .fullScreenCover(isPresented: $showingFeedback) {
+            FeedbackView()
+        }
+    }
+
+    // MARK: - Profile Header Section
+    private var profileHeaderSection: some View {
+        HStack(spacing: 16) {
+            // Gradient circular avatar (empty)
+            Circle()
+                .fill(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            Color(hex: "5EC4FF"),
+                            Color(hex: "B3E0FF")
+                        ]),
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 90, height: 90)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(appState.currentUser?.email ?? "user@example.com")
+                    .font(.custom("Poppins-Medium", size: 20))
                     .foregroundColor(.black)
 
-                Spacer()
+                Button(action: {
+                    // TODO: Navigate to edit profile
+                }) {
+                    HStack(spacing: 4) {
+                        Text("Edit profile")
+                            .font(.custom("Poppins-Medium", size: 15))
+                            .foregroundColor(Color(hex: "999999"))
 
-                // Invisible spacer for centering
-                HStack(spacing: 8) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 14, weight: .medium))
-                    Text("Back")
-                        .font(.system(size: 16, weight: .light))
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundColor(Color(hex: "999999"))
+                    }
                 }
-                .opacity(0)
             }
-            .frame(width: 347)
+
             Spacer()
         }
-        .padding(.top, 8)
-        .padding(.bottom, 16)
-        .background(Color(hex: "f9f9f9"))
-    }
-
-    // MARK: - Profile Section
-    private var profileSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Profile")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.black)
-
-            VStack(spacing: 12) {
-                settingsRow(
-                    icon: "person.circle",
-                    title: "Display Name",
-                    subtitle: appState.currentUser?.displayName ?? "Not set",
-                    showChevron: true
-                ) {
-                    newDisplayName = appState.currentUser?.displayName ?? ""
-                    showingEditName = true
-                }
-
-                settingsRow(
-                    icon: "envelope",
-                    title: "Email",
-                    subtitle: appState.currentUser?.email ?? "Not set",
-                    showChevron: false
-                ) {}
-            }
-            .background(Color.white)
-            .cornerRadius(12)
-        }
-    }
-
-    // MARK: - Notifications Section
-    private var notificationsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Notifications")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.black)
-
-            VStack(spacing: 0) {
-                settingsToggleRow(
-                    icon: "bell.fill",
-                    title: "Push Notifications",
-                    subtitle: "Receive app notifications",
-                    isOn: $notificationsEnabled
-                )
-
-                Divider()
-                    .padding(.leading, 52)
-
-                settingsToggleRow(
-                    icon: "message.fill",
-                    title: "SMS Reminders",
-                    subtitle: "Send SMS to family members",
-                    isOn: $smsRemindersEnabled
-                )
-            }
-            .background(Color.white)
-            .cornerRadius(12)
-        }
-    }
-
-    // MARK: - Account Management Section
-    private var accountManagementSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Account")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.black)
-
-            VStack(spacing: 12) {
-                settingsRow(
-                    icon: "key",
-                    title: "Change Password",
-                    subtitle: nil,
-                    showChevron: true
-                ) {
-                    // TODO: Implement change password
-                }
-
-                settingsRow(
-                    icon: "trash",
-                    title: "Delete Account",
-                    subtitle: nil,
-                    showChevron: true,
-                    destructive: true
-                ) {
-                    showingDeleteAccountConfirmation = true
-                }
-            }
-            .background(Color.white)
-            .cornerRadius(12)
-        }
-    }
-
-    // MARK: - About Section
-    private var aboutSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("About")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.black)
-
-            VStack(spacing: 12) {
-                settingsRow(
-                    icon: "info.circle",
-                    title: "Version",
-                    subtitle: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0",
-                    showChevron: false
-                ) {}
-
-                settingsRow(
-                    icon: "doc.text",
-                    title: "Terms of Service",
-                    subtitle: nil,
-                    showChevron: true
-                ) {
-                    // TODO: Open terms of service
-                }
-
-                settingsRow(
-                    icon: "hand.raised",
-                    title: "Privacy Policy",
-                    subtitle: nil,
-                    showChevron: true
-                ) {
-                    // TODO: Open privacy policy
-                }
-            }
-            .background(Color.white)
-            .cornerRadius(12)
-        }
-    }
-
-    // MARK: - Sign Out Button
-    private var signOutButton: some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            showingSignOutConfirmation = true
-        } label: {
-            HStack {
-                Image(systemName: "arrow.right.square")
-                    .font(.system(size: 18))
-                Text("Sign Out")
-                    .font(.system(size: 16, weight: .semibold))
-            }
-            .foregroundColor(.white)
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(Color.red)
-            .cornerRadius(12)
-        }
-        .padding(.top, 8)
     }
 
     // MARK: - Helper Views
-    private func settingsRow(
+    private func settingsListItem(
         icon: String,
         title: String,
-        subtitle: String?,
         showChevron: Bool,
-        destructive: Bool = false,
-        action: @escaping () -> Void = {}
+        action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
+        Button(action: {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        }) {
+            HStack(spacing: 16) {
                 Image(systemName: icon)
-                    .font(.system(size: 20))
-                    .foregroundColor(destructive ? .red : .black)
-                    .frame(width: 28, height: 28)
+                    .font(.system(size: 22))
+                    .foregroundColor(.black)
+                    .frame(width: 30)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(destructive ? .red : .black)
-
-                    if let subtitle = subtitle {
-                        Text(subtitle)
-                            .font(.system(size: 14))
-                            .foregroundColor(.gray)
-                    }
-                }
+                Text(title)
+                    .font(.custom("Poppins-Regular", size: 15))
+                    .foregroundColor(.black)
 
                 Spacer()
 
                 if showChevron {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.gray)
+                        .foregroundColor(Color(hex: "C7C7C7"))
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
         }
-    }
-
-    private func settingsToggleRow(
-        icon: String,
-        title: String,
-        subtitle: String?,
-        isOn: Binding<Bool>
-    ) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundColor(.black)
-                .frame(width: 28, height: 28)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.black)
-
-                if let subtitle = subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 14))
-                        .foregroundColor(.gray)
-                }
-            }
-
-            Spacer()
-
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-        }
-        .padding(16)
     }
 
     // MARK: - Actions
