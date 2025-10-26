@@ -461,6 +461,39 @@ final class AppState: ObservableObject {
     func clearError() {
         globalError = nil
     }
+
+    // MARK: - Cleanup (Called on Logout)
+
+    /// Reset AppState and stop all listeners when user logs out
+    ///
+    /// Called by ContentView when auth state changes to unauthenticated.
+    /// Ensures clean state for next login and prevents memory leaks.
+    func reset() {
+        print("🧹 [AppState] Resetting all state and stopping listeners...")
+
+        // Clear all user data
+        currentUser = nil
+        profiles.removeAll()
+        tasks.removeAll()
+        galleryEvents.removeAll()
+        globalError = nil
+        isLoading = false
+
+        // Stop all DataSyncCoordinator listeners and subscriptions
+        dataSyncCoordinator.stopListeners()
+
+        // Cancel all AppState subscriptions
+        cancellables.removeAll()
+
+        // Clear image cache
+        imageCache.clearCache()
+
+        // Re-setup subscriptions for next login
+        // This ensures when user logs back in, AppState will receive updates
+        setupSubscriptions()
+
+        print("✅ [AppState] Reset complete - all data cleared and listeners stopped")
+    }
 }
 
 // MARK: - Computed Properties (Convenience Accessors)

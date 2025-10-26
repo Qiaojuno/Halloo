@@ -33,19 +33,16 @@ struct HabitsView: View {
     /// Controls whether to show header (false when rendered in ContentView's layered architecture)
     var showHeader: Bool = true
 
-    /// Controls whether to show bottom navigation (false when rendered in ContentView's layered architecture)
-    var showNav: Bool = true
-    
     // MARK: - UI State Management
     @State private var selectedProfileIndex: Int = 0
     @State private var selectedDays: Set<Int> = Set(0...6) // Default to all days selected
-    
+
     /// Controls TaskCreationView conditional presentation with profile preselection
     @State private var showingTaskCreation = false
-    
+
     /// Controls direct ProfileOnboardingFlow presentation
     @State private var showingDirectOnboarding = false
-    
+
     /// Controls action sheet for unified create button
     @State private var showingCreateActionSheet = false
 
@@ -61,11 +58,6 @@ struct HabitsView: View {
 
     /// Track locally deleted habit IDs for optimistic UI updates
     @State private var locallyDeletedHabitIds: Set<String> = []
-
-    /// Tab transition state (for BottomGradientNavigation)
-    @State private var previousTab: Int = 0
-    @State private var transitionDirection: Int = 1
-    @State private var isTransitioning: Bool = false
 
     /// Delete button cooldown to prevent accidental taps
     @State private var isDeleteButtonCoolingDown = false
@@ -151,11 +143,6 @@ struct HabitsView: View {
                 }
                 .scrollDisabled(isScrollDisabled)
                 .background(Color(hex: "f9f9f9")) // Light gray app background
-
-                // Reusable bottom gradient navigation (no create button) (conditionally rendered)
-                if showNav {
-                    BottomGradientNavigation(selectedTab: $selectedTab, previousTab: $previousTab, transitionDirection: $transitionDirection, isTransitioning: $isTransitioning)
-                }
             }
         }
         .onAppear {

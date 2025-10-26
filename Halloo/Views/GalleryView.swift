@@ -20,23 +20,15 @@ struct GalleryView: View {
     /// Controls whether to show header (false when rendered in ContentView's layered architecture)
     var showHeader: Bool = true
 
-    /// Controls whether to show bottom navigation (false when rendered in ContentView's layered architecture)
-    var showNav: Bool = true
-
     // MARK: - State
     @State private var selectedFilter: GalleryFilter = .all
     @State private var selectedEventForDetail: GalleryHistoryEvent?
-    @State private var showingFilterDropdown = false
     @State private var showingAccountSettings = false
-    @State private var previousTab: Int = 0
-    @State private var transitionDirection: Int = 1
-    @State private var isTransitioning: Bool = false
-    
+
     // MARK: - Initialization
-    init(selectedTab: Binding<Int>, showHeader: Bool = true, showNav: Bool = true) {
+    init(selectedTab: Binding<Int>, showHeader: Bool = true) {
         self._selectedTab = selectedTab
         self.showHeader = showHeader
-        self.showNav = showNav
         // Initialize with placeholder - will be properly set in onAppear
         let container = Container.shared
         _viewModel = StateObject(wrappedValue: GalleryViewModel(
@@ -81,77 +73,10 @@ struct GalleryView: View {
             }
             .scrollDisabled(isScrollDisabled)
             .background(Color(hex: "f9f9f9")) // Light gray app background
-
-            // Reusable bottom gradient navigation (no create button) (conditionally rendered)
-            if showNav {
-                BottomGradientNavigation(selectedTab: $selectedTab, previousTab: $previousTab, transitionDirection: $transitionDirection, isTransitioning: $isTransitioning)
-            }
         }
         .onAppear {
             initializeViewModel()
         }
-        .overlay(
-            // Clean dropdown overlay positioned below filter button
-            Group {
-                if showingFilterDropdown {
-                    Color.clear // Truly invisible tap target to close dropdown
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                showingFilterDropdown = false
-                            }
-                        }
-
-                    VStack {
-                        HStack {
-                            Spacer()
-
-                            // Filter dropdown positioned below the filter button
-                            VStack(spacing: 0) {
-                                ForEach(GalleryFilter.allCases, id: \.self) { filter in
-                                    Button(action: {
-                                        selectedFilter = filter
-                                        withAnimation(.easeInOut(duration: 0.2)) {
-                                            showingFilterDropdown = false
-                                        }
-                                    }) {
-                                        HStack {
-                                            Text(filter.rawValue)
-                                                .font(.system(size: 14, weight: .medium))
-                                                .foregroundColor(selectedFilter == filter ? Color(hex: "007AFF") : Color(hex: "6f6f6f"))
-                                            Spacer()
-
-                                            if selectedFilter == filter {
-                                                Image(systemName: "checkmark")
-                                                    .font(.system(size: 12, weight: .medium))
-                                                    .foregroundColor(Color(hex: "007AFF"))
-                                            }
-                                        }
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 12)
-                                        .background(Color.white)
-                                    }
-
-                                    if filter != GalleryFilter.allCases.last {
-                                        Divider()
-                                            .background(Color(hex: "e0e0e0"))
-                                    }
-                                }
-                            }
-                            .background(Color.white)
-                            .cornerRadius(8)
-                            .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
-                            .frame(width: 140)
-                            .padding(.trailing, 16) // Align with filter button
-                        }
-                        .padding(.top, 90) // Position below header section
-
-                        Spacer()
-                    }
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                }
-            }
-        )
         .fullScreenCover(item: $selectedEventForDetail) { event in
             // PHASE 4: Read from AppState instead of ViewModel
             let currentIndex = appState.galleryEvents.firstIndex(where: { $0.id == event.id }) ?? 0
@@ -160,9 +85,6 @@ struct GalleryView: View {
             GalleryDetailView(
                 event: event,
                 selectedTab: $selectedTab,
-                previousTab: $previousTab,
-                transitionDirection: $transitionDirection,
-                isTransitioning: $isTransitioning,
                 currentIndex: currentIndex,
                 totalEvents: totalEvents,
                 onPrevious: {
@@ -278,50 +200,34 @@ extension GalleryView {
         }
     }
 
-    // Gallery Card Header Component
+    // Gallery Card Header Component - Horizontal Filter Selector
     private var galleryCardHeader: some View {
-        HStack {
-            // Task Gallery title (left aligned)
-            Text("Task Gallery")
-                .tracking(-1)
-                .font(AppFonts.poppinsMedium(size: 15))
-                .foregroundColor(Color(hex: "9f9f9f"))
-
-            Spacer()
-
-            // Filter button with hamburger icon (right aligned)
-            Button(action: {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showingFilterDropdown.toggle()
-                }
-            }) {
-                HStack(spacing: 12) {
-                    Text(selectedFilter.rawValue)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(Color(hex: "6f6f6f"))  // Dark grey
-
-                    // Hamburger icon (3 lines)
-                    VStack(spacing: 2) {
-                        Rectangle()
-                            .fill(Color(hex: "6f6f6f"))  // Dark grey
-                            .frame(width: 12, height: 1.5)
-                        Rectangle()
-                            .fill(Color(hex: "6f6f6f"))  // Dark grey
-                            .frame(width: 12, height: 1.5)
-                        Rectangle()
-                            .fill(Color(hex: "6f6f6f"))  // Dark grey
-                            .frame(width: 12, height: 1.5)
+        HStack(spacing: 0) {
+            ForEach(GalleryFilter.allCases, id: \.self) { filter in
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedFilter = filter
                     }
+                }) {
+                    Text(filter.rawValue)
+                        .font(.system(size: 13, weight: selectedFilter == filter ? .semibold : .regular))
+                        .foregroundColor(selectedFilter == filter ? .black : Color(hex: "9f9f9f"))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(
+                            selectedFilter == filter ?
+                            Color(hex: "f0f0f0") : Color.clear
+                        )
+                        .cornerRadius(6)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color(hex: "f0f0f0"))  // Light grey rectangle
-                .cornerRadius(6)
+                .buttonStyle(PlainButtonStyle())
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 20)
-        .padding(.bottom, 20)
+        .padding(3)
+        .background(Color(hex: "f9f9f9"))
+        .cornerRadius(8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
     
     // Photo Grid Content Component
@@ -435,13 +341,6 @@ extension GalleryView {
             return appState.galleryEvents.filter { $0.photoData != nil }
         case .sms:
             return appState.galleryEvents.filter { $0.hasTextResponse }
-        case .profiles:
-            return appState.galleryEvents.filter {
-                if case .profileCreated(_) = $0.eventData {
-                    return true
-                }
-                return false
-            }
         }
     }
     
@@ -515,7 +414,6 @@ enum GalleryFilter: String, CaseIterable {
     case all = "All"
     case photos = "Photos"
     case sms = "SMS"
-    case profiles = "Profiles"
 }
 
 // MARK: - Components moved to separate files

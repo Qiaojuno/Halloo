@@ -305,6 +305,38 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     
     deinit {
         syncTimer?.invalidate()
+        cancellables.removeAll()
+    }
+
+    /// Stops all Firebase listeners and clears subscriptions
+    ///
+    /// Called when user logs out to prevent memory leaks and ensure clean state.
+    /// Stops all real-time Firebase listeners and cancels all Combine subscriptions.
+    func stopListeners() {
+        print("🛑 [DataSyncCoordinator] Stopping all Firebase listeners and subscriptions")
+
+        // Cancel all Firebase listeners and Combine subscriptions
+        cancellables.removeAll()
+
+        // Stop sync timer
+        syncTimer?.invalidate()
+        syncTimer = nil
+
+        // Clear all pending changes
+        syncQueue.async { [weak self] in
+            self?.pendingProfileChanges.removeAll()
+            self?.pendingTaskChanges.removeAll()
+            self?.pendingResponseChanges.removeAll()
+            self?.pendingUserChanges.removeAll()
+        }
+
+        // Reset sync state
+        isSyncing = false
+        syncStatus = .idle
+        syncProgress = 0.0
+        pendingChanges = 0
+
+        print("✅ [DataSyncCoordinator] All listeners stopped and state cleared")
     }
     
     // MARK: - Initialization

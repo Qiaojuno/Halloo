@@ -15,13 +15,10 @@ import SwiftUI
  * UI CONSISTENCY: Matches DashboardView and GalleryView design language
  */
 struct GalleryDetailView: View {
-    
+
     // MARK: - Properties
     let event: GalleryHistoryEvent
     @Binding var selectedTab: Int
-    @Binding var previousTab: Int
-    @Binding var transitionDirection: Int
-    @Binding var isTransitioning: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.container) private var container
     @EnvironmentObject private var appState: AppState
@@ -38,14 +35,15 @@ struct GalleryDetailView: View {
 
     // Profile selection state for header
     @State private var selectedProfileIndex: Int = 0
-    
+
+    // Create button state for StandardTabBar
+    @State private var isCreateExpanded: Bool = false
+    @State private var showingCreateActionSheet: Bool = false
+
     // MARK: - Initialization
     init(
         event: GalleryHistoryEvent,
         selectedTab: Binding<Int>,
-        previousTab: Binding<Int>,
-        transitionDirection: Binding<Int>,
-        isTransitioning: Binding<Bool>,
         currentIndex: Int = 0,
         totalEvents: Int = 1,
         onPrevious: @escaping () -> Void = {},
@@ -53,9 +51,6 @@ struct GalleryDetailView: View {
     ) {
         self.event = event
         self._selectedTab = selectedTab
-        self._previousTab = previousTab
-        self._transitionDirection = transitionDirection
-        self._isTransitioning = isTransitioning
         self.currentIndex = currentIndex
         self.totalEvents = totalEvents
         self.onPrevious = onPrevious
@@ -102,21 +97,38 @@ struct GalleryDetailView: View {
                 .ignoresSafeArea(.container, edges: .bottom) // Extend past safe area to screen edge
             }
             
-            // Floating bottom navigation with custom dismiss behavior - left-aligned
+            // Standard tab bar at bottom
             VStack {
                 Spacer()
-                HStack {
-                    FloatingPillNavigation(selectedTab: $selectedTab, previousTab: $previousTab, transitionDirection: $transitionDirection, isTransitioning: $isTransitioning, onTabTapped: {
-                        // Dismiss the detail view whenever any tab is tapped
-                        dismiss()
-                    })
-                    Spacer() // Push navigation to left
-                }
-                .padding(.horizontal, 30) // More side padding from screen edges
-                .padding(.bottom, 4) // Even closer to bottom of screen
+                StandardTabBar(
+                    selectedTab: $selectedTab,
+                    isCreateExpanded: $isCreateExpanded,
+                    onCreateTapped: {
+                        showingCreateActionSheet = true
+                    }
+                )
             }
         }
         .navigationBarHidden(true)
+        .confirmationDialog("What would you like to create?", isPresented: $showingCreateActionSheet) {
+            Button("Add Family Member") {
+                // Handle add family member
+            }
+            Button("Create Habit") {
+                // Handle create habit
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .onChange(of: showingCreateActionSheet) { oldValue, newValue in
+            // Reset create button when action sheet is dismissed
+            if !newValue {
+                isCreateExpanded = false
+            }
+        }
+        .onChange(of: selectedTab) { oldValue, newValue in
+            // Dismiss the detail view whenever any tab is tapped
+            dismiss()
+        }
     }
     
     // MARK: - Navigation Header with Chevrons

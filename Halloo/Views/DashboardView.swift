@@ -55,9 +55,6 @@ struct DashboardView: View {
     /// Controls whether to show header (false when rendered in ContentView's layered architecture)
     var showHeader: Bool = true
 
-    /// Controls whether to show bottom navigation (false when rendered in ContentView's layered architecture)
-    var showNav: Bool = true
-
     /// Bindings for create actions (lifted to ContentView for proper presentation context)
     @Binding var showingCreateActionSheet: Bool
     @Binding var showingDirectOnboarding: Bool
@@ -87,11 +84,6 @@ struct DashboardView: View {
     /// Current total events count for navigation
     @State private var currentTotalEvents: Int = 0
 
-    /// Tab transition state (for GalleryDetailView)
-    @State private var previousTab: Int = 0
-    @State private var transitionDirection: Int = 1
-    @State private var isTransitioning: Bool = false
-    
     var body: some View {
         // Show dashboard content directly - presentation handled by ContentView
         dashboardContent
@@ -110,40 +102,33 @@ struct DashboardView: View {
                  * Contains all dashboard sections in vertical flow
                  * Background: Light gray (#f9f9f9) for card contrast
                  */
-                ScrollView {
-                    VStack(spacing: 10) { // Reduced spacing between cards by half
+                VStack(spacing: 10) { // Reduced spacing between cards by half
 
-                        // 🏠 HEADER: App branding + account access (conditionally rendered)
-                        if showHeader {
-                            headerSection
-                                .padding(.bottom, 3.33) // Increase spacing by 1/3 (10 → 13.33)
-                        }
-
-                        // ✅ COMPLETED: Interactive card stack showing task evidence
-                        // Replaces detailed view system with swipeable playing card stack
-                        cardStackSection
-                            .padding(.top, showHeader ? 0 : 100) // Add top padding when header is hidden (static header height)
-                            .padding(.bottom, 24) // Clean spacing to upcoming section
-
-                        // ⏰ UPCOMING: Today's pending tasks for selected profile only
-                        // Shows tasks that still need to be completed today
-                        upcomingSection
-                            .padding(.top, currentTopCardEvent == nil ? 18 : 0) // Add spacing when card stack is empty
-
-                        // Bottom padding to prevent content from hiding behind navigation
-                        Spacer(minLength: 100)
+                    // 🏠 HEADER: App branding + account access (conditionally rendered)
+                    if showHeader {
+                        headerSection
+                            .padding(.bottom, 3.33) // Increase spacing by 1/3 (10 → 13.33)
                     }
-                    .padding(.horizontal, geometry.size.width * 0.04) // Match GalleryView (96% width)
+
+                    // ✅ COMPLETED: Interactive card stack showing task evidence
+                    // Replaces detailed view system with swipeable playing card stack
+                    cardStackSection
+                        .padding(.top, showHeader ? 0 : 100) // Add top padding when header is hidden (static header height)
+                        .padding(.bottom, 24) // Clean spacing to upcoming section
+
+                    Spacer()
                 }
-                .scrollDisabled(isScrollDisabled)
+                .padding(.horizontal, geometry.size.width * 0.04) // Match GalleryView (96% width)
                 .background(Color(hex: "f9f9f9")) // Light gray app background
 
-                // Reusable bottom gradient navigation with create button (conditionally rendered)
-                if showNav {
-                    BottomGradientNavigation(selectedTab: $selectedTab, previousTab: $previousTab, transitionDirection: $transitionDirection, isTransitioning: $isTransitioning) {
-                        createHabitButton
-                    }
+                // Upcoming tasks card - fixed at bottom above StandardTabBar
+                VStack {
+                    Spacer()
+                    upcomingSection
+                        .padding(.horizontal, geometry.size.width * 0.04)
+                        .padding(.bottom, 60) // Position above StandardTabBar
                 }
+                .allowsHitTesting(true)
             }
         }
         .onAppear {
@@ -188,9 +173,6 @@ struct DashboardView: View {
             GalleryDetailView(
                 event: galleryData.event,
                 selectedTab: $selectedTab,
-                previousTab: $previousTab,
-                transitionDirection: $transitionDirection,
-                isTransitioning: $isTransitioning,
                 currentIndex: galleryData.index,
                 totalEvents: galleryData.total,
                 onPrevious: { navigateToPreviousTask() },
@@ -322,18 +304,7 @@ struct DashboardView: View {
     
     
     // MARK: - ⏰ Upcoming Section
-    
-    /// Dynamic header text based on task count - simplified and scannable
-    private func getUpcomingHeaderText() -> String {
-        let taskCount = viewModel.todaysUpcomingTasks.count
 
-        if taskCount == 0 {
-            return "All done today!"
-        } else {
-            return "\(taskCount) upcoming"
-        }
-    }
-    
     /**
      * TODAY'S PENDING TASKS: What needs to be done today
      * 
@@ -409,32 +380,55 @@ struct DashboardView: View {
          * TASK LIST: Profile-filtered, today-only pending tasks
          * Data source: viewModel.todaysUpcomingTasks (automatically filtered)
          * White card background for clarity and grouping
+         * FIXED AT BOTTOM: Expands downward with internal scrolling
          */
-        VStack(spacing: 0) {
-                // Collapsible header with dynamic message and chevron
-                HStack {
-                    Text(getUpcomingHeaderText())
+        let maxExpandedHeight = UIScreen.main.bounds.height * 0.20 // 20% of screen height
+
+        return VStack(spacing: 0) {
+            // Collapsible header with dynamic message and chevron (at top)
+            HStack(alignment: .center, spacing: 12) {
+                // Party popper emoji - always visible
+                Text("🎉")
+                    .font(.system(size: 28))
+
+                // Dynamic header text
+                if viewModel.todaysUpcomingTasks.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("All messages received!")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.black)
+
+                        if !isUpcomingExpanded {
+                            Text("0 tasks left")
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundColor(.black)
+                        }
+                    }
+                } else {
+                    Text("\(viewModel.todaysUpcomingTasks.count) upcoming")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.black)
-                        .multilineTextAlignment(.leading)
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(Color(hex: "9f9f9f"))
-                        .rotationEffect(.degrees(isUpcomingExpanded ? 90 : 0))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 16)
-                .contentShape(Rectangle()) // Make entire header tappable
-                .onTapGesture {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7, blendDuration: 0)) {
-                        isUpcomingExpanded.toggle()
-                    }
                 }
 
-                // Expandable content with animation
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(Color(hex: "9f9f9f"))
+                    .rotationEffect(.degrees(isUpcomingExpanded ? 90 : -90))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .background(Color.white) // Header background
+            .contentShape(Rectangle()) // Make entire header tappable
+            .onTapGesture {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7, blendDuration: 0)) {
+                    isUpcomingExpanded.toggle()
+                }
+            }
+
+            // Expandable content with animation (rendered after header so it expands DOWNWARD)
+            if isUpcomingExpanded {
                 VStack(spacing: 0) {
                     if viewModel.todaysUpcomingTasks.isEmpty {
                         // Show confirmation message when no tasks and expanded
@@ -447,35 +441,41 @@ struct DashboardView: View {
                         }
                         .padding(.vertical, 20)
                     } else {
-                        // Show task list when tasks exist and expanded
-                        VStack(spacing: 0) {
-                            ForEach(Array(viewModel.todaysUpcomingTasks.enumerated()), id: \.offset) { index, task in
-                                TaskRowView(
-                                    task: task.task,
-                                    profile: task.profile,
-                                    showViewButton: false, // No view button for pending tasks
-                                    onViewButtonTapped: nil
-                                )
-                                .padding(.horizontal, 12)  // Match card title alignment
-                                .padding(.vertical, 12)
-                                .background(Color.white) // Each task has white background
+                        // Internal ScrollView for task list with max height
+                        ScrollView {
+                            VStack(spacing: 0) {
+                                ForEach(Array(viewModel.todaysUpcomingTasks.enumerated()), id: \.offset) { index, task in
+                                    TaskRowView(
+                                        task: task.task,
+                                        profile: task.profile,
+                                        showViewButton: false, // No view button for pending tasks
+                                        onViewButtonTapped: nil
+                                    )
+                                    .padding(.horizontal, 12)  // Match card title alignment
+                                    .padding(.vertical, 12)
+                                    .background(Color.white) // Each task has white background
 
-                                if index < viewModel.todaysUpcomingTasks.count - 1 {
-                                    Divider()
-                                        .overlay(Color(hex: "f8f3f3"))
-                                        .padding(.horizontal, 24)  // Shorter lines aligned with tasks
+                                    if index < viewModel.todaysUpcomingTasks.count - 1 {
+                                        Divider()
+                                            .overlay(Color(hex: "f8f3f3"))
+                                            .padding(.horizontal, 24)  // Shorter lines aligned with tasks
+                                    }
                                 }
                             }
                         }
+                        .frame(maxHeight: maxExpandedHeight - 60) // Reserve space for header
                     }
                 }
-                .opacity(isUpcomingExpanded ? 1.0 : 0.0)
-                .frame(maxHeight: isUpcomingExpanded ? .infinity : 0)
-                .clipped()
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
-        .background(Color.white) // Card background
+        .background(
+            Color.white // Solid white background to block gradient
+                .cornerRadius(12)
+        )
         .cornerRadius(12) // Consistent rounded corners
-        .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2) // Dark gray shadow
+        .shadow(color: Color(hex: "6f6f6f").opacity(0.125), radius: 6, x: 0, y: -2) // Subtle shadow pointing upward
+        .fixedSize(horizontal: false, vertical: true) // Size to content, don't expand unnecessarily
     }
     
     // MARK: - ✅ Card Stack Section
@@ -646,35 +646,6 @@ struct DashboardView: View {
         // No bottom padding - this is the last content section
     }
     
-    // MARK: - ✨ Unified Create Button
-    /**
-     * FLOATING UNIFIED CREATE BUTTON: Bottom center call-to-action
-     * 
-     * PURPOSE: Primary action button for creating new profiles or tasks
-     * Positioned at bottom center for easy thumb access
-     * Shows action sheet to choose between profile creation or task creation
-     * Same size as profile circles for visual consistency
-     */
-    private var createHabitButton: some View {
-        Button(action: {
-            // Haptic feedback for create action
-            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-            impactFeedback.impactOccurred()
-
-            showingCreateActionSheet = true
-        }) {
-            ZStack {
-                Circle()
-                    .fill(Color.black)
-                    .frame(width: 57.25, height: 57.25) // 61.56 × 0.93 = 57.25 (matches navigation pill height)
-                    .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2)
-
-                Image(systemName: "plus")
-                    .font(.system(size: 26.11, weight: .medium)) // 28.08 × 0.93 = 26.11 (7% smaller)
-                    .foregroundColor(.white)
-            }
-        }
-    }
     
     // MARK: - 🔧 Helper Properties & Methods
     
@@ -1248,209 +1219,6 @@ struct PreviewBottomNavigation: View {
         )
         .padding(.trailing, 10)
         .padding(.bottom, 20)
-    }
-}
-
-// MARK: - Universal Floating Pill Navigation Component
-/**
- * UNIVERSAL FLOATING PILL NAVIGATION: Shared navigation component
- * 
- * DESIGN RATIONALE:
- * - Custom design to match original Remi app layout
- * - Pill shape (140×47px) positioned LEFT-aligned (20px left, 35px bottom)  
- * - Three tabs (home/habits/gallery) restored from original design
- * - UPDATED 2025-09-29: Unified component with optional dismiss callback
- * - UPDATED 2025-09-29: Changed from right to left alignment per Remi app photo
- * 
- * BUSINESS LOGIC:
- * - Home tab: Dashboard screen
- * - Habits tab: Habits management screen  
- * - Gallery tab: Photo gallery screen
- * - Navigation logic handled by parent ContentView via TabView
- * - Optional dismiss callback for detail views (GalleryDetailView)
- * 
- * VISUAL STATES:
- * - Active tab: Black icons/text
- * - Inactive tab: Gray icons/text
- * - White background with light gray border for definition
- * 
- * USAGE:
- * - Regular views: FloatingPillNavigation(selectedTab: $tab, previousTab: $previousTab, transitionDirection: $transitionDirection, onTabTapped: nil)
- * - Detail views: FloatingPillNavigation(selectedTab: $tab, previousTab: $previousTab, transitionDirection: $transitionDirection, onTabTapped: { dismiss() })
- */
-struct FloatingPillNavigation: View {
-    @Binding var selectedTab: Int
-    @Binding var previousTab: Int  // Add binding to previousTab
-    @Binding var transitionDirection: Int  // Add binding to transition direction
-    @Binding var isTransitioning: Bool  // Lock to prevent animation overlap
-    let onTabTapped: (() -> Void)? // Optional dismiss callback
-    
-    // iPhone 13 base dimensions for scaling (390x844)
-    private let iPhone13Width: CGFloat = 390
-    private let basePillWidth: CGFloat = 168.74 // 181.44 × 0.93 = 168.74 (7% smaller)
-    private let basePillHeight: CGFloat = 57.25 // 61.56 × 0.93 = 57.25 (matches create button)
-    
-    // Calculate responsive dimensions based on screen width
-    private var pillWidth: CGFloat {
-        let screenWidth = UIScreen.main.bounds.width
-        return (basePillWidth / iPhone13Width) * screenWidth
-    }
-    
-    private var pillHeight: CGFloat {
-        let screenWidth = UIScreen.main.bounds.width
-        return (basePillHeight / iPhone13Width) * screenWidth
-    }
-    
-    private var iconSize: CGFloat {
-        let screenWidth = UIScreen.main.bounds.width
-        return (21.2 / iPhone13Width) * screenWidth // 22.8 × 0.93 = 21.2 (7% smaller)
-    }
-
-    private var fontSize: CGFloat {
-        let screenWidth = UIScreen.main.bounds.width
-        return (8.84 / iPhone13Width) * screenWidth // 9.5 × 0.93 = 8.84 (7% smaller)
-    }
-    
-    var body: some View {
-        HStack {
-            /*
-             * PILL-SHAPED NAVIGATION CONTAINER:
-             * Responsive dimensions based on iPhone 13 proportions (43px height on 390px width)
-             * Corner radius is exactly half the height for perfect pill shape
-             */
-            HStack(spacing: pillWidth * 0.08) { // Very tight spacing for three tabs
-                
-                /*
-                 * HOME TAB: Dynamic active/inactive state
-                 * Icon: house.fill when active, house when inactive
-                 * Text: "home" in small Inter font with negative tracking
-                 * Color: Changes based on selectedTab state
-                 */
-                VStack(spacing: 2) { // Reduced from 4 to 2
-                    Image(systemName: selectedTab == 0 ? "house.fill" : "house")
-                        .font(.system(size: iconSize))
-                        .foregroundColor(selectedTab == 0 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
-
-                    Text("home")
-                        .font(.custom("Inter", size: fontSize))
-                        .tracking(-0.5) // Negative letter spacing to condense text
-                        .foregroundColor(selectedTab == 0 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
-                }
-                .onTapGesture {
-                    // Prevent rapid tab switches during animation
-                    guard !isTransitioning else {
-                        print("⚠️ Tab tap blocked - transition in progress")
-                        return
-                    }
-
-                    if let onTabTapped = onTabTapped {
-                        var transaction = Transaction()
-                        transaction.disablesAnimations = true
-                        withTransaction(transaction) {
-                            selectedTab = 0
-                            onTabTapped()
-                        }
-                    } else {
-                        // Update previousTab for Habits transition (Dashboard/Gallery use fixed positions)
-                        previousTab = selectedTab
-                        selectedTab = 0
-                    }
-                }
-                
-                /*
-                 * GALLERY TAB: Dynamic active/inactive state
-                 * Icon: photo.fill when active, photo when inactive (single photo representation)
-                 * Text: "gallery" in small Inter font with negative tracking
-                 * Color: Changes based on selectedTab state
-                 * Action: Updates selectedTab to switch to Gallery view
-                 */
-                VStack(spacing: 2) { // Reduced from 4 to 2
-                    Image(systemName: selectedTab == 1 ? "photo.fill" : "photo")
-                        .font(.system(size: iconSize))
-                        .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
-
-                    Text("gallery")
-                        .font(.custom("Inter", size: fontSize))
-                        .tracking(-0.5) // Negative letter spacing to condense text
-                        .foregroundColor(selectedTab == 1 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
-                }
-                .onTapGesture {
-                    // Prevent rapid tab switches during animation
-                    guard !isTransitioning else {
-                        print("⚠️ Tab tap blocked - transition in progress")
-                        return
-                    }
-
-                    if let onTabTapped = onTabTapped {
-                        var transaction = Transaction()
-                        transaction.disablesAnimations = true
-                        withTransaction(transaction) {
-                            selectedTab = 1
-                            onTabTapped()
-                        }
-                    } else {
-                        // Update previousTab for Gallery transition
-                        previousTab = selectedTab
-                        selectedTab = 1
-                    }
-                }
-
-                /*
-                 * HABITS TAB: Dynamic active/inactive state
-                 * Icon: bookmark.fill when active, bookmark when inactive
-                 * Text: "habits" in small Inter font with negative tracking
-                 * Color: Changes based on selectedTab state
-                 * Action: Updates selectedTab to switch to Habits view
-                 */
-                VStack(spacing: 2) { // Reduced from 4 to 2
-                    Image(systemName: selectedTab == 2 ? "bookmark.fill" : "bookmark")
-                        .font(.system(size: iconSize))
-                        .foregroundColor(selectedTab == 2 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
-
-                    Text("habits")
-                        .font(.custom("Inter", size: fontSize))
-                        .tracking(-0.5) // Negative letter spacing to condense text
-                        .foregroundColor(selectedTab == 2 ? .black : Color(hex: "9f9f9f")) // Active/Inactive state
-                }
-                .onTapGesture {
-                    // Prevent rapid tab switches during animation
-                    guard !isTransitioning else {
-                        print("⚠️ Tab tap blocked - transition in progress")
-                        return
-                    }
-
-                    if let onTabTapped = onTabTapped {
-                        var transaction = Transaction()
-                        transaction.disablesAnimations = true
-                        withTransaction(transaction) {
-                            selectedTab = 2
-                            onTabTapped()
-                        }
-                    } else {
-                        // Update previousTab for Habits transition
-                        previousTab = selectedTab
-                        selectedTab = 2
-                    }
-                }
-            }
-            /*
-             * PILL CONTAINER STYLING:
-             * - Responsive sizing based on screen dimensions
-             * - Corner radius is half height for perfect pill shape
-             * - White pill-shaped background with matching stroke
-             * - Positioned exactly 10px from right, 20px from bottom
-             */
-            .frame(width: pillWidth, height: pillHeight) // Responsive dimensions
-            .background(
-                RoundedRectangle(cornerRadius: pillHeight / 2) // Half of height = perfect pill
-                    .fill(Color.white)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: pillHeight / 2) // Same corner radius for stroke
-                    .stroke(Color(hex: "e0e0e0"), lineWidth: 1)
-            )
-            // No padding - positioned by parent HStack
-        }
     }
 }
 

@@ -12,6 +12,7 @@ struct CardStackView: View {
     @State private var stackedEvents: [GalleryHistoryEvent] = []
     @State private var isDragging: Bool = false
     @State private var dragOffset: CGSize = .zero
+    @State private var triggerBounce: Bool = false
 
     // MARK: - Environment
     @EnvironmentObject private var appState: AppState
@@ -51,21 +52,36 @@ struct CardStackView: View {
     }
     
     private var emptyCard: some View {
-        VStack(spacing: 19.2) { // 24 × 0.8 = 19.2 (20% smaller)
+        VStack(spacing: 0) {
             Spacer()
-            Image(systemName: "paperplane.fill")
-                .font(.system(size: 64, weight: .light)) // 80 × 0.8 = 64 (20% smaller)
-                .foregroundColor(.white)
+                .frame(height: 20) // Even less top spacer to push icon higher
+
+            // Hero icon - prominent focal point with layered bounce animation on tap
+            Image(systemName: "rectangle.portrait.on.rectangle.portrait.angled.fill")
+                .font(.system(size: 300, weight: .thin))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(
+                    Color(hex: "d0d0d0"),  // Front card: light grey
+                    .black                  // Back card: black
+                )
+                .symbolEffect(.bounce.byLayer, value: triggerBounce)
+                .onTapGesture {
+                    triggerBounce.toggle()
+                }
+                .padding(.bottom, -10) // Negative padding to pull text closer
+
+            // Subtle supporting text (two rows)
             Text("Your loved one's moments will appear\nhere as beautiful cards")
-                .font(.system(size: 14.4, weight: .medium)) // 18 × 0.8 = 14.4 (20% smaller)
-                .foregroundColor(.white)
+                .font(.custom("Poppins-Regular", size: 13))
+                .foregroundColor(Color(hex: "8a8a8a"))
                 .multilineTextAlignment(.center)
-                .lineSpacing(3.2) // 4 × 0.8 = 3.2 (20% smaller)
+                .lineSpacing(4)
+                .padding(.horizontal, 20)
+                .fixedSize(horizontal: false, vertical: true) // Allow text to take needed space
+
             Spacer()
         }
         .frame(width: cardWidth, height: cardHeight)
-        .background(Color(red: 0.108, green: 0.108, blue: 0.108)) // 0.12 × 0.9 = 0.108 (10% darker)
-        .cornerRadius(10)
     }
     
     private var cardStack: some View {
@@ -139,44 +155,62 @@ struct CardStackView: View {
     }
 
     private func getCardXOffset(for index: Int) -> CGFloat {
+        // Corner peeks - coordinated X/Y for diagonal scatter
         switch index {
-        case 1: return -12      // Card 1: left
-        case 2: return 12       // Card 2: right
-        case 3: return 0        // Card 3: center
-        case 4: return -6       // Card 4: slight left
-        default: return CGFloat(index % 2 == 0 ? -4 : 4)
+        case 1: return -12      // Card 1: left (top-left corner)
+        case 2: return 10       // Card 2: right (bottom-right corner)
+        case 3: return 8        // Card 3: right (top-right corner)
+        case 4: return -10      // Card 4: left (bottom-left corner)
+        default: return CGFloat(index % 2 == 0 ? -2 : 2)
         }
     }
 
     private func getCardYOffset(for index: Int) -> CGFloat {
+        // Corner peeks - coordinated with X for diagonal scatter
         switch index {
-        case 1: return -16      // Card 1: peek from top
-        case 2: return -16      // Card 2: peek from top
-        case 3: return 16       // Card 3: peek from bottom
-        case 4: return -8       // Card 4: slight top
+        case 1: return -20      // Card 1: top (top-left corner with X=-12)
+        case 2: return 18       // Card 2: bottom (bottom-right corner with X=+10)
+        case 3: return -16      // Card 3: top (top-right corner with X=+8)
+        case 4: return 22       // Card 4: bottom (bottom-left corner with X=-10)
         default: return CGFloat(-index * 2)
         }
     }
 
     private func getCardRotation(for index: Int) -> Double {
+        // Professional standard: ±2-3° max (Tinder/Bumble style)
+        // Subtle rotation that respects padding bounds
         switch index {
-        case 1: return -4.75    // Card 1: left tilt (5% less: -5 × 0.95)
-        case 2: return 3.61     // Card 2: right tilt (another 5% less: 3.8 × 0.95)
-        default: return Double(index % 2 == 0 ? -2 : 2)  // Cards 3+: minimal tilt
+        case 1: return -2.5     // Card 1: subtle left tilt
+        case 2: return 1.8      // Card 2: slight right tilt (not mirrored)
+        case 3: return -1.5     // Card 3: minimal left tilt
+        case 4: return 2.2      // Card 4: slight right tilt
+        default: return Double(index % 2 == 0 ? -1 : 1)
         }
     }
     
+    // MARK: - Helper: Get Original Card Number
+    /// Returns the card's original position (1-based) in the events array
+    /// This stays consistent even after swipe reordering
+    private func getOriginalCardNumber(for event: GalleryHistoryEvent) -> Int {
+        if let originalIndex = events.firstIndex(where: { $0.id == event.id }) {
+            return originalIndex + 1  // 1-based for display
+        }
+        return 1  // Fallback
+    }
+
     private func cardView(for event: GalleryHistoryEvent, cardIndex: Int) -> some View {
         // Photo cards: Full-bleed photo as card background
         // Text cards: Dark background with speech bubbles
+        let originalCardNumber = getOriginalCardNumber(for: event)
+
         if event.hasPhoto {
-            return AnyView(photoCardView(for: event, cardIndex: cardIndex))
+            return AnyView(photoCardView(for: event, cardNumber: originalCardNumber))
         } else {
-            return AnyView(textCardView(for: event, cardIndex: cardIndex))
+            return AnyView(textCardView(for: event, cardNumber: originalCardNumber))
         }
     }
 
-    private func photoCardView(for event: GalleryHistoryEvent, cardIndex: Int) -> some View {
+    private func photoCardView(for event: GalleryHistoryEvent, cardNumber: Int) -> some View {
         ZStack {
             // Photo fills entire card (background layer)
             Group {
@@ -206,7 +240,8 @@ struct CardStackView: View {
                 // Header with semi-transparent background for readability
                 HStack {
                     // Clean card counter: "1/5" format in rounded pill
-                    Text("\(cardIndex + 1)/\(stackedEvents.count)")
+                    // Uses original card number (not current array index)
+                    Text("\(cardNumber)/\(events.count)")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
@@ -279,10 +314,11 @@ struct CardStackView: View {
         return formatter.string(from: date)
     }
 
-    private func textCardView(for event: GalleryHistoryEvent, cardIndex: Int) -> some View {
+    private func textCardView(for event: GalleryHistoryEvent, cardNumber: Int) -> some View {
         // Calculate progressive lightening for text cards
+        // Note: Use cardNumber-1 for 0-based calculation
         let baseColor: Double = 0.08
-        let lighteningAmount = Double(cardIndex) * 0.05
+        let lighteningAmount = Double(cardNumber - 1) * 0.05
         let cardColor = Color(red: baseColor + lighteningAmount,
                              green: baseColor + lighteningAmount,
                              blue: baseColor + lighteningAmount)
@@ -294,7 +330,8 @@ struct CardStackView: View {
                 // Header
                 HStack {
                     // Clean card counter: "1/5" format in rounded pill
-                    Text("\(cardIndex + 1)/\(stackedEvents.count)")
+                    // Uses original card number (not current array index)
+                    Text("\(cardNumber)/\(events.count)")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
