@@ -46,6 +46,8 @@ struct StandardTabBar: View {
                     title: "Gallery",
                     isSelected: selectedTab == 1
                 ) {
+                    // Post notification for gallery tab tap (even if already selected)
+                    NotificationCenter.default.post(name: .galleryTabTapped, object: nil)
                     selectedTab = 1
                     isCreateExpanded = false // Close create if switching tabs
                 }

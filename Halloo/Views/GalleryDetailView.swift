@@ -1,5 +1,10 @@
 import SwiftUI
 
+// MARK: - Notification Names
+extension Notification.Name {
+    static let galleryTabTapped = Notification.Name("galleryTabTapped")
+}
+
 /**
  * GALLERY DETAIL VIEW - Expanded content view for gallery items
  *
@@ -20,8 +25,11 @@ struct GalleryDetailView: View {
     let event: GalleryHistoryEvent
     @Binding var selectedTab: Int
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.presentationMode) private var presentationMode
     @Environment(\.container) private var container
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var profileViewModel: ProfileViewModel
+    @EnvironmentObject private var dashboardViewModel: DashboardViewModel
 
     // Navigation state
     let currentIndex: Int
@@ -33,12 +41,13 @@ struct GalleryDetailView: View {
     private var hasPrevious: Bool { currentIndex > 0 }
     private var hasNext: Bool { currentIndex < totalEvents - 1 }
 
-    // Profile selection state for header
-    @State private var selectedProfileIndex: Int = 0
+    // Animation state
+    @State private var showBottomNavBar = false
 
-    // Create button state for StandardTabBar
+    // Navigation bar state
     @State private var isCreateExpanded: Bool = false
     @State private var showingCreateActionSheet: Bool = false
+    @State private var selectedProfileIndex: Int = 0
 
     // MARK: - Initialization
     init(
@@ -59,28 +68,28 @@ struct GalleryDetailView: View {
     
     var body: some View {
         ZStack {
-            // Background
-            Color(hex: "f9f9f9")
-                .ignoresSafeArea()
-            
             VStack(spacing: 0) {
-                // Header with Remi logo and profile icon - same as other views
+                // Invisible but interactive SharedHeaderSection (duplicates the one behind for touch events)
                 SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
-                    .padding(.horizontal, UIScreen.main.bounds.width * 0.04) // Match DashboardView/GalleryView alignment
-                
+                    .environmentObject(appState)
+                    .environmentObject(profileViewModel)
+                    .environmentObject(dashboardViewModel)
+                    .background(Color(hex: "f9f9f9")) // Match ContentView styling
+                    .opacity(showBottomNavBar ? 0.01 : 0) // Starts at 0, becomes 0.01 after animation
+
                 // Full-width white card extending to bottom of screen
                 VStack(spacing: 0) {
                     // Navigation header with chevrons and date
                     navigationHeader
                         .padding(.horizontal, 20)
                         .padding(.vertical, 24) // Increased vertical padding
-                    
+
                     // Scrollable content area that fills remaining space
                     ScrollView {
                         VStack(spacing: 0) {
                             // Square content area - full width like Instagram
                             contentSquare
-                            
+
                             // Bottom metadata info with padding
                             metadataInfo
                                 .padding(.horizontal, 20)
@@ -90,14 +99,14 @@ struct GalleryDetailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity) // Fill available space
                 }
                 .background(Color.white)
-                .cornerRadius(10)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .shadow(color: Color(hex: "6f6f6f").opacity(0.15), radius: 4, x: 0, y: 2)
-                .padding(.top, 20)
+                .padding(.horizontal, UIScreen.main.bounds.width * 0.04) // Match GalleryView alignment
                 .frame(maxHeight: .infinity) // Extend to bottom
-                .ignoresSafeArea(.container, edges: .bottom) // Extend past safe area to screen edge
+                .ignoresSafeArea(.container, edges: .bottom) // Extend past safe area to bottom edge
             }
-            
-            // Standard tab bar at bottom
+
+            // Bottom navigation bar - appears after animation
             VStack {
                 Spacer()
                 StandardTabBar(
@@ -107,9 +116,13 @@ struct GalleryDetailView: View {
                         showingCreateActionSheet = true
                     }
                 )
+                .opacity(showBottomNavBar ? 1 : 0) // Animate only the nav bar opacity
+                .animation(.easeIn(duration: 0.2), value: showBottomNavBar)
             }
         }
         .navigationBarHidden(true)
+        .presentationDragIndicator(.hidden) // Hide the drag indicator
+        .interactiveDismissDisabled(true) // Disable swipe-to-dismiss
         .confirmationDialog("What would you like to create?", isPresented: $showingCreateActionSheet) {
             Button("Add Family Member") {
                 // Handle add family member
@@ -125,9 +138,19 @@ struct GalleryDetailView: View {
                 isCreateExpanded = false
             }
         }
+        .onAppear {
+            // Show bottom nav bar after animation completes (0.4s delay)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                showBottomNavBar = true
+            }
+        }
         .onChange(of: selectedTab) { oldValue, newValue in
             // Dismiss the detail view whenever any tab is tapped
-            dismiss()
+            presentationMode.wrappedValue.dismiss()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .galleryTabTapped)) { _ in
+            // Dismiss when gallery tab is tapped (even if already on gallery)
+            presentationMode.wrappedValue.dismiss()
         }
     }
     
@@ -142,7 +165,7 @@ struct GalleryDetailView: View {
                     if hasPrevious {
                         onPrevious()
                     } else {
-                        dismiss()
+                        presentationMode.wrappedValue.dismiss()
                     }
                 }
             }) {

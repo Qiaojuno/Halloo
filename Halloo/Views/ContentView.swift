@@ -140,6 +140,7 @@ struct ContentView: View {
                     GalleryView(selectedTab: $selectedTab, showHeader: false)
                         .environmentObject(galleryVM) // Use real Firebase services!
                         .environmentObject(profileVM)
+                        .environmentObject(dashboardVM) // Needed for GalleryDetailView
                         .environmentObject(appState)  // PHASE 1: Inject AppState for read-only access
                         .environment(\.isScrollDisabled, isHorizontalDragging)
                         .environment(\.isDragging, dragOffset != 0)

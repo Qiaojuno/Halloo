@@ -12,6 +12,7 @@ struct GalleryView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel: GalleryViewModel
     @EnvironmentObject private var profileViewModel: ProfileViewModel
+    @EnvironmentObject private var dashboardViewModel: DashboardViewModel
 
     // MARK: - Navigation State
     /// Tab selection binding from parent ContentView for floating pill navigation
@@ -94,7 +95,11 @@ struct GalleryView: View {
                     navigateToNext(from: event)
                 }
             )
+            .environmentObject(appState)
+            .environmentObject(profileViewModel)
+            .environmentObject(dashboardViewModel)
             .inject(container: container)
+            .presentationBackground(.clear) // Transparent background to show underlying navigation
             .transition(.identity) // No transition effect for gallery detail
         }
     }
