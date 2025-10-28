@@ -1,4 +1,26 @@
 import SwiftUI
+import UIKit
+
+// MARK: - Visual Effect Blur (UIKit Integration)
+/**
+ * VISUAL EFFECT BLUR: UIKit blur wrapper for SwiftUI
+ *
+ * PURPOSE: Provides UIKit's UIBlurEffect in SwiftUI with forced light appearance
+ * REASON: SwiftUI's Material adapts to system dark mode, we need light mode only
+ */
+struct VisualEffectBlur: UIViewRepresentable {
+    var blurStyle: UIBlurEffect.Style
+
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        let view = UIVisualEffectView(effect: UIBlurEffect(style: blurStyle))
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        return view
+    }
+
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
+        uiView.effect = UIBlurEffect(style: blurStyle)
+    }
+}
 
 // MARK: - Standard Tab Bar Component
 /**
@@ -71,12 +93,18 @@ struct StandardTabBar: View {
                 }
             }
             .frame(height: 70)
-            .padding(.top, 0) // No top padding
-            .background(Color.white) // White background behind the tabs
+            .padding(.bottom, 15) // Push content down into safe area
         }
-        .background(Color.white) // White background extends to bottom
-        .padding(.bottom, -20) // Move entire bar down 20pt
-        .edgesIgnoringSafeArea(.bottom)
+        .background(
+            ZStack {
+                // Blur layer behind
+                VisualEffectBlur(blurStyle: .systemUltraThinMaterialLight)
+
+                // White color on top with slight transparency to show blur
+                Color.white.opacity(0.85)
+            }
+            .ignoresSafeArea(.all, edges: .bottom) // Extend background to screen bottom
+        )
     }
 }
 
@@ -94,7 +122,11 @@ struct CreateTabItem: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button(action: {
+            // Haptic feedback
+            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            action()
+        }) {
             ZStack {
                 // Black circle background (animated) - spans from top of icons to bottom of text
                 if isExpanded {
@@ -129,7 +161,6 @@ struct CreateTabItem: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
             .animation(.easeInOut(duration: 0.2), value: isExpanded)
         }
     }
@@ -161,7 +192,6 @@ struct TabBarItem: View {
             }
             .foregroundColor(isSelected ? .black : Color(hex: "9f9f9f")) // Black when selected, light gray when not (matches pill navigation)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)  // Add vertical padding inside each tab
         }
     }
 }

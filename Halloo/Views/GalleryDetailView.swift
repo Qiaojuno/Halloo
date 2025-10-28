@@ -123,15 +123,19 @@ struct GalleryDetailView: View {
         .navigationBarHidden(true)
         .presentationDragIndicator(.hidden) // Hide the drag indicator
         .interactiveDismissDisabled(true) // Disable swipe-to-dismiss
-        .confirmationDialog("What would you like to create?", isPresented: $showingCreateActionSheet) {
-            Button("Add Family Member") {
-                // Handle add family member
-            }
-            Button("Create Habit") {
-                // Handle create habit
-            }
-            Button("Cancel", role: .cancel) {}
-        }
+        .overlay(
+            CreateActionCard(
+                isPresented: $showingCreateActionSheet,
+                onCreateHabit: {
+                    // Handle create habit
+                    // TODO: Implement habit creation from gallery detail
+                },
+                onCreateProfile: {
+                    // Handle add family member
+                    // TODO: Implement profile creation from gallery detail
+                }
+            )
+        )
         .onChange(of: showingCreateActionSheet) { oldValue, newValue in
             // Reset create button when action sheet is dismissed
             if !newValue {

@@ -59,7 +59,7 @@ struct ContentView: View {
     // Create action state (lifted from DashboardView for proper presentation context)
     @State private var showingCreateActionSheet = false
     @State private var showingDirectOnboarding = false
-    @State private var showingTaskCreation = false
+    @State private var showingTaskCreation = false // NEW: For habit creation card
     @State private var isCreateExpanded = false // Track create button toggle state
 
     @State private var authCancellables = Set<AnyCancellable>()
@@ -296,6 +296,7 @@ struct ContentView: View {
                         onCreateTapped: { showingCreateActionSheet = true }
                     )
                 }
+                .ignoresSafeArea(.all, edges: .bottom) // Extend VStack to screen bottom
                 .zIndex(100) // Always on top
 
             } else {
@@ -303,18 +304,20 @@ struct ContentView: View {
                 LoadingView()
             }
         }
-        .confirmationDialog("What would you like to create?", isPresented: $showingCreateActionSheet) {
-            Button("Add Family Member") {
-                if let profileVM = profileViewModel {
-                    profileVM.startProfileOnboarding()
-                    showingDirectOnboarding = true
+        .overlay(
+            CreateActionCard(
+                isPresented: $showingCreateActionSheet,
+                onCreateHabit: {
+                    showingTaskCreation = true
+                },
+                onCreateProfile: {
+                    if let profileVM = profileViewModel {
+                        profileVM.startProfileOnboarding()
+                        showingDirectOnboarding = true
+                    }
                 }
-            }
-            Button("Create Habit") {
-                showingTaskCreation = true
-            }
-            Button("Cancel", role: .cancel) {}
-        }
+            )
+        )
         .onChange(of: showingCreateActionSheet) { oldValue, newValue in
             // Reset create button when action sheet is dismissed
             if !newValue {
@@ -330,15 +333,24 @@ struct ContentView: View {
                 .environmentObject(appState)
             }
         }
-        .fullScreenCover(isPresented: $showingTaskCreation) {
-            if let dashboardVM = dashboardViewModel, let profileVM = profileViewModel {
-                TaskCreationViewWrapper(
-                    container: container,
-                    appState: appState,
-                    preselectedProfileId: dashboardVM.selectedProfileId,
-                    profileVM: profileVM,
-                    dismissAction: { showingTaskCreation = false }
-                )
+        .overlay(
+            // NEW: Habit Creation Card (replaces full-screen TaskCreationViewWrapper)
+            Group {
+                if showingTaskCreation, let dashboardVM = dashboardViewModel, let profileVM = profileViewModel {
+                    HabitCreationCardWrapper(
+                        isPresented: $showingTaskCreation,
+                        preselectedProfileId: dashboardVM.selectedProfileId,
+                        container: container,
+                        appState: appState,
+                        profileVM: profileVM
+                    )
+                }
+            }
+        )
+        .onChange(of: showingTaskCreation) { oldValue, newValue in
+            // Reset create button when habit card is dismissed
+            if !newValue {
+                isCreateExpanded = false
             }
         }
     }
@@ -628,7 +640,7 @@ struct ContentView_Previews: PreviewProvider {
 }
 #endif
 
-// MARK: - Task Creation Wrapper
+// MARK: - Task Creation Wrapper (OLD - DEPRECATED, keeping for reference)
 private struct TaskCreationViewWrapper: View {
     let container: Container
     let appState: AppState
@@ -658,6 +670,42 @@ private struct TaskCreationViewWrapper: View {
         .environmentObject(taskVM)
         .environmentObject(profileVM)
         .environmentObject(appState)
+    }
+}
+
+// MARK: - Habit Creation Card Wrapper
+private struct HabitCreationCardWrapper: View {
+    @Binding var isPresented: Bool
+    let preselectedProfileId: String?
+    let container: Container
+    let appState: AppState
+    let profileVM: ProfileViewModel
+
+    @StateObject private var taskVM: TaskViewModel
+
+    init(isPresented: Binding<Bool>, preselectedProfileId: String?, container: Container, appState: AppState, profileVM: ProfileViewModel) {
+        self._isPresented = isPresented
+        self.preselectedProfileId = preselectedProfileId
+        self.container = container
+        self.appState = appState
+        self.profileVM = profileVM
+
+        let vm = container.makeTaskViewModel()
+        vm.setAppState(appState)
+        _taskVM = StateObject(wrappedValue: vm)
+    }
+
+    var body: some View {
+        HabitCreationCard(
+            isPresented: $isPresented,
+            preselectedProfileId: preselectedProfileId,
+            onDismiss: {
+                isPresented = false
+            }
+        )
+        .environmentObject(appState)
+        .environmentObject(profileVM)
+        .environmentObject(taskVM)
     }
 }
 

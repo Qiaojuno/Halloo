@@ -73,48 +73,48 @@ struct HabitsView: View {
     private let weekDayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     
     var body: some View {
-        if showingDirectOnboarding {
-            // ✅ NEW: Simplified single-card profile creation
-            SimplifiedProfileCreationView(onDismiss: {
-                showingDirectOnboarding = false
-            })
-            .environmentObject(profileViewModel)
-            .transition(.identity)
-            .transaction { transaction in
-                transaction.disablesAnimations = true
-            }
-        } else if showingTaskCreation, let taskVM = taskViewModel {
-            // Show task creation flow with persistent ViewModel
-            TaskCreationView(
-                preselectedProfileId: selectedProfile?.id,
-                dismissAction: {
-                    showingTaskCreation = false
+        // Show habits view as main content
+        habitsContent
+            .onAppear {
+                // Initialize TaskViewModel once
+                if taskViewModel == nil {
+                    print("🔴 [HabitsView] Creating TaskViewModel instance")
+                    taskViewModel = container.makeTaskViewModel()
+                    // Load all tasks for the authenticated user
+                    taskViewModel?.loadTasks()
                 }
-            )
-            .environmentObject(taskVM)
-            .transition(.identity)
-            .transaction { transaction in
-                transaction.disablesAnimations = true
             }
-        } else {
-            // Show habits view - NO .transition() here, let parent control it
-            habitsContent
-                .onAppear {
-                    // Initialize TaskViewModel once
-                    if taskViewModel == nil {
-                        print("🔴 [HabitsView] Creating TaskViewModel instance")
-                        taskViewModel = container.makeTaskViewModel()
-                        // Load all tasks for the authenticated user
-                        taskViewModel?.loadTasks()
+            .onChange(of: taskViewModel?.tasks.count) { oldCount, newCount in
+                print("🔄 [HabitsView] Tasks count changed to: \(newCount ?? 0)")
+                // Force view refresh by updating a local state
+                refreshID = UUID()
+            }
+            .id(refreshID) // Force refresh when refreshID changes
+            .fullScreenCover(isPresented: $showingDirectOnboarding) {
+                // Profile creation
+                SimplifiedProfileCreationView(onDismiss: {
+                    showingDirectOnboarding = false
+                })
+                .environmentObject(profileViewModel)
+                .environmentObject(appState)
+            }
+            .overlay(
+                // NEW: Habit Creation Card (replaces full-screen TaskCreationView)
+                Group {
+                    if showingTaskCreation, let taskVM = taskViewModel {
+                        HabitCreationCard(
+                            isPresented: $showingTaskCreation,
+                            preselectedProfileId: selectedProfile?.id,
+                            onDismiss: {
+                                showingTaskCreation = false
+                            }
+                        )
+                        .environmentObject(appState)
+                        .environmentObject(profileViewModel)
+                        .environmentObject(taskVM)
                     }
                 }
-                .onChange(of: taskViewModel?.tasks.count) { oldCount, newCount in
-                    print("🔄 [HabitsView] Tasks count changed to: \(newCount ?? 0)")
-                    // Force view refresh by updating a local state
-                    refreshID = UUID()
-                }
-                .id(refreshID) // Force refresh when refreshID changes
-        }
+            )
     }
     
     private var habitsContent: some View {
@@ -480,23 +480,18 @@ struct HabitsView: View {
                     .foregroundColor(.white)
             }
         }
-        .actionSheet(isPresented: $showingCreateActionSheet) {
-            ActionSheet(
-                title: Text("What would you like to create?"),
-                buttons: [
-                    .default(Text("Add Family Member")) {
-                        // Create profile action
-                        profileViewModel.startProfileOnboarding()
-                        showingDirectOnboarding = true
-                    },
-                    .default(Text("Create Habit")) {
-                        // Create task action
-                        showingTaskCreation = true
-                    },
-                    .cancel()
-                ]
+        .overlay(
+            CreateActionCard(
+                isPresented: $showingCreateActionSheet,
+                onCreateHabit: {
+                    showingTaskCreation = true
+                },
+                onCreateProfile: {
+                    profileViewModel.startProfileOnboarding()
+                    showingDirectOnboarding = true
+                }
             )
-        }
+        )
     }
     
     // MARK: - 🗑️ Delete Profile Button
