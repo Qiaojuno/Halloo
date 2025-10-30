@@ -677,6 +677,43 @@ exports.manualCleanup = functions.https.onRequest(async (req, res) => {
 });
 
 /**
+ * Retry utility with exponential backoff for Firestore operations
+ *
+ * @param {Function} operation - Async function to retry
+ * @param {string} operationName - Name for logging
+ * @param {number} maxRetries - Maximum retry attempts (default: 3)
+ * @returns {Promise<any>} - Result of the operation
+ * @throws {Error} - If all retries exhausted
+ */
+async function retryWithBackoff(operation, operationName, maxRetries = 3) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await operation();
+      if (attempt > 1) {
+        console.log(`✅ ${operationName} succeeded on attempt ${attempt}`);
+      }
+      return result;
+    } catch (error) {
+      lastError = error;
+
+      if (attempt === maxRetries) {
+        console.error(`❌ ${operationName} failed after ${maxRetries} attempts: ${error.message}`);
+        throw error;
+      }
+
+      // Exponential backoff: 100ms, 200ms, 400ms
+      const delayMs = 100 * Math.pow(2, attempt - 1);
+      console.warn(`⚠️ ${operationName} failed on attempt ${attempt}/${maxRetries}, retrying in ${delayMs}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw lastError;
+}
+
+/**
  * Cloud Scheduler: Check for due habits every minute and send SMS reminders
  *
  * Runs: Every 1 minute (Cloud Scheduler minimum interval)
@@ -695,23 +732,27 @@ exports.sendScheduledTaskReminders = onSchedule({
   timeZone: 'America/Los_Angeles',
   secrets: [twilioAccountSid, twilioAuthToken, twilioPhoneNumber]
 }, async (event) => {
-  console.log('⏰ Running scheduled task reminder check (1-min interval, 90s window)...');
+  console.log('⏰ Running scheduled task reminder check (1-min interval, 5-min catchup window)...');
 
   const now = admin.firestore.Timestamp.now();
-  const ninetySecondsAgo = admin.firestore.Timestamp.fromDate(
-    new Date(Date.now() - 90 * 1000)
+  const currentTime = now.toDate();
+
+  // EXPANDED WINDOW: 5 minutes (catches habits missed by scheduler delays/outages)
+  // This prevents habits from being skipped if Cloud Scheduler is delayed
+  const fiveMinutesAgo = admin.firestore.Timestamp.fromDate(
+    new Date(Date.now() - 5 * 60 * 1000)
   );
 
   try {
-    // Find all active habits scheduled in last 90 seconds
+    // Find all active habits scheduled in last 5 minutes
     const habitsSnapshot = await admin.firestore()
       .collectionGroup('habits')
       .where('status', '==', 'active')
-      .where('nextScheduledDate', '>=', ninetySecondsAgo)
+      .where('nextScheduledDate', '>=', fiveMinutesAgo)
       .where('nextScheduledDate', '<=', now)
       .get();
 
-    console.log(`📋 Found ${habitsSnapshot.size} habits due for reminders`);
+    console.log(`📋 Found ${habitsSnapshot.size} habits in 5-minute window`);
 
     if (habitsSnapshot.empty) {
       console.log('✅ No habits due right now');
@@ -776,6 +817,21 @@ exports.sendScheduledTaskReminders = onSchedule({
       // Check if SMS already sent for this exact scheduled time (prevent duplicates)
       const scheduledTimeDate = habit.nextScheduledDate.toDate();
 
+      // Calculate lateness: how many seconds late is this SMS?
+      const latenessSeconds = Math.floor((currentTime - scheduledTimeDate) / 1000);
+      const latenessMinutes = Math.floor(latenessSeconds / 60);
+
+      if (latenessSeconds > 120) {
+        // More than 2 minutes late - log as warning
+        console.warn(`⏰ WARNING: Habit "${habit.title}" is ${latenessMinutes}m ${latenessSeconds % 60}s late (scheduled: ${scheduledTimeDate.toISOString()})`);
+      } else if (latenessSeconds > 60) {
+        // Between 1-2 minutes late - expected latency
+        console.log(`⏰ Habit "${habit.title}" is ${latenessSeconds}s late (normal scheduler latency)`);
+      } else {
+        // Less than 60 seconds late - perfect timing
+        console.log(`✅ Habit "${habit.title}" is on-time (lateness: ${latenessSeconds}s)`);
+      }
+
       const smsLogQuery = await admin.firestore()
         .collection(`users/${userId}/smsLogs`)
         .where('habitId', '==', habit.id)
@@ -821,6 +877,8 @@ exports.sendScheduledTaskReminders = onSchedule({
             twilioSid: twilioMessage.sid,
             status: twilioMessage.status,
             nextScheduledDate: habit.nextScheduledDate,
+            scheduledTime: scheduledTimeDate,
+            latenessSeconds: latenessSeconds, // Track delivery latency for analytics
             sentAt: admin.firestore.FieldValue.serverTimestamp(),
             direction: 'outbound'
           });
@@ -876,16 +934,23 @@ exports.sendScheduledTaskReminders = onSchedule({
             continue;
           }
 
-          await habitDoc.ref.update({
-            nextScheduledDate: admin.firestore.Timestamp.fromDate(nextOccurrence),
-            lastSMSSentAt: admin.firestore.FieldValue.serverTimestamp()
-          });
+          // Retry Firestore update with exponential backoff (3 attempts: 0ms, 100ms, 200ms)
+          await retryWithBackoff(
+            async () => {
+              await habitDoc.ref.update({
+                nextScheduledDate: admin.firestore.Timestamp.fromDate(nextOccurrence),
+                lastSMSSentAt: admin.firestore.FieldValue.serverTimestamp()
+              });
+            },
+            `Update nextScheduledDate for habit ${habit.id} ("${habit.title}")`
+          );
+
           console.log(`📅 Updated nextScheduledDate for "${habit.title}" to ${nextOccurrence.toISOString()}`);
 
         } catch (updateError) {
-          console.error(`❌ CRITICAL: Failed to update nextScheduledDate for habit ${habit.id}:`, updateError.message);
+          console.error(`❌ CRITICAL: Failed to update nextScheduledDate for habit ${habit.id} after 3 retries:`, updateError.message);
           // This is critical - if we can't update the date, the habit is stuck
-          // Log to error collection for monitoring
+          // Log to error collection for monitoring and alerting
           await admin.firestore()
             .collection('errors')
             .add({
@@ -893,19 +958,27 @@ exports.sendScheduledTaskReminders = onSchedule({
               habitId: habit.id,
               userId: userId,
               profileId: profile.id,
+              habitTitle: habit.title,
               errorMessage: updateError.message,
+              errorStack: updateError.stack,
+              retriesExhausted: true,
               timestamp: admin.firestore.FieldValue.serverTimestamp()
             });
         }
       } else {
         // For one-time habits, just track when SMS was sent (no need to advance date)
         try {
-          await habitDoc.ref.update({
-            lastSMSSentAt: admin.firestore.FieldValue.serverTimestamp()
-          });
+          await retryWithBackoff(
+            async () => {
+              await habitDoc.ref.update({
+                lastSMSSentAt: admin.firestore.FieldValue.serverTimestamp()
+              });
+            },
+            `Update lastSMSSentAt for one-time habit ${habit.id}`
+          );
           console.log(`⏱️ One-time habit "${habit.title}" - nextScheduledDate NOT updated`);
         } catch (updateError) {
-          console.error(`❌ Failed to update lastSMSSentAt for one-time habit ${habit.id}:`, updateError.message);
+          console.error(`❌ Failed to update lastSMSSentAt for one-time habit ${habit.id} after retries:`, updateError.message);
         }
       }
     }
@@ -923,6 +996,255 @@ exports.sendScheduledTaskReminders = onSchedule({
 
   } catch (error) {
     console.error('❌ Error in sendScheduledTaskReminders:', error);
+    throw error;
+  }
+});
+
+/**
+ * Missed SMS Recovery: Hourly check for habits that got stuck in the past
+ *
+ * This is a safety net that catches habits where:
+ * 1. nextScheduledDate is in the past (more than 5 minutes ago)
+ * 2. lastSMSSentAt doesn't match nextScheduledDate (SMS was never sent)
+ * 3. Habit is still active
+ *
+ * When found, it advances nextScheduledDate to the NEXT future occurrence
+ * without sending SMS (to avoid sending late/stale reminders).
+ *
+ * Runs: Every hour (less frequent since this is edge case recovery)
+ * Purpose: Prevent habits from permanently breaking due to transient failures
+ */
+exports.recoverMissedHabits = onSchedule({
+  schedule: 'every 60 minutes',
+  timeZone: 'America/Los_Angeles'
+}, async (event) => {
+  console.log('🔧 Running missed habit recovery check (hourly safety net)...');
+
+  const now = new Date();
+  const fiveMinutesAgo = admin.firestore.Timestamp.fromDate(
+    new Date(now.getTime() - 5 * 60 * 1000)
+  );
+
+  try {
+    // Find habits where nextScheduledDate is MORE than 5 minutes in the past
+    // These are habits that were missed by the regular scheduler
+    const stuckHabitsSnapshot = await admin.firestore()
+      .collectionGroup('habits')
+      .where('status', '==', 'active')
+      .where('frequency', '!=', 'once') // Only recurring habits can get stuck
+      .where('nextScheduledDate', '<', fiveMinutesAgo)
+      .get();
+
+    console.log(`🔍 Found ${stuckHabitsSnapshot.size} habits with nextScheduledDate in the past`);
+
+    if (stuckHabitsSnapshot.empty) {
+      console.log('✅ No stuck habits found');
+      return null;
+    }
+
+    let recovered = 0;
+    let alreadySent = 0;
+
+    for (const habitDoc of stuckHabitsSnapshot.docs) {
+      const habit = habitDoc.data();
+      const habitPath = habitDoc.ref.path;
+
+      // Extract userId from path
+      const pathParts = habitPath.split('/');
+      const userId = pathParts[1];
+
+      // Check if SMS was actually sent for this nextScheduledDate
+      const smsLogQuery = await admin.firestore()
+        .collection(`users/${userId}/smsLogs`)
+        .where('habitId', '==', habit.id)
+        .where('nextScheduledDate', '==', habit.nextScheduledDate)
+        .where('direction', '==', 'outbound')
+        .limit(1)
+        .get();
+
+      if (!smsLogQuery.empty) {
+        // SMS was sent, but nextScheduledDate wasn't updated - CRITICAL BUG
+        console.warn(`⚠️ Habit "${habit.title}" (${habit.id}): SMS was sent but nextScheduledDate stuck at ${habit.nextScheduledDate.toDate().toISOString()}`);
+        alreadySent++;
+      }
+
+      // Calculate the NEXT future occurrence (skip the missed one)
+      const nextOccurrence = calculateNextOccurrence(habit);
+      console.log(`🔧 Recovering habit "${habit.title}": advancing from ${habit.nextScheduledDate.toDate().toISOString()} to ${nextOccurrence.toISOString()}`);
+
+      // Update with retry logic
+      try {
+        await retryWithBackoff(
+          async () => {
+            await habitDoc.ref.update({
+              nextScheduledDate: admin.firestore.Timestamp.fromDate(nextOccurrence),
+              recoveredAt: admin.firestore.FieldValue.serverTimestamp(), // Track when recovery happened
+              recoveredBy: 'recoverMissedHabits'
+            });
+          },
+          `Recover habit ${habit.id} ("${habit.title}")`
+        );
+
+        recovered++;
+        console.log(`✅ Recovered habit "${habit.title}" - next SMS will be ${nextOccurrence.toISOString()}`);
+
+      } catch (error) {
+        console.error(`❌ Failed to recover habit ${habit.id}:`, error.message);
+
+        // Log critical error
+        await admin.firestore()
+          .collection('errors')
+          .add({
+            type: 'habitRecoveryFailure',
+            habitId: habit.id,
+            userId: userId,
+            habitTitle: habit.title,
+            stuckDate: habit.nextScheduledDate.toDate().toISOString(),
+            errorMessage: error.message,
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+          });
+      }
+    }
+
+    const summary = {
+      stuckHabits: stuckHabitsSnapshot.size,
+      recovered,
+      alreadySent,
+      timestamp: new Date().toISOString()
+    };
+
+    console.log(`📊 Recovery summary:`, summary);
+    return summary;
+
+  } catch (error) {
+    console.error('❌ Missed habit recovery failed:', error);
+    throw error;
+  }
+});
+
+/**
+ * Health Check Monitor: Track system health and alert on critical failures
+ *
+ * Monitors:
+ * 1. Habits stuck in the past (nextScheduledDate < now - 1 hour)
+ * 2. Recent errors in 'errors' collection
+ * 3. SMS sending success rate (last hour)
+ * 4. Firestore update failures
+ *
+ * Runs: Every 15 minutes for proactive monitoring
+ * Alerts: Logs warnings when thresholds exceeded
+ */
+exports.healthCheckMonitor = onSchedule({
+  schedule: 'every 15 minutes',
+  timeZone: 'America/Los_Angeles'
+}, async (event) => {
+  console.log('🏥 Running health check monitor...');
+
+  const now = new Date();
+  const oneHourAgo = admin.firestore.Timestamp.fromDate(
+    new Date(now.getTime() - 60 * 60 * 1000)
+  );
+  const fifteenMinutesAgo = admin.firestore.Timestamp.fromDate(
+    new Date(now.getTime() - 15 * 60 * 1000)
+  );
+
+  try {
+    const healthMetrics = {
+      timestamp: now.toISOString(),
+      checks: {}
+    };
+
+    // Check 1: Habits stuck in the past (more than 1 hour old)
+    const stuckHabitsSnapshot = await admin.firestore()
+      .collectionGroup('habits')
+      .where('status', '==', 'active')
+      .where('nextScheduledDate', '<', oneHourAgo)
+      .get();
+
+    healthMetrics.checks.stuckHabits = {
+      count: stuckHabitsSnapshot.size,
+      status: stuckHabitsSnapshot.size === 0 ? 'healthy' : (stuckHabitsSnapshot.size < 5 ? 'warning' : 'critical')
+    };
+
+    if (stuckHabitsSnapshot.size > 0) {
+      console.warn(`⚠️ HEALTH: ${stuckHabitsSnapshot.size} habits stuck in the past`);
+    } else {
+      console.log(`✅ HEALTH: No stuck habits`);
+    }
+
+    // Check 2: Recent critical errors
+    const recentErrorsSnapshot = await admin.firestore()
+      .collection('errors')
+      .where('timestamp', '>=', fifteenMinutesAgo)
+      .where('type', 'in', ['nextScheduledDateUpdateFailure', 'habitRecoveryFailure'])
+      .get();
+
+    healthMetrics.checks.recentErrors = {
+      count: recentErrorsSnapshot.size,
+      status: recentErrorsSnapshot.size === 0 ? 'healthy' : (recentErrorsSnapshot.size < 3 ? 'warning' : 'critical')
+    };
+
+    if (recentErrorsSnapshot.size > 0) {
+      console.warn(`⚠️ HEALTH: ${recentErrorsSnapshot.size} critical errors in last 15 minutes`);
+      // Log first few errors for context
+      recentErrorsSnapshot.docs.slice(0, 3).forEach(doc => {
+        const error = doc.data();
+        console.warn(`  - ${error.type}: ${error.errorMessage} (habit: ${error.habitTitle || error.habitId})`);
+      });
+    } else {
+      console.log(`✅ HEALTH: No recent critical errors`);
+    }
+
+    // Check 3: SMS sending success rate (last hour)
+    const recentSMSLogsSnapshot = await admin.firestore()
+      .collectionGroup('smsLogs')
+      .where('sentAt', '>=', oneHourAgo)
+      .where('direction', '==', 'outbound')
+      .get();
+
+    const totalSMS = recentSMSLogsSnapshot.size;
+    const failedSMS = recentSMSLogsSnapshot.docs.filter(doc => doc.data().status === 'failed').length;
+    const successRate = totalSMS > 0 ? ((totalSMS - failedSMS) / totalSMS * 100).toFixed(1) : 100;
+
+    healthMetrics.checks.smsSuccessRate = {
+      totalSent: totalSMS,
+      failed: failedSMS,
+      successRate: `${successRate}%`,
+      status: successRate >= 95 ? 'healthy' : (successRate >= 85 ? 'warning' : 'critical')
+    };
+
+    if (successRate < 95) {
+      console.warn(`⚠️ HEALTH: SMS success rate is ${successRate}% (${failedSMS}/${totalSMS} failed)`);
+    } else {
+      console.log(`✅ HEALTH: SMS success rate is ${successRate}%`);
+    }
+
+    // Check 4: Overall system health
+    const criticalCount = Object.values(healthMetrics.checks).filter(check => check.status === 'critical').length;
+    const warningCount = Object.values(healthMetrics.checks).filter(check => check.status === 'warning').length;
+
+    healthMetrics.overallStatus = criticalCount > 0 ? 'critical' : (warningCount > 0 ? 'warning' : 'healthy');
+
+    // Log health metrics to dedicated collection
+    await admin.firestore()
+      .collection('healthMetrics')
+      .add(healthMetrics);
+
+    // Alert on critical status
+    if (healthMetrics.overallStatus === 'critical') {
+      console.error(`🚨 CRITICAL HEALTH ALERT: System has ${criticalCount} critical issues`);
+      console.error(`📊 Health metrics:`, JSON.stringify(healthMetrics, null, 2));
+    } else if (healthMetrics.overallStatus === 'warning') {
+      console.warn(`⚠️ WARNING: System has ${warningCount} warnings`);
+    } else {
+      console.log(`✅ HEALTH: System is healthy`);
+    }
+
+    console.log(`📊 Health check complete - Status: ${healthMetrics.overallStatus}`);
+    return healthMetrics;
+
+  } catch (error) {
+    console.error('❌ Health check monitor failed:', error);
     throw error;
   }
 });
