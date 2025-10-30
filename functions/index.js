@@ -835,22 +835,6 @@ exports.sendScheduledTaskReminders = onSchedule({
 
         smssSent++;
 
-        // Update nextScheduledDate for recurring habits only
-        if (habit.frequency !== 'once') {
-          const nextOccurrence = calculateNextOccurrence(habit);
-          await habitDoc.ref.update({
-            nextScheduledDate: admin.firestore.Timestamp.fromDate(nextOccurrence),
-            lastSMSSentAt: admin.firestore.FieldValue.serverTimestamp()  // Track when SMS was sent
-          });
-          console.log(`📅 Updated nextScheduledDate for "${habit.title}" to ${nextOccurrence.toISOString()}`);
-        } else {
-          // For one-time habits, still track when SMS was sent
-          await habitDoc.ref.update({
-            lastSMSSentAt: admin.firestore.FieldValue.serverTimestamp()
-          });
-          console.log(`⏱️ One-time habit "${habit.title}" - nextScheduledDate NOT updated`);
-        }
-
       } catch (smsError) {
         console.error(`❌ Failed to send SMS for habit ${habit.id}:`, smsError.message);
 
@@ -871,6 +855,58 @@ exports.sendScheduledTaskReminders = onSchedule({
           });
 
         smsFailed++;
+      }
+
+      // CRITICAL: Update nextScheduledDate OUTSIDE the SMS try-catch block
+      // This ensures the date advances even if SMS fails, preventing the habit from getting stuck
+      // If we don't update this, the habit will never send again because the date is in the past
+      if (habit.frequency !== 'once') {
+        try {
+          const nextOccurrence = calculateNextOccurrence(habit);
+
+          // Validate the calculated date
+          if (!nextOccurrence || isNaN(nextOccurrence.getTime())) {
+            console.error(`❌ Invalid nextOccurrence calculated for habit ${habit.id}`);
+            continue;
+          }
+
+          // Ensure it's in the future
+          if (nextOccurrence <= new Date()) {
+            console.error(`❌ nextOccurrence is in the past for habit ${habit.id}: ${nextOccurrence.toISOString()}`);
+            continue;
+          }
+
+          await habitDoc.ref.update({
+            nextScheduledDate: admin.firestore.Timestamp.fromDate(nextOccurrence),
+            lastSMSSentAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+          console.log(`📅 Updated nextScheduledDate for "${habit.title}" to ${nextOccurrence.toISOString()}`);
+
+        } catch (updateError) {
+          console.error(`❌ CRITICAL: Failed to update nextScheduledDate for habit ${habit.id}:`, updateError.message);
+          // This is critical - if we can't update the date, the habit is stuck
+          // Log to error collection for monitoring
+          await admin.firestore()
+            .collection('errors')
+            .add({
+              type: 'nextScheduledDateUpdateFailure',
+              habitId: habit.id,
+              userId: userId,
+              profileId: profile.id,
+              errorMessage: updateError.message,
+              timestamp: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
+      } else {
+        // For one-time habits, just track when SMS was sent (no need to advance date)
+        try {
+          await habitDoc.ref.update({
+            lastSMSSentAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+          console.log(`⏱️ One-time habit "${habit.title}" - nextScheduledDate NOT updated`);
+        } catch (updateError) {
+          console.error(`❌ Failed to update lastSMSSentAt for one-time habit ${habit.id}:`, updateError.message);
+        }
       }
     }
 

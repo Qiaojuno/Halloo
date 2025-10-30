@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import SuperwallKit
 import Firebase
+import UserNotifications
 
 // MARK: - Environment Keys
 private struct IsScrollDisabledKey: EnvironmentKey {
@@ -449,6 +450,9 @@ struct ContentView: View {
                         print("🔍 [ContentView] Checking for missing profile photos...")
                         await self.profileViewModel?.restoreMissingProfilePhotos()
 
+                        // DEBUG: Check and clear pending notifications
+                        await self.debugAndClearNotifications()
+
                         // CRITICAL: Re-populate the duplicate prevention Set AFTER data is loaded
                         // This prevents duplicate gallery events when SMS listener replays old confirmations
                         await MainActor.run {
@@ -462,6 +466,38 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    /// Debug function to check and clear all pending/delivered notifications
+    /// This helps identify if notifications are being scheduled despite local notifications being disabled
+    private func debugAndClearNotifications() async {
+        let center = UNUserNotificationCenter.current()
+
+        // Check pending notifications (scheduled but not delivered)
+        let pending = await center.pendingNotificationRequests()
+        print("📱 [Notifications] Pending notifications: \(pending.count)")
+        for request in pending {
+            print("  - ID: \(request.identifier)")
+            print("    Title: \(request.content.title)")
+            print("    Body: \(request.content.body)")
+            if let trigger = request.trigger {
+                print("    Trigger: \(trigger)")
+            }
+        }
+
+        // Check delivered notifications (already shown to user)
+        let delivered = await center.deliveredNotifications()
+        print("📱 [Notifications] Delivered notifications: \(delivered.count)")
+        for notification in delivered {
+            print("  - ID: \(notification.request.identifier)")
+            print("    Title: \(notification.request.content.title)")
+            print("    Body: \(notification.request.content.body)")
+        }
+
+        // Clear ALL notifications (both pending and delivered)
+        await center.removeAllPendingNotificationRequests()
+        await center.removeAllDeliveredNotifications()
+        print("✅ [Notifications] Cleared all pending and delivered notifications")
     }
 
     private func setupAuthStateObserver() {
