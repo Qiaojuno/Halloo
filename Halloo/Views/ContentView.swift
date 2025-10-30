@@ -318,6 +318,7 @@ struct ContentView: View {
                     }
                 }
             )
+            .environmentObject(appState)
         )
         .onChange(of: showingCreateActionSheet) { oldValue, newValue in
             // Reset create button when action sheet is dismissed
@@ -325,19 +326,25 @@ struct ContentView: View {
                 isCreateExpanded = false
             }
         }
-        .fullScreenCover(isPresented: $showingDirectOnboarding) {
-            if let profileVM = profileViewModel {
-                SimplifiedProfileCreationView(onDismiss: {
-                    showingDirectOnboarding = false
-                })
-                .environmentObject(profileVM)
-                .environmentObject(appState)
+        .overlay(
+            // Profile Creation Card (replaces full-screen SimplifiedProfileCreationView)
+            Group {
+                if let profileVM = profileViewModel {
+                    ProfileCreationCard(
+                        isPresented: $showingDirectOnboarding,
+                        onDismiss: {
+                            showingDirectOnboarding = false
+                        }
+                    )
+                    .environmentObject(appState)
+                    .environmentObject(profileVM)
+                }
             }
-        }
+        )
         .overlay(
             // NEW: Habit Creation Card (replaces full-screen TaskCreationViewWrapper)
             Group {
-                if showingTaskCreation, let dashboardVM = dashboardViewModel, let profileVM = profileViewModel {
+                if let dashboardVM = dashboardViewModel, let profileVM = profileViewModel {
                     HabitCreationCardWrapper(
                         isPresented: $showingTaskCreation,
                         preselectedProfileId: dashboardVM.selectedProfileId,

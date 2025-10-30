@@ -308,9 +308,6 @@ extension GalleryView {
     
     // Group events by date
     private var groupedEventsByDate: [(date: Date, events: [GalleryHistoryEvent])] {
-        print("🎨 [GalleryView] groupedEventsByDate computed")
-        print("🎨 [GalleryView] filteredEvents.count = \(filteredEvents.count)")
-
         let calendar = Calendar.current
         let grouped = Dictionary(grouping: filteredEvents) { event in
             calendar.startOfDay(for: event.createdAt)
@@ -319,26 +316,12 @@ extension GalleryView {
         let result = grouped.map { (date: $0.key, events: $0.value.sorted { $0.createdAt > $1.createdAt }) }
             .sorted { $0.date > $1.date }
 
-        print("🎨 [GalleryView] groupedEventsByDate.count = \(result.count)")
-        print("🎨 [GalleryView] groupedEventsByDate.isEmpty = \(result.isEmpty)")
-
         return result
     }
     
     // Filter events based on selected filter
     // PHASE 4: Read from AppState (single source of truth) instead of ViewModel
     private var filteredEvents: [GalleryHistoryEvent] {
-        print("🎨 [GalleryView] filteredEvents computed")
-        print("🎨 [GalleryView] appState.galleryEvents.count = \(appState.galleryEvents.count)")
-        print("🎨 [GalleryView] selectedFilter = \(selectedFilter)")
-
-        if !appState.galleryEvents.isEmpty {
-            print("🎨 [GalleryView] Gallery events available:")
-            for event in appState.galleryEvents {
-                print("   - Event ID: \(event.id), Type: \(event.eventType), Created: \(event.createdAt)")
-            }
-        }
-
         switch selectedFilter {
         case .all:
             return appState.galleryEvents

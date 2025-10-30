@@ -53,7 +53,7 @@ import OSLog
 /// - Note: SMS delivery depends on profile confirmation and valid phone numbers
 /// - Warning: Task scheduling requires proper timezone handling for elderly users
 @MainActor
-final class TaskViewModel: ObservableObject {
+final class TaskViewModel: ObservableObject, AppStateViewModel {
     
     // MARK: - Task Management Properties
     
@@ -273,7 +273,7 @@ final class TaskViewModel: ObservableObject {
     /// PHASE 2: AppState reference for write consolidation
     /// - Injected after initialization by ContentView
     /// - Used to update centralized state instead of local @Published arrays
-    private weak var appState: AppState?
+    weak var appState: AppState?
 
     // MARK: - Internal Coordination Properties
     
@@ -522,7 +522,6 @@ final class TaskViewModel: ObservableObject {
     // ContentView calls appState.loadUserData() on authentication
     // Kept as empty method for backward compatibility during transition
     func loadTasks() {
-        print("⚠️ [TaskViewModel] loadTasks() called but is deprecated - AppState handles loading")
         // No-op: AppState.loadUserData() is called by ContentView instead
     }
     
@@ -598,23 +597,9 @@ final class TaskViewModel: ObservableObject {
     SMS reminders use simple, consistent language patterns that elderly users recognize.
     */
     private func createTaskAsync() async {
-        print("📝 Starting task creation...")
-        print("🔍 Validation check:")
-        print("   - taskTitle: '\(taskTitle)'")
-        print("   - taskTitle.isEmpty: \(!taskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)")
-        print("   - selectedProfile: \(selectedProfile?.id ?? "NIL")")
-        print("   - titleError: \(titleError ?? "nil")")
-        print("   - timeError: \(timeError ?? "nil")")
-        print("   - profileError: \(profileError ?? "nil")")
-        print("   - requiresPhoto: \(requiresPhoto)")
-        print("   - requiresText: \(requiresText)")
-        print("   - isValidForm: \(isValidForm)")
-
         guard isValidForm, let profile = selectedProfile else {
-            print("⚠️ Form validation failed or no profile selected")
             return
         }
-        print("✅ Form validated, profile selected: \(profile.name)")
 
         isLoading = true
         errorMessage = nil
@@ -623,26 +608,17 @@ final class TaskViewModel: ObservableObject {
         var createdTasks: [Task] = []
 
         do {
-            print("🔍 Checking authentication...")
-            print("🔍 Auth service type: \(type(of: authService))")
-            print("🔍 Current user: \(String(describing: authService.currentUser))")
-
             guard let userId = authService.currentUser?.uid else {
                 print("❌ No user ID - authentication failed")
                 throw TaskError.userNotAuthenticated
             }
-            print("✅ User authenticated with ID: \(userId)")
 
             // Protective limit: Max 10 tasks per elderly profile to prevent SMS overwhelming
             guard canCreateTask else {
-                print("❌ Max tasks reached for profile")
                 throw TaskError.maxTasksReached
             }
-            print("✅ Can create task (under limit)")
-            print("📋 Creating \(scheduledTimes.count) task(s) for scheduled times")
 
             for (index, scheduledTime) in scheduledTimes.enumerated() {
-                print("   Creating task \(index + 1)/\(scheduledTimes.count)...")
 
                 // Calculate the correct first occurrence based on frequency
                 guard let nextScheduledDate = calculateFirstOccurrence(
@@ -654,12 +630,8 @@ final class TaskViewModel: ObservableObject {
                     await MainActor.run {
                         self.errorMessage = "Cannot create task with a time in the past. Please select a future time."
                     }
-                    print("   ❌ Scheduled time is in the past for one-time task")
                     throw TaskError.invalidScheduleTime
                 }
-
-                print("   📅 Calculated nextScheduledDate: \(nextScheduledDate)")
-                print("   ⏰ Original scheduledTime: \(scheduledTime)")
 
                 let task = Task(
                     id: IDGenerator.habitID(),
@@ -681,46 +653,33 @@ final class TaskViewModel: ObservableObject {
                     lastModifiedAt: Date(),
                     nextScheduledDate: nextScheduledDate  // Use calculated date
                 )
-                print("   ✅ Task created: \(task.title)")
-                print("      - Frequency: \(frequency)")
-                print("      - Next occurrence: \(nextScheduledDate)")
 
-                print("   💾 Saving to database...")
                 // Persist with family synchronization
                 try await databaseService.createTask(task)
-                print("   ✅ Saved to database")
 
                 // Local notifications disabled - SMS handled by Cloud Function
-                // print("   📱 Scheduling notifications...")
                 // try await scheduleTaskNotifications(for: task)
-                // print("   ✅ Notifications scheduled")
 
                 createdTasks.append(task)
             }
 
             await MainActor.run {
-                print("🎉 Updating local state with \(createdTasks.count) new task(s)")
 
                 // PHASE 4: AppState is always available - update it directly
                 for task in createdTasks {
-                    appState?.addTask(task)
-                    print("✅ [TaskViewModel] Task added to AppState: \(task.title)")
+                    self.addTask(task)
                 }
 
                 self.resetForm()
                 self.showingCreateTask = false
-                print("✅ Task creation complete! Total tasks: \(self.tasks.count)")
             }
 
         } catch {
             print("❌ Error creating task: \(error)")
-            print("❌ Error type: \(type(of: error))")
-            print("❌ Error description: \(error.localizedDescription)")
             await MainActor.run {
                 // ROLLBACK: Remove optimistically added tasks from AppState
                 for task in createdTasks {
-                    appState?.deleteTask(task.id)
-                    print("🔄 [TaskViewModel] Rolled back task from AppState: \(task.title)")
+                    self.deleteTask(task.id, taskTitle: task.title)
                 }
 
                 // Show user-friendly error message
@@ -780,8 +739,7 @@ final class TaskViewModel: ObservableObject {
 
             // 1. OPTIMISTIC: Update AppState immediately
             await MainActor.run {
-                appState?.updateTask(updatedTask)
-                print("⚡ [TaskViewModel] Optimistic update: \(updatedTask.title)")
+                self.updateTask(updatedTask)
             }
 
             // 2. Try Firebase update
@@ -813,8 +771,7 @@ final class TaskViewModel: ObservableObject {
             // 3. ROLLBACK: Restore original task on failure
             await MainActor.run {
                 if let original = originalTask {
-                    appState?.updateTask(original)
-                    print("🔄 [TaskViewModel] Rolled back to original task state")
+                    self.updateTask(original)
                 }
 
                 self.errorMessage = "Failed to update task. Changes reverted."
@@ -844,8 +801,7 @@ final class TaskViewModel: ObservableObject {
 
             await MainActor.run {
                 // PHASE 4: AppState is always available - delete via AppState
-                appState?.deleteTask(task.id)
-                print("✅ [TaskViewModel] Task deleted from AppState: \(task.title)")
+                self.deleteTask(task.id, taskTitle: task.title)
             }
             
         } catch {
@@ -903,8 +859,7 @@ final class TaskViewModel: ObservableObject {
 
             await MainActor.run {
                 // PHASE 4: AppState is always available - update via AppState
-                appState?.updateTask(updatedTask)
-                print("✅ [TaskViewModel] Task status toggled in AppState: \(updatedTask.title)")
+                self.updateTask(updatedTask)
             }
             
         } catch {
@@ -947,8 +902,6 @@ final class TaskViewModel: ObservableObject {
     ///
     /// - Parameter task: The task whose notifications should be cancelled
     private func cancelTaskNotifications(for task: Task) async throws {
-        print("🗑️ [TaskViewModel] Cancelling notifications for task: \(task.title)")
-
         // Get next 30 scheduled occurrences (matches creation logic from line 885)
         let scheduledTimes = task.getNextScheduledTimes(count: 30)
 
@@ -958,10 +911,7 @@ final class TaskViewModel: ObservableObject {
             let notificationId = "\(task.id)_\(scheduledTime.timeIntervalSince1970)"
 
             await notificationService.cancelNotification(withId: notificationId)
-            print("   ✅ Cancelled notification: \(notificationId)")
         }
-
-        print("✅ [TaskViewModel] Cancelled \(scheduledTimes.count) notifications for task: \(task.title)")
     }
     
     // MARK: - Manual Task Completion
@@ -1024,8 +974,7 @@ final class TaskViewModel: ObservableObject {
 
             await MainActor.run {
                 // PHASE 4: AppState is always available - update via AppState
-                appState?.updateTask(updatedTask)
-                print("✅ [TaskViewModel] Task completion updated in AppState: \(updatedTask.title)")
+                self.updateTask(updatedTask)
             }
             
         } catch {
@@ -1034,8 +983,7 @@ final class TaskViewModel: ObservableObject {
                 // Note: Current implementation doesn't optimistically mark complete,
                 // but add this for future-proofing
                 if let originalTask = tasks.first(where: { $0.id == task.id }) {
-                    appState?.updateTask(originalTask)
-                    print("🔄 [TaskViewModel] Rolled back task completion")
+                    self.updateTask(originalTask)
                 }
 
                 self.errorMessage = "Failed to mark task as complete. Please try again."

@@ -276,6 +276,10 @@ struct CardStackView: View {
                             isSelected: false,
                             size: .custom(45)
                         )
+                    } else {
+                        Circle()
+                            .fill(Color.gray)
+                            .frame(width: 45, height: 45)
                     }
 
                     // Task name
@@ -388,6 +392,10 @@ struct CardStackView: View {
                             isSelected: false,
                             size: .custom(45)
                         )
+                    } else {
+                        Circle()
+                            .fill(Color.gray)
+                            .frame(width: 45, height: 45)
                     }
 
                     // Task name

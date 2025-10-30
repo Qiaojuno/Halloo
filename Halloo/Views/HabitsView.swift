@@ -94,18 +94,10 @@ struct HabitsView: View {
                 refreshID = UUID()
             }
             .id(refreshID) // Force refresh when refreshID changes
-            .fullScreenCover(isPresented: $showingDirectOnboarding) {
-                // Profile creation
-                SimplifiedProfileCreationView(onDismiss: {
-                    showingDirectOnboarding = false
-                })
-                .environmentObject(profileViewModel)
-                .environmentObject(appState)
-            }
             .overlay(
                 // NEW: Habit Creation Card (replaces full-screen TaskCreationView)
                 Group {
-                    if showingTaskCreation, let taskVM = taskViewModel {
+                    if let taskVM = taskViewModel {
                         HabitCreationCard(
                             isPresented: $showingTaskCreation,
                             preselectedProfileId: selectedProfile?.id,
@@ -118,6 +110,17 @@ struct HabitsView: View {
                         .environmentObject(taskVM)
                     }
                 }
+            )
+            .overlay(
+                // Profile Creation Card (replaces full-screen SimplifiedProfileCreationView)
+                ProfileCreationCard(
+                    isPresented: $showingDirectOnboarding,
+                    onDismiss: {
+                        showingDirectOnboarding = false
+                    }
+                )
+                .environmentObject(appState)
+                .environmentObject(profileViewModel)
             )
     }
     

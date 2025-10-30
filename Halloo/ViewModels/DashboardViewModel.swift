@@ -52,7 +52,7 @@ import OSLog
 /// - Note: Automatically refreshes every minute to ensure current care status visibility
 /// - Warning: Overdue task alerts require family intervention to prevent care gaps
 @MainActor
-final class DashboardViewModel: ObservableObject {
+final class DashboardViewModel: ObservableObject, AppStateViewModel {
     
     // MARK: - Dashboard State Properties
     
@@ -228,7 +228,7 @@ final class DashboardViewModel: ObservableObject {
     /// Dashboard reads profiles but does not manage them
     // PHASE 4: Migrating to AppState
     private weak var profileViewModel: ProfileViewModel?  // TODO Phase 5: Remove completely
-    private weak var appState: AppState?
+    weak var appState: AppState?
 
     /// Computed property to access profiles from ProfileViewModel
     private var profiles: [ElderlyProfile] {

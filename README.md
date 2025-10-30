@@ -217,6 +217,16 @@ See **[RECURRING-TASK-SYSTEM.md](Halloo/docs/RECURRING-TASK-SYSTEM.md)** for com
 | 90-Day Archival | ✅ Working |
 | Multi-Device Sync | ✅ Working |
 
+## 📝 Recent Updates
+
+### 2025-10-28: ViewModel Extensions Refactoring
+- Created ViewModelExtensions.swift with AppStateViewModel protocol
+- Eliminated 80+ lines of duplicate CRUD boilerplate code across ViewModels
+- Added automatic context tracking via #function macro
+- Implemented optimistic update pattern helper with automatic rollback
+- Reduced ViewModel code by 80% (80 lines → 16 lines of protocol conformance)
+- See [Technical Documentation](Halloo/docs/TECHNICAL-DOCUMENTATION.md#appstate-crud-protocol-extensions) for details
+
 ---
 
 ## 🐛 Known Issues
@@ -241,5 +251,5 @@ Proprietary - All rights reserved
 
 ---
 
-**Last Updated:** October 16, 2025
+**Last Updated:** October 28, 2025
 **Version:** MVP (Pre-launch)

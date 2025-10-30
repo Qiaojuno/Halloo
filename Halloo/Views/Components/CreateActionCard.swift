@@ -24,6 +24,12 @@ struct CreateActionCard: View {
     let onCreateHabit: () -> Void
     let onCreateProfile: () -> Void
 
+    @EnvironmentObject private var appState: AppState
+
+    private var hasReachedMaxProfiles: Bool {
+        appState.profiles.count >= 2
+    }
+
     var body: some View {
         ZStack {
             // Dimmed background overlay (tap to dismiss)
@@ -83,8 +89,10 @@ struct CreateActionCard: View {
                 CreateActionOption(
                     icon: "👴🏻",
                     title: "New Profile",
-                    description: "Add another profile you want to monitor"
+                    description: hasReachedMaxProfiles ? "Maximum 2 profiles reached" : "Add another profile you want to monitor",
+                    isDisabled: hasReachedMaxProfiles
                 ) {
+                    guard !hasReachedMaxProfiles else { return }
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         isPresented = false
                     }
@@ -113,10 +121,12 @@ struct CreateActionOption: View {
     let icon: String
     let title: String
     let description: String
+    var isDisabled: Bool = false
     let action: () -> Void
 
     var body: some View {
         Button(action: {
+            guard !isDisabled else { return }
             // Haptic feedback
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             action()
@@ -125,22 +135,23 @@ struct CreateActionOption: View {
                 // Icon circle
                 ZStack {
                     Circle()
-                        .fill(Color(hex: "B9E3FF"))
+                        .fill(isDisabled ? Color(hex: "E0E0E0") : Color(hex: "B9E3FF"))
                         .frame(width: 50, height: 50)
 
                     Text(icon)
                         .font(.system(size: 28))
+                        .opacity(isDisabled ? 0.4 : 1.0)
                 }
 
                 // Text content
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.black)
+                        .foregroundColor(isDisabled ? Color(hex: "B0B0B0") : .black)
 
                     Text(description)
                         .font(.system(size: 14, weight: .regular))
-                        .foregroundColor(Color(hex: "7A7A7A"))
+                        .foregroundColor(isDisabled ? Color(hex: "C0C0C0") : Color(hex: "7A7A7A"))
                 }
 
                 Spacer()
@@ -150,6 +161,7 @@ struct CreateActionOption: View {
             .contentShape(Rectangle()) // Make entire row tappable
         }
         .buttonStyle(PlainButtonStyle())
+        .disabled(isDisabled)
     }
 }
 
@@ -164,5 +176,11 @@ struct CreateActionOption: View {
             onCreateHabit: { print("Create Habit") },
             onCreateProfile: { print("Create Profile") }
         )
+        .environmentObject(AppState(
+            authService: Container.shared.resolve(AuthenticationServiceProtocol.self),
+            databaseService: Container.shared.resolve(DatabaseServiceProtocol.self),
+            dataSyncCoordinator: Container.shared.resolve(DataSyncCoordinator.self),
+            imageCache: Container.shared.resolve(ImageCacheService.self)
+        ))
     }
 }

@@ -289,18 +289,14 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     init(
         databaseService: DatabaseServiceProtocol
     ) {
-        print("🔵 [DataSyncCoordinator] init() START")
         self.databaseService = databaseService
-        print("🔵 [DataSyncCoordinator] databaseService assigned")
 
         // NOTE: All setup moved to initialize() to avoid blocking app startup
         // setupAutoSync() will be called from initialize() after app launches
         // setupNotificationHandling() will be called from initialize() after app launches
 
         // Restore previous family coordination state (safe to do in init)
-        print("🔵 [DataSyncCoordinator] calling loadLastSyncDate()")
         loadLastSyncDate()
-        print("🔵 [DataSyncCoordinator] init() COMPLETE")
     }
     
     deinit {
@@ -378,8 +374,6 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
     ///
     /// - Parameter userId: Family user ID to observe data for
     func setupFirebaseListeners(userId: String) {
-        print("🔥 [DataSyncCoordinator] Setting up Firebase real-time listeners for user: \(userId)")
-
         // 1. Connect Task Updates Listener
         // Observes all habits across user's profiles via collection group query
         databaseService.observeUserTasks(userId)
@@ -387,15 +381,13 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
                 receiveCompletion: { completion in
                     switch completion {
                     case .finished:
-                        print("✅ [DataSyncCoordinator] Task listener completed")
+                        break
                     case .failure(let error):
                         print("❌ [DataSyncCoordinator] Task listener error: \(error.localizedDescription)")
                         // Note: Listener will auto-reconnect on network recovery
                     }
                 },
                 receiveValue: { [weak self] tasks in
-                    print("🔄 [DataSyncCoordinator] Received \(tasks.count) tasks from Firestore")
-
                     // Broadcast each task to AppState via publishers
                     // This triggers AppState.handleTaskUpdate() on all devices
                     tasks.forEach { task in
@@ -412,14 +404,12 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
                 receiveCompletion: { completion in
                     switch completion {
                     case .finished:
-                        print("✅ [DataSyncCoordinator] Profile listener completed")
+                        break
                     case .failure(let error):
                         print("❌ [DataSyncCoordinator] Profile listener error: \(error.localizedDescription)")
                     }
                 },
                 receiveValue: { [weak self] profiles in
-                    print("🔄 [DataSyncCoordinator] Received \(profiles.count) profiles from Firestore")
-
                     // Broadcast each profile to AppState
                     profiles.forEach { profile in
                         self?.profileUpdatesSubject.send(profile)
@@ -430,32 +420,25 @@ final class DataSyncCoordinator: ObservableObject, @unchecked Sendable {
 
         // 3. Connect Gallery Events Listener
         // Observes gallery_events collection for real-time updates from Twilio webhook
-        print("🔵 [DataSyncCoordinator] Setting up gallery events listener for user: \(userId)")
         databaseService.observeUserGalleryEvents(userId)
             .sink(
                 receiveCompletion: { completion in
                     switch completion {
                     case .finished:
-                        print("✅ [DataSyncCoordinator] Gallery events listener completed")
+                        break
                     case .failure(let error):
                         print("❌ [DataSyncCoordinator] Gallery events listener error: \(error.localizedDescription)")
                     }
                 },
                 receiveValue: { [weak self] events in
-                    print("🔄 [DataSyncCoordinator] Received \(events.count) gallery events from Firestore")
-                    print("🔵 [DataSyncCoordinator] Gallery event IDs: \(events.map { $0.id })")
-
                     // Broadcast each event to AppState via publisher
                     // This triggers AppState.handleGalleryEventUpdate() on all devices
                     events.forEach { event in
-                        print("🔵 [DataSyncCoordinator] Broadcasting gallery event: \(event.id)")
                         self?.galleryEventUpdatesSubject.send(event)
                     }
                 }
             )
             .store(in: &cancellables)
-
-        print("✅ [DataSyncCoordinator] Firebase listeners connected successfully")
     }
     
     /// Saves any unsaved changes before backgrounding

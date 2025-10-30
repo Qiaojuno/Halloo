@@ -1,5 +1,5 @@
 # Halloo iOS App - Project Structure & Status
-# Last Updated: 2025-10-21
+# Last Updated: 2025-10-28
 # Status: ✅ **BUILD SUCCESSFUL** - Performance Optimizations Complete
 
 ## 🚨 CURRENT BUILD STATUS
@@ -38,13 +38,14 @@ xcodebuild -scheme Halloo \
 📁 Halloo/
 ├── 📄 Info.plist
 ├── 📄 GoogleService-Info.plist
-├── 📁 Core/ (6 files)
+├── 📁 Core/ (7 files)
 │   ├── 📄 App.swift ✅ Main app entry point
 │   ├── 📄 AppState.swift ✅ Single source of truth for all app state (Phase 4)
 │   ├── 📄 AppFonts.swift ✅ Custom font system (Poppins/Inter)
 │   ├── 📄 DataSyncCoordinator.swift ✅ Real-time multi-device sync (updated Phase 2)
 │   ├── 📄 IDGenerator.swift ✅ Unique ID generation utilities
-│   └── 📄 String+Extensions.swift ✅ String utility methods (E.164 phone format)
+│   ├── 📄 String+Extensions.swift ✅ String utility methods (E.164 phone format)
+│   └── 📄 ViewModelExtensions.swift ✅ AppState CRUD protocol extensions - Eliminates 80+ lines of duplicate code
 │
 │   ❌ DELETED (Phase 1 - MVP Simplification):
 │   ├── 📄 ErrorCoordinator.swift ❌ REMOVED - Simple @Published errorMessage instead
@@ -408,7 +409,43 @@ TabView (3 tabs)
 - Device testing for accessibility
 - Multi-device sync testing
 
-## RECENT CRITICAL CHANGES (2025-10-21)
+## RECENT CRITICAL CHANGES (2025-10-28)
+
+### ✅ VIEWMODEL EXTENSIONS - APPSTATE CRUD PROTOCOL (2025-10-28)
+
+**Changes:**
+1. **ViewModelExtensions.swift created** (155 lines)
+   - AppStateViewModel protocol with automatic logging
+   - Profile operations: addProfile(), updateProfile(), deleteProfile()
+   - Task operations: addTask(), updateTask(), deleteTask()
+   - Optimistic update pattern helper with automatic rollback
+   - All methods use @MainActor and automatic context tracking via #function
+
+2. **ViewModel property visibility changes**
+   - ProfileViewModel.swift:221 - Changed `private weak var appState` to `weak var appState`
+   - TaskViewModel.swift:276 - Changed `private weak var appState` to `weak var appState`
+   - DashboardViewModel.swift:231 - Changed `private weak var appState` to `weak var appState`
+   - Reason: Swift protocol conformance requires internal visibility
+
+3. **Protocol adoption**
+   - ProfileViewModel, TaskViewModel, and DashboardViewModel now conform to AppStateViewModel
+   - Replaced direct appState calls with protocol extension methods
+   - Automatic logging for all CRUD operations
+
+**Code Reduction:**
+- **Before:** 80+ lines of duplicate `appState?.addX()` calls with manual logging
+- **After:** 16 lines of protocol conformance declarations
+- **Result:** 80% reduction in boilerplate code across ViewModels
+
+**Files Modified:**
+- Core/ViewModelExtensions.swift (NEW - 155 lines)
+- ViewModels/ProfileViewModel.swift (visibility change on line 221)
+- ViewModels/TaskViewModel.swift (visibility change on line 276)
+- ViewModels/DashboardViewModel.swift (visibility change on line 231)
+
+---
+
+## PREVIOUS CRITICAL CHANGES (2025-10-21)
 
 ### ✅ IMAGE CACHING SYSTEM IMPLEMENTED
 

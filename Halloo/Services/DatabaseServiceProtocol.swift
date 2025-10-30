@@ -446,6 +446,16 @@ protocol DatabaseServiceProtocol {
     /// - Throws: DatabaseError if photo deletion fails
     func deletePhoto(at url: String) async throws
 
+    /// Retrieves download URL for profile photo if it exists in Storage
+    ///
+    /// Checks if a profile photo file exists in Firebase Storage and returns
+    /// the download URL. Useful for restoring missing photoURL references.
+    ///
+    /// - Parameter profileId: Unique identifier for the elderly profile
+    /// - Returns: Download URL if photo exists, nil otherwise
+    /// - Throws: DatabaseError if storage access fails
+    func getProfilePhotoURL(for profileId: String) async throws -> String?
+
     // MARK: - Analytics and Reporting
     func getTaskCompletionStats(for userId: String, from startDate: Date, to endDate: Date) async throws -> TaskCompletionStats
     func getProfileAnalytics(for profileId: String, userId: String) async throws -> ProfileAnalytics

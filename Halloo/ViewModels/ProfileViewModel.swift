@@ -53,7 +53,7 @@ import OSLog
 /// - Note: Maximum 4 profiles per family user to prevent SMS overwhelming
 /// - Warning: Phone number changes require re-confirmation via new SMS
 @MainActor
-final class ProfileViewModel: ObservableObject {
+final class ProfileViewModel: ObservableObject, AppStateViewModel {
     
     // MARK: - Profile Management Properties
     
@@ -218,7 +218,7 @@ final class ProfileViewModel: ObservableObject {
     /// PHASE 2: AppState reference for write consolidation
     /// - Injected after initialization by ContentView
     /// - Used to update centralized state instead of local @Published arrays
-    private weak var appState: AppState?
+    weak var appState: AppState?
 
     /// Tracks which profiles have had gallery events created to prevent duplicates
     /// - Key: profileId
@@ -349,22 +349,13 @@ final class ProfileViewModel: ObservableObject {
         self.dataSyncCoordinator = dataSyncCoordinator
 
         // Configure elderly-appropriate validation
-        print("🔵 Calling setupValidation()...")
         setupValidation()
-        print("🔵 setupValidation() complete")
 
         // Enable real-time family and SMS synchronization
-        print("🔵 Calling setupDataSync()...")
         setupDataSync()
-        print("🔵 setupDataSync() complete")
-
-        print("ℹ️ [VmInit] ProfileViewModel init complete - loadProfiles() will be called after initialization - authStatus: \(authService.isAuthenticated), userId: \(authService.currentUser?.uid ?? "nil")")
 
         // NOTE: loadProfiles() is called explicitly in ContentView after ViewModel creation
         // to avoid crashes from async work during init
-
-        print("✅ [VmInit] ProfileViewModel.init exit")
-        print("🔵 ProfileViewModel.init COMPLETE")
     }
     
     /// Convenience initializer for Canvas previews that skips automatic data loading
@@ -462,10 +453,6 @@ final class ProfileViewModel: ObservableObject {
     }
     
     private func setupDataSync() {
-        print("🔍 [ProfileViewModel] Setting up DataSync subscriptions...")
-        print("🔍 [ProfileViewModel] DataSyncCoordinator instance: \(ObjectIdentifier(dataSyncCoordinator))")
-        print("🔍 [ProfileViewModel] Current thread: \(Thread.current)")
-
         // Listen for profile updates from other family members
         let profileUpdatesCancellable = dataSyncCoordinator.profileUpdates
             .receive(on: DispatchQueue.main)
@@ -474,39 +461,25 @@ final class ProfileViewModel: ObservableObject {
                 self?.handleProfileUpdate(updatedProfile)
             }
         cancellables.insert(profileUpdatesCancellable)
-        print("✅ [ProfileViewModel] Profile updates subscription stored")
 
         // Listen for SMS confirmation responses
-        print("🔍 [ProfileViewModel] About to access smsResponses publisher...")
         let smsPublisher = dataSyncCoordinator.smsResponses
-        print("✅ [ProfileViewModel] Got smsResponses publisher, setting up pipeline...")
 
         let smsCancellable = smsPublisher
-            .handleEvents(receiveOutput: { response in
-                print("🔥 [ProfileViewModel] RAW SMS EVENT RECEIVED (before compactMap) - Thread: \(Thread.current)")
-                print("   - Profile ID: \(response.profileId ?? "nil")")
-                print("   - Is Confirmation: \(response.isConfirmationResponse)")
-                print("   - Text: \(response.textResponse ?? "nil")")
-            })
             .compactMap { (response: SMSResponse) -> SMSResponse? in
-                print("📩 [ProfileViewModel] In compactMap - isConfirmation: \(response.isConfirmationResponse)")
                 // Filter for confirmation responses
                 guard response.isConfirmationResponse else {
-                    print("⚠️ [ProfileViewModel] Filtered out - not a confirmation response")
                     return nil
                 }
-                print("✅ [ProfileViewModel] Passed filter - returning response")
                 return response
             }
             .sink { [weak self] (response: SMSResponse) in
-                print("🎯 [ProfileViewModel] IN SINK - Processing confirmation response for profile: \(response.profileId ?? "unknown")")
                 // Ensure UI updates happen on main thread
                 DispatchQueue.main.async {
                     self?.handleConfirmationResponse(response)
                 }
             }
         cancellables.insert(smsCancellable)
-        print("✅ [ProfileViewModel] SMS responses subscription stored")
 
         // Listen for gallery event updates to keep the duplicate prevention Set in sync
         let galleryCancellable = dataSyncCoordinator.galleryEventUpdates
@@ -519,16 +492,12 @@ final class ProfileViewModel: ObservableObject {
                 }
             }
         cancellables.insert(galleryCancellable)
-        print("✅ [ProfileViewModel] Gallery event updates subscription stored")
-
-        print("✅ [ProfileViewModel] DataSync subscriptions established - total cancellables: \(cancellables.count)")
     }
     
     // PHASE 4: loadProfiles() is now a no-op - AppState.loadUserData() handles all data loading
     // ContentView calls appState.loadUserData() on authentication
     // Kept as empty method for backward compatibility during transition
     func loadProfiles() {
-        print("⚠️ [ProfileViewModel] loadProfiles() called but is deprecated - AppState handles loading")
         // No-op: AppState.loadUserData() is called by ContentView instead
     }
     
@@ -586,28 +555,8 @@ final class ProfileViewModel: ObservableObject {
     profile creation attempts.
     */
     func createProfileAsync() async {
-        print("🔵 [AsyncTask] Create profile - thread: \(Thread.current)")
-
-        // ✅ DIAGNOSTIC: Check validation state
-        print("🔍 ==================== PROFILE CREATION DEBUG ====================")
-        print("🔍 profileName: '\(profileName)'")
-        print("🔍 phoneNumber: '\(phoneNumber)'")
-        print("🔍 relationship: '\(relationship)'")
-        print("🔍 timeZone: \(timeZone.identifier)")
-        print("🔍 isEmergencyContact: \(isEmergencyContact)")
-        print("🔍 notes: '\(notes)'")
-        print("🔍 hasSelectedPhoto: \(hasSelectedPhoto)")
-        print("🔍 selectedPhotoData: \(selectedPhotoData?.count ?? 0) bytes")
-        print("🔍 nameError: \(String(describing: nameError))")
-        print("🔍 phoneError: \(String(describing: phoneError))")
-        print("🔍 relationshipError: \(String(describing: relationshipError))")
-        print("🔍 isValidForm: \(isValidForm)")
-        print("🔍 missingRequirements: \(missingRequirements)")
-        print("🔍 ================================================================")
-
         guard isValidForm else {
             print("❌ VALIDATION FAILED - Exiting createProfileAsync")
-            print("⚠️ [AsyncTask] Profile form validation failed - profileName: \(profileName), phoneNumber: \(phoneNumber), relationship: \(relationship), hasSelectedPhoto: \(hasSelectedPhoto), missingRequirements: \(missingRequirements.joined(separator: ", "))")
 
             // Show error to user
             await MainActor.run {
@@ -617,26 +566,19 @@ final class ProfileViewModel: ObservableObject {
             return
         }
 
-        print("✅ VALIDATION PASSED - Proceeding with profile creation")
-
         await MainActor.run {
             self.isLoading = true
             self.errorMessage = nil
         }
 
         do {
-            print("ℹ️ [AsyncTask] Checking authentication - authServiceType: \(String(describing: type(of: authService))), isAuthenticated: \(authService.isAuthenticated), hasCurrentUser: \(authService.currentUser != nil)")
-
             guard let userId = authService.currentUser?.uid else {
                 print("❌ [AsyncTask] Authentication check failed - no user ID")
                 throw ProfileError.userNotAuthenticated
             }
 
-            print("✅ [AsyncTask] User authenticated - userId: \(userId)")
-
             // Protective limit: Max 4 profiles per family to prevent SMS overwhelming
             guard canCreateProfile else {
-                print("⚠️ [AsyncTask] Max profiles limit reached - currentCount: \(profiles.count), maxProfiles: \(maxProfiles)")
                 throw ProfileError.maxProfilesReached
             }
 
@@ -646,26 +588,14 @@ final class ProfileViewModel: ObservableObject {
 
             // Upload profile photo if provided
             var photoURLString: String? = nil
-            print("📸 Checking for photo upload - selectedPhotoData: \(selectedPhotoData?.count ?? 0) bytes")
             if let photoData = selectedPhotoData {
-                print("📸 ✅ Photo data exists, starting upload...")
-                print("ℹ️ [AsyncTask] Uploading profile photo - profileId: \(profileId), photoSize: \(photoData.count)")
-
                 do {
-                    print("📸 Calling databaseService.uploadProfilePhoto()...")
                     photoURLString = try await databaseService.uploadProfilePhoto(photoData, for: profileId)
-                    print("📸 ✅ Photo upload SUCCESS - URL: \(photoURLString ?? "nil")")
-                    print("✅ [AsyncTask] Profile photo uploaded - profileId: \(profileId), photoURL: \(photoURLString ?? "nil")")
                 } catch {
-                    print("📸 ❌ Photo upload FAILED - error: \(error.localizedDescription)")
                     print("❌ [AsyncTask] Failed to upload profile photo - profileId: \(profileId), error: \(error.localizedDescription)")
                     // Continue without photo - it will fall back to initial letter
                 }
-            } else {
-                print("📸 ❌ No photo data to upload (selectedPhotoData is nil)")
             }
-
-            print("ℹ️ [AsyncTask] Creating profile object - name: \(profileName), phone: \(e164Phone), relationship: \(relationship), hasPhoto: \(photoURLString != nil)")
 
             // Create profile with elderly-optimized defaults
             let profile = ElderlyProfile(
@@ -683,36 +613,26 @@ final class ProfileViewModel: ObservableObject {
                 lastActiveAt: Date()
             )
 
-            print("ℹ️ [Database] Saving profile to database - profileId: \(profile.id), userId: \(userId)")
-
             // Persist with family synchronization
-            print("🔵 [Database] Create elderly profile - profileId: \(profile.id)")
-
             do {
                 try await databaseService.createElderlyProfile(profile)
-                print("✅ [Database] Profile saved successfully - profileId: \(profile.id)")
             } catch {
                 print("❌ [Database] Failed to save profile - profileId: \(profile.id), error: \(error.localizedDescription)")
                 throw error
             }
 
-            print("ℹ️ [AsyncTask] Broadcasting profile update")
             // Broadcast profile creation to Dashboard and other family members
             dataSyncCoordinator.broadcastProfileUpdate(profile)
-            print("✅ [AsyncTask] Profile update broadcasted")
 
-            print("ℹ️ [AsyncTask] Sending confirmation SMS")
             // Send SMS confirmation immediately (critical step)
             do {
                 try await sendConfirmationSMS(for: profile)
-                print("✅ [AsyncTask] SMS sent successfully - profileId: \(profile.id), phoneNumber: \(profile.phoneNumber)")
             } catch {
                 print("❌ [AsyncTask] Failed to send SMS - profileId: \(profile.id), phoneNumber: \(profile.phoneNumber), error: \(error.localizedDescription)")
                 // Don't throw - profile created, SMS failure is recoverable
             }
 
             await MainActor.run {
-                print("ℹ️ [UiUpdate] Updating local state - oldProfileCount: \(self.profiles.count), thread: \(Thread.current)")
 
                 // PHASE 2: Update AppState instead of local array
                 // AppState will broadcast via DataSyncCoordinator automatically
@@ -728,11 +648,7 @@ final class ProfileViewModel: ObservableObject {
                 self.confirmationStatus[profile.id] = .sent
                 self.resetForm()
                 self.showingCreateProfile = false
-
-                print("✅ [UiUpdate] Profile creation complete - newProfileId: \(profile.id)")
             }
-
-            print("✅ [AsyncTask] Profile creation successful - profileId: \(profile.id), totalProfiles: \(profiles.count)")
 
         } catch {
             print("❌ [AsyncTask] Profile creation failed - errorType: \(String(describing: type(of: error))), error: \(error.localizedDescription)")
@@ -741,14 +657,11 @@ final class ProfileViewModel: ObservableObject {
                 // Provide family-friendly error context
                 self.errorMessage = error.localizedDescription
                 logger.error("Creating elderly family member profile failed: \(error.localizedDescription)")
-
-                print("ℹ️ [UiUpdate] Error message displayed to user - message: \(error.localizedDescription)")
             }
         }
 
         await MainActor.run {
             self.isLoading = false
-            print("ℹ️ [UiUpdate] Loading state cleared")
         }
     }
     
@@ -784,6 +697,7 @@ final class ProfileViewModel: ObservableObject {
                 isEmergencyContact: isEmergencyContact,
                 timeZone: timeZone.identifier,
                 notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+                photoURL: profile.photoURL,
                 status: phoneChanged ? .pendingConfirmation : profile.status,
                 createdAt: profile.createdAt,
                 lastActiveAt: Date(),
@@ -805,8 +719,7 @@ final class ProfileViewModel: ObservableObject {
             
             await MainActor.run {
                 // PHASE 4: AppState is always available - update directly
-                appState?.updateProfile(updatedProfile)
-                print("✅ [ProfileViewModel] Profile updated in AppState: \(updatedProfile.name)")
+                self.updateProfile(updatedProfile)
 
                 self.resetForm()
                 self.showingEditProfile = false
@@ -838,8 +751,7 @@ final class ProfileViewModel: ObservableObject {
             print("🎬 [ProfileViewModel] Optimistic delete - removing '\(profile.name)' from UI immediately")
 
             // PHASE 4: AppState is always available - delete directly
-            appState?.deleteProfile(profile.id)
-            print("✅ [ProfileViewModel] Profile deleted from AppState: \(profile.name)")
+            self.deleteProfile(profile.id, profileName: profile.name)
 
             self.confirmationStatus.removeValue(forKey: profile.id)
             self.confirmationMessages.removeValue(forKey: profile.id)
@@ -857,8 +769,7 @@ final class ProfileViewModel: ObservableObject {
                 print("❌ [ProfileViewModel] Deletion failed - restoring '\(profile.name)' to UI")
 
                 // PHASE 4: AppState is always available - restore directly
-                appState?.addProfile(profile)  // Re-add the profile
-                print("✅ [ProfileViewModel] Profile restored to AppState after delete failure")
+                self.addProfile(profile)  // Re-add the profile
 
                 self.errorMessage = "Failed to delete profile: \(error.localizedDescription)"
                 logger.error("Deleting profile failed: \(error.localizedDescription)")
@@ -884,6 +795,7 @@ final class ProfileViewModel: ObservableObject {
             isEmergencyContact: profile.isEmergencyContact,
             timeZone: profile.timeZone,
             notes: profile.notes,
+            photoURL: profile.photoURL,
             status: newStatus,
             createdAt: profile.createdAt,
             lastActiveAt: Date(),
@@ -898,8 +810,7 @@ final class ProfileViewModel: ObservableObject {
             
             await MainActor.run {
                 // PHASE 4: AppState is always available - update directly
-                appState?.updateProfile(updatedProfile)
-                print("✅ [ProfileViewModel] Profile status toggled in AppState: \(updatedProfile.name)")
+                self.updateProfile(updatedProfile)
             }
             
         } catch {
@@ -909,7 +820,108 @@ final class ProfileViewModel: ObservableObject {
             }
         }
     }
-    
+
+    /// Restores missing photoURL references for profiles that have photos in Storage
+    ///
+    /// This utility function checks all profiles for missing photoURL fields and attempts
+    /// to restore them by checking if the photo file exists in Firebase Storage.
+    /// Useful for recovering from bugs where photoURL was accidentally cleared.
+    func restoreMissingProfilePhotos() async {
+        guard let userId = authService.currentUser?.uid else {
+            print("⚠️ [ProfileViewModel] Cannot restore photos - no authenticated user")
+            return
+        }
+
+        for profile in profiles {
+            // Skip if profile already has a photoURL
+            if profile.photoURL != nil && !profile.photoURL!.isEmpty {
+                continue
+            }
+
+            // Check if photo exists in Storage
+            if let photoURL = try? await databaseService.getProfilePhotoURL(for: profile.id) {
+                print("✅ [ProfileViewModel] Restored photoURL for '\(profile.name)'")
+
+                // Create updated profile with restored photoURL
+                var updatedProfile = profile
+                updatedProfile.photoURL = photoURL
+
+                // Update in Firestore
+                do {
+                    try await databaseService.updateElderlyProfile(updatedProfile)
+
+                    // Update in AppState
+                    await MainActor.run {
+                        self.updateProfile(updatedProfile)
+                    }
+                } catch {
+                    print("❌ [ProfileViewModel] Failed to restore photoURL for '\(profile.name)': \(error.localizedDescription)")
+                }
+            }
+        }
+
+        print("✅ [ProfileViewModel] Photo restoration check complete")
+    }
+
+    /// Refreshes expired or invalid photo URLs for profiles
+    ///
+    /// This function regenerates download URLs with fresh tokens for profiles that have
+    /// photos in Firebase Storage but the URL may have expired or become invalid.
+    /// Call this when AsyncImage fails to load a profile photo despite having a photoURL.
+    func refreshProfilePhotoURLs() async {
+        guard let userId = authService.currentUser?.uid else {
+            print("⚠️ [ProfileViewModel] Cannot refresh photos - no authenticated user")
+            return
+        }
+
+        for profile in profiles {
+            // Only refresh if profile has a photoURL (skip profiles without photos)
+            guard profile.photoURL != nil && !profile.photoURL!.isEmpty else {
+                continue
+            }
+
+            // Get fresh download URL from Storage
+            if let freshPhotoURL = try? await databaseService.getProfilePhotoURL(for: profile.id) {
+                // Only update if URL changed
+                if freshPhotoURL != profile.photoURL {
+                    print("🔄 [ProfileViewModel] Refreshing photoURL for '\(profile.name)'")
+                    print("   Old URL token: \(profile.photoURL?.split(separator: "=").last ?? "none")")
+                    print("   New URL token: \(freshPhotoURL.split(separator: "=").last ?? "none")")
+
+                    // CRITICAL: Remove old cached image before updating
+                    // This ensures the UI will use the new URL instead of stale cache
+                    await MainActor.run {
+                        self.appState?.imageCache.removeCachedImage(for: profile.photoURL)
+                    }
+
+                    // Create updated profile with fresh photoURL
+                    var updatedProfile = profile
+                    updatedProfile.photoURL = freshPhotoURL
+
+                    // Update in Firestore
+                    do {
+                        try await databaseService.updateElderlyProfile(updatedProfile)
+
+                        // Update in AppState and trigger UI refresh
+                        await MainActor.run {
+                            self.updateProfile(updatedProfile)
+                        }
+
+                        // CRITICAL: Pre-load the fresh image into cache
+                        // This ensures ProfileImageView immediately shows the updated photo
+                        await self.appState?.imageCache.preloadProfileImages([updatedProfile])
+
+                        print("✅ [ProfileViewModel] Refreshed photoURL for '\(profile.name)'")
+                    } catch {
+                        print("❌ [ProfileViewModel] Failed to refresh photoURL for '\(profile.name)': \(error.localizedDescription)")
+                    }
+                }
+            }
+        }
+
+        print("✅ [ProfileViewModel] Photo URL refresh check complete")
+    }
+
     // MARK: - SMS Confirmation Management
     
     /// Resends SMS confirmation to elderly family member when needed
@@ -1035,23 +1047,11 @@ final class ProfileViewModel: ObservableObject {
     No further SMS reminders will be sent to elderly users who decline.
     */
     private func handleConfirmationResponse(_ response: SMSResponse) {
-        print("🎯 [ProfileViewModel] handleConfirmationResponse called")
-        print("   - Profile ID: \(response.profileId ?? "nil")")
-        print("   - Is Positive: \(response.isPositiveConfirmation)")
-        print("   - Text: \(response.textResponse ?? "no text")")
-
         guard let profileId = response.profileId else {
-            print("⚠️ [ProfileViewModel] No profile ID in response - skipping")
             return
         }
 
-        print("🔍 [ProfileViewModel] Current profiles count: \(profiles.count)")
-        for (index, profile) in profiles.enumerated() {
-            print("   Profile \(index): \(profile.id) - status: \(profile.status)")
-        }
-
         if response.isPositiveConfirmation {
-            print("✅ [ProfileViewModel] Processing POSITIVE confirmation")
             // ONBOARDING FLOW: Check if this response is for current onboarding profile
             if let onboardingProfile = onboardingProfile,
                onboardingProfile.id == profileId,
@@ -1068,8 +1068,7 @@ final class ProfileViewModel: ObservableObject {
                         
                         await MainActor.run {
                             // PHASE 4: Add to AppState (single source of truth)
-                            appState?.addProfile(confirmedProfile)
-                            print("✅ [ProfileViewModel] Confirmed profile added to AppState: \(confirmedProfile.name)")
+                            self.addProfile(confirmedProfile)
 
                             self.confirmationStatus[profileId] = .confirmed
                             self.confirmationMessages[profileId] = "Confirmed! Ready to receive reminders."
@@ -1096,32 +1095,24 @@ final class ProfileViewModel: ObservableObject {
                 // NOTE: profileId from webhook is actually the phone number (fromPhone)
                 // So we need to match by phoneNumber, not by document ID
                 if let index = profiles.firstIndex(where: { $0.phoneNumber == profileId }) {
-                    print("✅ [ProfileViewModel] Found existing profile at index \(index) with phone: \(profileId)")
                     var updatedProfile = profiles[index]
                     updatedProfile.status = .confirmed
                     updatedProfile.confirmedAt = response.receivedAt
 
                     // PHASE 4: Update via AppState (single source of truth)
-                    appState?.updateProfile(updatedProfile)
-                    print("✅ [ProfileViewModel] Profile confirmed and updated in AppState: \(updatedProfile.name)")
+                    self.updateProfile(updatedProfile)
 
                     confirmationStatus[updatedProfile.id] = .confirmed
                     confirmationMessages[updatedProfile.id] = "Confirmed! Ready to receive reminders."
-                    
+
                     // Create gallery history event for profile creation
                     createGalleryEventForProfile(updatedProfile, profileSlot: index)
-                    
+
                     // Persist confirmation status for family synchronization
                     _Concurrency.Task {
                         try? await databaseService.updateElderlyProfile(updatedProfile)
                         // Broadcast profile status update to Dashboard and family members
                         self.dataSyncCoordinator.broadcastProfileUpdate(updatedProfile)
-                    }
-                } else {
-                    print("⚠️ [ProfileViewModel] No profile found with phone number: \(profileId)")
-                    print("   Current profiles:")
-                    for profile in profiles {
-                        print("   - \(profile.name): \(profile.phoneNumber) (status: \(profile.status))")
                     }
                 }
             }
@@ -1185,8 +1176,7 @@ final class ProfileViewModel: ObservableObject {
         updatedProfile.optOutOfSMS(method: "STOP_KEYWORD")
 
         // PHASE 4: Update via AppState (optimistic UI)
-        appState?.updateProfile(updatedProfile)
-        print("✅ [ProfileViewModel] Profile opted out via STOP in AppState: \(updatedProfile.name)")
+        self.updateProfile(updatedProfile)
         confirmationStatus[profileId] = .declined
         confirmationMessages[profileId] = "⚠️ Opted out via STOP keyword. No SMS will be sent."
 

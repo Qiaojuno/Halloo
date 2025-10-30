@@ -32,11 +32,17 @@ struct HabitCreationCard: View {
     // Form state
     @State private var selectedProfileId: String?
     @State private var habitName: String = ""
+    @State private var selectedEmoji: String = "😊" // Default emoji
     @State private var selectedDays: Set<Int> = []
     @State private var selectedTimes: [Date] = []
     @State private var confirmationMethod: String = "" // "photo" or "text"
     @State private var showingTimePicker: Bool = false
     @State private var tempSelectedTime = Date()
+    @State private var isCreating = false // Loading state
+    @State private var showingEmojiPicker = false // Emoji picker state
+
+    // Emoji options for habit
+    private let emojiOptions = ["😊", "💊", "🏃", "📚", "💪", "🧘", "🥗", "💧", "🛏️", "🧠", "❤️", "🎯", "✨", "🌟", "🔥"]
 
     @FocusState private var isTextFieldFocused: Bool
 
@@ -49,6 +55,11 @@ struct HabitCreationCard: View {
                     .onTapGesture {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             isPresented = false
+                        }
+
+                        // Reset form and call dismiss callback after animation
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            resetForm()
                             onDismiss()
                         }
                     }
@@ -74,6 +85,13 @@ struct HabitCreationCard: View {
                 isPresented: $showingTimePicker
             )
         }
+        .sheet(isPresented: $showingEmojiPicker) {
+            EmojiPickerSheet(
+                selectedEmoji: $selectedEmoji,
+                emojiOptions: emojiOptions,
+                isPresented: $showingEmojiPicker
+            )
+        }
         .onAppear {
             // Set preselected profile if provided
             if let profileId = preselectedProfileId {
@@ -86,10 +104,29 @@ struct HabitCreationCard: View {
         VStack(spacing: 0) {
             Spacer()
 
-            // White card with scrollable content + button inside
+            // Card with scrollable content + button inside
             VStack(spacing: 0) {
+                // Off-white title tab at top (rounded only on top corners)
+                ZStack {
+                    // Top corners only rounded
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 20,
+                        bottomLeadingRadius: 0,
+                        bottomTrailingRadius: 0,
+                        topTrailingRadius: 20
+                    )
+                    .fill(Color(hex: "f9f9f9"))
+                    .frame(height: 50)
+
+                    Text("New Habit")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.black)
+                }
+                .frame(height: 50)
+                .zIndex(1)
+
                 ScrollView {
-                    VStack(spacing: 28) {
+                    VStack(spacing: 24) { // Clean spacing between sections
                         // Profile Selector
                         profileSelectorSection
 
@@ -108,143 +145,236 @@ struct HabitCreationCard: View {
                         // Button inside card (scrollable)
                         if !isTextFieldFocused {
                             createButtonInside
-                                .padding(.top, 8)
+                                .padding(.top, 4)
                         }
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 24)
+                    .padding(.horizontal, 24) // Match CreateActionCard's internal padding
+                    .padding(.top, 20)
+                    .padding(.bottom, 16)
+                }
+                .frame(maxHeight: 500)
+                .background(Color.white)
+                .onTapGesture {
+                    // Dismiss keyboard when tapping anywhere in the scroll view
+                    isTextFieldFocused = false
                 }
             }
             .background(Color.white)
             .cornerRadius(20)
             .shadow(color: Color.black.opacity(0.15), radius: 20, x: 0, y: -5)
-            .padding(.horizontal, 16) // Match CreateActionCard
+            .padding(.horizontal, 16) // Match CreateActionCard exactly
             .padding(.bottom, 90) // Position right above tab bar (same as CreateActionCard)
         }
     }
 
     // MARK: - Profile Selector Section
     private var profileSelectorSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("WHO IS THIS FOR?")
-                .font(.custom("Inter", size: 12))
-                .fontWeight(.semibold)
-                .foregroundColor(Color(hex: "8E8E93"))
-                .tracking(0.5)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Who Is This For?")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.black)
 
-            Menu {
+            VStack(spacing: 10) {
                 ForEach(appState.profiles) { profile in
-                    Button(action: {
-                        selectedProfileId = profile.id
-                    }) {
-                        Text(profile.name)
-                    }
+                    profileRow(for: profile)
                 }
-            } label: {
-                HStack {
-                    if let profileId = selectedProfileId,
-                       let profile = appState.profiles.first(where: { $0.id == profileId }) {
-                        Text(profile.name)
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundColor(.black)
-                    } else {
-                        Text("Select a profile")
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundColor(.gray)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.gray)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .background(Color(hex: "f0f0f0"))
-                .cornerRadius(12)
             }
+            .padding(12)
+            .background(Color(hex: "F8F8F8"))
+            .cornerRadius(12)
         }
     }
+
+    private func profileRow(for profile: ElderlyProfile) -> some View {
+        let isSelected = selectedProfileId == profile.id
+        let profileSlot = appState.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
+
+        return Button(action: {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            selectedProfileId = profile.id
+        }) {
+            HStack(spacing: 14) {
+                // Profile picture on left
+                ProfileImageView(
+                    profile: profile,
+                    profileSlot: profileSlot,
+                    isSelected: isSelected,
+                    size: .custom(45)
+                )
+
+                // Name in bold on right
+                Text(profile.name)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.black)
+
+                Spacer()
+
+                // Selection indicator - green checkmark
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundColor(.green)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Color.white)
+            .cornerRadius(10)
+        }
+    }
+
 
     // MARK: - Habit Name Section
     private var habitNameSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("What's The Habit?")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.black)
+
+            // Habit name input wrapped in light grey card
+            VStack(spacing: 12) {
+                // Combined Emoji + Text Field
+                HStack(spacing: 12) {
+                    // Emoji on left (clickable)
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        isTextFieldFocused = false
+                        showingEmojiPicker = true
+                    }) {
+                        Text(selectedEmoji)
+                            .font(.system(size: 28))
+                    }
+
+                    // Text Field on right
+                    ZStack(alignment: .leading) {
+                        TextField("", text: $habitName)
+                            .font(.system(size: 16, weight: .regular))
+                            .foregroundColor(.black)
+                            .focused($isTextFieldFocused)
+
+                        if habitName.isEmpty {
+                            Text("e.g., take medication")
+                                .font(.system(size: 14, weight: .light))
+                                .foregroundColor(.gray.opacity(0.8))
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color.white)
+                .cornerRadius(10)
+
+                // Trending Habits Section (inside grey card)
+                trendingHabitsContent
+            }
+            .padding(12)
+            .background(Color(hex: "F8F8F8"))
+            .cornerRadius(12)
+        }
+    }
+
+    // MARK: - Trending Habits Content (no padding/background, used inside grey card)
+    private var trendingHabitsContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("WHAT'S THE HABIT?")
-                .font(.custom("Inter", size: 12))
-                .fontWeight(.semibold)
-                .foregroundColor(Color(hex: "8E8E93"))
-                .tracking(0.5)
+            Text("Trending popular habits")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.black)
 
-            ZStack(alignment: .leading) {
-                TextField("", text: $habitName)
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundColor(.black)
-                    .focused($isTextFieldFocused)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-                    .background(Color(hex: "f0f0f0"))
-                    .cornerRadius(12)
-
-                if habitName.isEmpty {
-                    Text("e.g., take medication")
-                        .font(.system(size: 14, weight: .light))
-                        .foregroundColor(.gray.opacity(0.8))
-                        .padding(.horizontal, 16)
-                        .allowsHitTesting(false)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(trendingHabits, id: \.0) { emoji, habitName in
+                        Button(action: {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            selectedEmoji = emoji
+                            self.habitName = habitName
+                        }) {
+                            HStack(spacing: 8) {
+                                Text(emoji)
+                                    .font(.system(size: 22))
+                                Text(habitName)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.black)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(Color.white)
+                            .cornerRadius(10)
+                        }
+                    }
                 }
             }
         }
     }
 
+    // Trending habits data
+    private let trendingHabits: [(String, String)] = [
+        ("💊", "Take medication"),
+        ("🚶", "Morning walk"),
+        ("💧", "Drink water"),
+        ("📖", "Read book"),
+        ("🧘", "Meditation"),
+        ("🥗", "Healthy meal")
+    ]
+
     // MARK: - Days Section
     private var daysSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("WHICH DAYS?")
-                .font(.custom("Inter", size: 12))
-                .fontWeight(.semibold)
-                .foregroundColor(Color(hex: "8E8E93"))
-                .tracking(0.5)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Which Days?")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.black)
 
-            HStack(spacing: 8) {
+            // Week selector wrapped in light grey box
+            VStack(spacing: 10) {
                 ForEach(0..<7) { index in
                     Button(action: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         if selectedDays.contains(index) {
                             selectedDays.remove(index)
                         } else {
                             selectedDays.insert(index)
                         }
                     }) {
-                        Text(["S", "M", "T", "W", "T", "F", "S"][index])
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.white)
-                            .frame(width: 40, height: 40)
-                            .background(selectedDays.contains(index) ? Color.black : Color(hex: "e0e0e0"))
-                            .clipShape(Circle())
+                        HStack {
+                            Text(["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][index])
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(.black)
+
+                            Spacer()
+
+                            if selectedDays.contains(index) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundColor(.green)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Color.white)
+                        .cornerRadius(10)
                     }
                 }
             }
+            .padding(12)
+            .background(Color(hex: "F8F8F8")) // Same as trending habits
+            .cornerRadius(12)
         }
     }
 
     // MARK: - Times Section
     private var timesSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("WHAT TIMES?")
-                .font(.custom("Inter", size: 12))
-                .fontWeight(.semibold)
-                .foregroundColor(Color(hex: "8E8E93"))
-                .tracking(0.5)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("What Times?")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.black)
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
+                // Display selected times as white rectangles
                 ForEach(Array(selectedTimes.enumerated()), id: \.offset) { index, time in
                     HStack {
-                        Text("•")
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundColor(.black)
-
                         Text(formatTime(time))
-                            .font(.system(size: 16, weight: .regular))
+                            .font(.system(size: 16, weight: .medium))
                             .foregroundColor(.black)
 
                         Spacer()
@@ -252,61 +382,62 @@ struct HabitCreationCard: View {
                         Button(action: {
                             selectedTimes.remove(at: index)
                         }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 14, weight: .regular))
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 20))
                                 .foregroundColor(Color(hex: "9f9f9f"))
-                                .frame(width: 24, height: 24)
                         }
                     }
-                    .frame(height: 44)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.white)
+                    .cornerRadius(10)
                 }
 
+                // Add Time button - light grey box
                 Button(action: {
                     showingTimePicker = true
                 }) {
                     HStack {
-                        Image(systemName: "plus")
-                            .font(.system(size: 14, weight: .regular))
+                        Text("🕐")
+                            .font(.system(size: 20))
                         Text("Add Time")
-                            .font(.system(size: 16, weight: .regular))
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.black)
+                        Spacer()
                     }
-                    .foregroundColor(.blue)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color(hex: "F8F8F8"))
+                    .cornerRadius(10)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
     // MARK: - Confirmation Method Section
     private var confirmationMethodSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("HOW TO CONFIRM?")
-                .font(.custom("Inter", size: 12))
-                .fontWeight(.semibold)
-                .foregroundColor(Color(hex: "8E8E93"))
-                .tracking(0.5)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("How To Confirm?")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.black)
 
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 // Photo Option
                 Button(action: {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     confirmationMethod = "photo"
                 }) {
-                    VStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         Text("📷")
-                            .font(.system(size: 40))
+                            .font(.system(size: 28))
                         Text("Photo")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.black)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(confirmationMethod == "photo" ? .white : .black)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 110)
-                    .background(confirmationMethod == "photo" ? Color(hex: "B9E3FF") : Color(hex: "F5F5F5"))
-                    .cornerRadius(16)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(confirmationMethod == "photo" ? Color.black : Color.clear, lineWidth: 2)
-                    )
+                    .padding(.vertical, 12)
+                    .background(confirmationMethod == "photo" ? Color.black : Color(hex: "F5F5F5"))
+                    .cornerRadius(10)
                 }
 
                 // Text Option
@@ -314,21 +445,17 @@ struct HabitCreationCard: View {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     confirmationMethod = "text"
                 }) {
-                    VStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         Text("💬")
-                            .font(.system(size: 40))
+                            .font(.system(size: 28))
                         Text("Text")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundColor(.black)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(confirmationMethod == "text" ? .white : .black)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 110)
-                    .background(confirmationMethod == "text" ? Color(hex: "B9E3FF") : Color(hex: "F5F5F5"))
-                    .cornerRadius(16)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(confirmationMethod == "text" ? Color.black : Color.clear, lineWidth: 2)
-                    )
+                    .padding(.vertical, 12)
+                    .background(confirmationMethod == "text" ? Color.black : Color(hex: "F5F5F5"))
+                    .cornerRadius(10)
                 }
             }
         }
@@ -337,15 +464,26 @@ struct HabitCreationCard: View {
     // MARK: - Create Button (Inside Card)
     private var createButtonInside: some View {
         Button(action: handleCreateHabit) {
-            Text("Create Habit")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 50)
-                .background(canCreate ? Color.black : Color.gray.opacity(0.3))
-                .cornerRadius(15)
+            ZStack {
+                // Button text (hidden when loading)
+                Text("Create Habit")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+                    .opacity(isCreating ? 0 : 1)
+
+                // Loading indicator
+                if isCreating {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(1.0)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 48) // Reduced from 50 to 48 for more compact look
+            .background(canCreate && !isCreating ? Color.black : Color.gray.opacity(0.3))
+            .cornerRadius(14) // Reduced from 15 to 14 to match confirmation cards
         }
-        .disabled(!canCreate)
+        .disabled(!canCreate || isCreating)
         .padding(.bottom, 4) // Small bottom padding inside card
     }
 
@@ -360,16 +498,20 @@ struct HabitCreationCard: View {
 
     // MARK: - Actions
     private func handleCreateHabit() {
-        guard canCreate else { return }
+        guard canCreate && !isCreating else { return }
         guard let profileId = selectedProfileId else { return }
         guard let profile = appState.profiles.first(where: { $0.id == profileId }) else { return }
+
+        // Set loading state immediately
+        isCreating = true
 
         // Haptic feedback
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
 
         // Transfer data to TaskViewModel
         taskViewModel.selectedProfile = profile
-        taskViewModel.taskTitle = habitName
+        // Prepend emoji to habit name with a space
+        taskViewModel.taskTitle = "\(selectedEmoji) \(habitName)"
         taskViewModel.taskCategory = .medication
         taskViewModel.frequency = .custom
         taskViewModel.scheduledTimes = selectedTimes
@@ -392,18 +534,35 @@ struct HabitCreationCard: View {
         // Create task
         taskViewModel.createTask()
 
-        // Dismiss card
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-            isPresented = false
-        }
+        // Small delay before dismissing to show loading state
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            // Reset loading state
+            isCreating = false
 
-        // Call dismiss callback after animation
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            onDismiss()
+            // Dismiss card
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                isPresented = false
+            }
+
+            // Reset form and call dismiss callback after animation
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                resetForm()
+                onDismiss()
+            }
         }
     }
 
     // MARK: - Helper Functions
+    private func resetForm() {
+        selectedProfileId = nil
+        habitName = ""
+        selectedEmoji = "😊"
+        selectedDays = []
+        selectedTimes = []
+        confirmationMethod = ""
+        isCreating = false
+    }
+
     private func formatTime(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
@@ -423,6 +582,47 @@ struct HabitCreationCard: View {
             default: return nil
             }
         })
+    }
+}
+
+// MARK: - Emoji Picker Sheet
+struct EmojiPickerSheet: View {
+    @Binding var selectedEmoji: String
+    let emojiOptions: [String]
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                // Grid of emojis
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 60))], spacing: 16) {
+                    ForEach(emojiOptions, id: \.self) { emoji in
+                        Button(action: {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            selectedEmoji = emoji
+                            isPresented = false
+                        }) {
+                            Text(emoji)
+                                .font(.system(size: 40))
+                                .frame(width: 60, height: 60)
+                                .background(selectedEmoji == emoji ? Color(hex: "B9E3FF") : Color(hex: "F8F8F8"))
+                                .cornerRadius(12)
+                        }
+                    }
+                }
+                .padding(24)
+            }
+            .navigationTitle("Select Emoji")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        isPresented = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 

@@ -1,8 +1,91 @@
 # Hallo iOS App - Development Guidelines & Patterns
-# Last Updated: 2025-10-21
+# Last Updated: 2025-10-28
 # Critical patterns and fixes for future development
 
-## RECENT LESSONS LEARNED (2025-10-21)
+## RECENT LESSONS LEARNED (2025-10-28)
+
+### AppState CRUD Protocol Extensions Pattern
+
+**Critical Pattern:** Use protocol extensions to eliminate duplicate AppState CRUD calls across ViewModels
+
+**Problem:** Duplicate boilerplate code across ViewModels
+```swift
+// ❌ BEFORE - 80+ lines of duplicate code across ViewModels
+class ProfileViewModel {
+    weak var appState: AppState?
+
+    func createProfile() {
+        appState?.addProfile(profile)
+        print("✅ [ProfileViewModel] Profile added: \(profile.name) - createProfile()")
+    }
+}
+
+class TaskViewModel {
+    weak var appState: AppState?
+
+    func createTask() {
+        appState?.addTask(task)
+        print("✅ [TaskViewModel] Task added: \(task.title) - createTask()")
+    }
+}
+```
+
+**Solution:** Protocol extensions with automatic logging and context tracking
+```swift
+// ✅ AFTER - 16 lines of protocol conformance
+protocol AppStateViewModel: AnyObject {
+    var appState: AppState? { get }
+}
+
+extension AppStateViewModel {
+    @MainActor
+    func addProfile(_ profile: ElderlyProfile, context: String = #function) {
+        appState?.addProfile(profile)
+        print("✅ [\(type(of: self))] Profile added: \(profile.name) - \(context)")
+    }
+}
+
+// ViewModels just conform to protocol
+extension ProfileViewModel: AppStateViewModel {}
+extension TaskViewModel: AppStateViewModel {}
+
+// Usage
+profileViewModel.addProfile(newProfile)  // Automatic logging with caller context
+```
+
+**Benefits:**
+- **Code Reduction:** 80 lines → 16 lines (80% reduction)
+- **Automatic Logging:** Context captured via `#function` macro
+- **Type Safety:** Automatic ViewModel name via `type(of: self)`
+- **Consistency:** All CRUD operations follow same pattern
+- **Maintainability:** Single source of truth for AppState operations
+
+**Key Features:**
+1. **Automatic Context Tracking:** `context: String = #function` captures calling function name
+2. **MainActor Safety:** All methods marked `@MainActor` for thread safety
+3. **Optimistic Update Pattern:** Helper method for UI updates with automatic rollback
+4. **Profile Operations:** addProfile(), updateProfile(), deleteProfile()
+5. **Task Operations:** addTask(), updateTask(), deleteTask()
+
+**Important Note:** Protocol conformance requires `appState` property to have internal visibility (not private)
+
+```swift
+// ❌ WRONG - Protocol conformance fails
+class ProfileViewModel {
+    private weak var appState: AppState?  // Too restrictive
+}
+
+// ✅ CORRECT - Internal visibility for protocol
+class ProfileViewModel {
+    weak var appState: AppState?  // Default internal access
+}
+```
+
+**File Reference:** `/Halloo/Core/ViewModelExtensions.swift` (lines 1-154)
+
+---
+
+## PREVIOUS LESSONS LEARNED (2025-10-21)
 
 ### Image Caching Pattern
 
@@ -196,6 +279,58 @@ Image("mascot")    // ❌ WRONG - case mismatch
 ```
 
 ## KEY DESIGN PATTERNS
+
+### AppState CRUD Protocol Extensions
+**File:** `/Halloo/Core/ViewModelExtensions.swift`
+
+**Pattern:** Unified CRUD operations via protocol extensions
+
+```swift
+// 1. Define protocol
+protocol AppStateViewModel: AnyObject {
+    var appState: AppState? { get }
+}
+
+// 2. Add protocol extensions for operations
+extension AppStateViewModel {
+    @MainActor
+    func addProfile(_ profile: ElderlyProfile, context: String = #function) {
+        appState?.addProfile(profile)
+        print("✅ [\(type(of: self))] Profile added: \(profile.name) - \(context)")
+    }
+
+    // ... other CRUD methods
+}
+
+// 3. ViewModels conform to protocol
+extension ProfileViewModel: AppStateViewModel {}
+extension TaskViewModel: AppStateViewModel {}
+
+// 4. Use in ViewModels
+func createProfile() async {
+    addProfile(newProfile)  // Automatic logging, context tracking
+}
+```
+
+**Optimistic Update Pattern:**
+```swift
+await optimisticUpdate(
+    updatedTask,
+    update: { self.updateTask(updatedTask) },
+    rollback: {
+        if let original = self.tasks.first(where: { $0.id == updatedTask.id }) {
+            self.updateTask(original)
+        }
+    },
+    operation: { try await self.databaseService.updateTask(updatedTask) }
+)
+```
+
+**Best Practices:**
+- Always use protocol extensions instead of duplicate CRUD calls
+- Let `#function` macro capture context automatically
+- Keep `appState` property internal (not private) for protocol conformance
+- Use optimistic update pattern for better UX
 
 ### Container Dependency Injection
 ```swift

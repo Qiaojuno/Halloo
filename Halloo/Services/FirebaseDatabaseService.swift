@@ -79,8 +79,6 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     // MARK: - Profile Operations
     
     func createElderlyProfile(_ profile: ElderlyProfile) async throws {
-        print("ℹ️ [ProfileId] Creating profile - profileId: \(profile.id), userId: \(profile.userId), phoneNumber: \(profile.phoneNumber)")
-
         // Check for existing profile with same phone number (DUPLICATE PREVENTION)
         let existingProfiles = try await CollectionPath.userProfiles(userId: profile.userId)
             .collection(in: db)
@@ -97,24 +95,18 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
             let existingName = existingData["name"] as? String ?? "Unknown"
             let existingId = firstDoc.documentID
 
-            print("ℹ️ [ProfileId] Existing profile details - id: \(existingId), name: \(existingName), phoneNumber: \(profile.phoneNumber)")
-
             // Throw error to prevent duplicate creation
             throw DatabaseError.duplicatePhoneNumber(
                 phoneNumber: profile.phoneNumber,
                 existingProfileName: existingName,
                 existingProfileId: existingId
             )
-        } else {
-            print("✅ [ProfileId] No duplicate phone numbers found - safe to create - phoneNumber: \(profile.phoneNumber)")
         }
 
         let profileData = try encodeToFirestore(profile)
         try await CollectionPath.userProfiles(userId: profile.userId)
             .document(profile.id, in: db)
             .setData(profileData)
-
-        print("✅ [Database] Profile created in Firestore - profileId: \(profile.id), userId: \(profile.userId)")
 
         // Update user's profile count
         try await updateUserProfileCount(profile.userId)
@@ -136,14 +128,23 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
 
     func getElderlyProfiles(for userId: String) async throws -> [ElderlyProfile] {
+        print("🔍 [FirebaseDB] Loading profiles for userId: \(userId)")
+        print("🔍 [FirebaseDB] Query path: users/\(userId)/profiles")
+
         let snapshot = try await CollectionPath.userProfiles(userId: userId)
             .collection(in: db)
             .order(by: "createdAt")
             .getDocuments()
 
-        return try snapshot.documents.map { document in
-            try decodeFromFirestore(document.data(), as: ElderlyProfile.self)
+        print("🔍 [FirebaseDB] Found \(snapshot.documents.count) profile documents")
+
+        let profiles = try snapshot.documents.map { document in
+            let profile = try decodeFromFirestore(document.data(), as: ElderlyProfile.self)
+            print("🔍 [FirebaseDB] Profile: '\(profile.name)' (id: \(profile.id), userId: \(profile.userId))")
+            return profile
         }
+
+        return profiles
     }
 
     func updateElderlyProfile(_ profile: ElderlyProfile) async throws {
@@ -234,24 +235,12 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
 
     func getTasks(for userId: String) async throws -> [Task] {
-        #if DEBUG
-        print("🔍 [FirebaseDatabaseService] Querying habits collectionGroup for userId: \(userId)")
-        print("🔍 [FirebaseDatabaseService] Auth UID: \(Auth.auth().currentUser?.uid ?? "nil")")
-        #endif
-
         do {
             // Use collection group query to get all tasks for user across all profiles
             let snapshot = try await db.collectionGroup("habits")
                 .whereField("userId", isEqualTo: userId)
                 .order(by: "createdAt")
                 .getDocuments()
-
-            #if DEBUG
-            print("✅ [FirebaseDatabaseService] Successfully fetched \(snapshot.documents.count) habits")
-            if !snapshot.documents.isEmpty {
-                print("📊 [FirebaseDatabaseService] Sample habit IDs: \(snapshot.documents.prefix(3).map { $0.documentID })")
-            }
-            #endif
 
             return try snapshot.documents.map { document in
                 try decodeFromFirestore(document.data(), as: Task.self)
@@ -281,10 +270,6 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
         let startOfDay = calendar.startOfDay(for: date)
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
 
-        #if DEBUG
-        print("🔍 [FirebaseDatabaseService] Querying scheduled habits for date: \(startOfDay), userId: \(userId)")
-        #endif
-
         do {
             // Use collection group query across all user's profiles
             let snapshot = try await db.collectionGroup("habits")
@@ -293,10 +278,6 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
                 .whereField("nextScheduledDate", isLessThan: Timestamp(date: endOfDay))
                 .order(by: "nextScheduledDate")
                 .getDocuments()
-
-            #if DEBUG
-            print("✅ [FirebaseDatabaseService] Found \(snapshot.documents.count) scheduled habits for date")
-            #endif
 
             return try snapshot.documents.map { document in
                 try decodeFromFirestore(document.data(), as: Task.self)
@@ -373,25 +354,10 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
     
     func deleteTask(_ taskId: String, userId: String, profileId: String) async throws {
-        #if DEBUG
-        print("🔍 [FirebaseDatabaseService] deleteTask called")
-        print("   taskId: \(taskId)")
-        print("   userId: \(userId)")
-        print("   profileId: \(profileId)")
-        #endif
-
         do {
             // Delete the task itself using the proper nested path
             let taskPath = "users/\(userId)/profiles/\(profileId)/habits/\(taskId)"
-            #if DEBUG
-            print("🗑️ [FirebaseDatabaseService] Deleting habit at: \(taskPath)")
-            #endif
-
             try await db.document(taskPath).delete()
-
-            #if DEBUG
-            print("✅ [FirebaseDatabaseService] Habit deleted successfully")
-            #endif
 
             // Note: Messages are not deleted to preserve chat history
             // Note: User task count is not updated (would require collection group query)
@@ -476,10 +442,6 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
 
     func getRecentSMSResponses(for userId: String, limit: Int) async throws -> [SMSResponse] {
-        #if DEBUG
-        print("🔍 [FirebaseDatabaseService] Querying recent messages (limit: \(limit)) for userId: \(userId)")
-        #endif
-
         do {
             // Use collection group query across all user's profiles
             let snapshot = try await db.collectionGroup("messages")
@@ -488,16 +450,9 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
                 .limit(to: limit)
                 .getDocuments()
 
-            #if DEBUG
-            print("✅ [FirebaseDatabaseService] Found \(snapshot.documents.count) recent messages")
-            #endif
-
             return snapshot.documents.compactMap { document in
                 do {
-                    // Log document structure for debugging
-                    let data = document.data()
-                    print("🔍 [FirebaseDatabaseService] Message document keys: \(data.keys.joined(separator: ", "))")
-                    return try decodeFromFirestore(data, as: SMSResponse.self)
+                    return try decodeFromFirestore(document.data(), as: SMSResponse.self)
                 } catch {
                     print("⚠️ [FirebaseDatabaseService] Skipping message \(document.documentID): \(error.localizedDescription)")
                     return nil
@@ -578,42 +533,24 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
     }
 
     func uploadProfilePhoto(_ photoData: Data, for profileId: String) async throws -> String {
-        print("📤 [Storage] Starting profile photo upload")
-        print("📤 [Storage] Profile ID: \(profileId)")
-        print("📤 [Storage] Photo size: \(photoData.count) bytes")
-
         let storageRef = storage.reference()
         let photoRef = storageRef.child("profiles/\(profileId)/photo.jpg")
-
-        print("📤 [Storage] Storage path: profiles/\(profileId)/photo.jpg")
 
         let metadata = StorageMetadata()
         metadata.contentType = "image/jpeg"
 
-        print("📤 [Storage] Calling putDataAsync()...")
-        let uploadResult: StorageMetadata
         do {
-            uploadResult = try await photoRef.putDataAsync(photoData, metadata: metadata)
-            print("📤 [Storage] ✅ putDataAsync() completed!")
-            print("📤 [Storage] Upload result path: \(uploadResult.path ?? "no path")")
-            print("📤 [Storage] Upload result bucket: \(uploadResult.bucket ?? "no bucket")")
-            print("📤 [Storage] Upload result name: \(uploadResult.name ?? "no name")")
+            _ = try await photoRef.putDataAsync(photoData, metadata: metadata)
         } catch {
-            print("📤 [Storage] ❌ putDataAsync() FAILED with error: \(error)")
-            print("📤 [Storage] Error type: \(type(of: error))")
-            print("📤 [Storage] Error details: \(error.localizedDescription)")
+            print("❌ [Storage] putDataAsync() FAILED with error: \(error.localizedDescription)")
             throw error
         }
 
-        print("📤 [Storage] Getting download URL...")
         do {
             let downloadURL = try await photoRef.downloadURL()
-            print("📤 [Storage] ✅ Download URL obtained: \(downloadURL.absoluteString)")
             return downloadURL.absoluteString
         } catch {
-            print("📤 [Storage] ❌ downloadURL() FAILED with error: \(error)")
-            print("📤 [Storage] This means the upload succeeded but getting URL failed")
-            print("📤 [Storage] Error details: \(error.localizedDescription)")
+            print("❌ [Storage] downloadURL() FAILED with error: \(error.localizedDescription)")
             throw error
         }
     }
@@ -622,7 +559,23 @@ class FirebaseDatabaseService: DatabaseServiceProtocol {
         let photoRef = storage.reference(forURL: url)
         try await photoRef.delete()
     }
-    
+
+    /// Checks if a profile photo exists in Storage and returns the download URL
+    /// Used to restore missing photoURL references in Firestore
+    func getProfilePhotoURL(for profileId: String) async throws -> String? {
+        let storageRef = storage.reference()
+        let photoRef = storageRef.child("profiles/\(profileId)/photo.jpg")
+
+        do {
+            let downloadURL = try await photoRef.downloadURL()
+            print("✅ [Storage] Found photo for profile \(profileId): \(downloadURL.absoluteString)")
+            return downloadURL.absoluteString
+        } catch {
+            print("ℹ️ [Storage] No photo found for profile \(profileId)")
+            return nil
+        }
+    }
+
     // MARK: - Real-time Listeners
     
     func observeUserTasks(_ userId: String) -> AnyPublisher<[Task], Error> {
@@ -1262,8 +1215,6 @@ extension FirebaseDatabaseService {
     ///   - userId: The user who owns this profile (for updating counts)
     /// - Note: Uses nested subcollections - deletes habits and messages automatically
     func deleteProfileRecursively(_ profileId: String, userId: String) async throws {
-        print("ℹ️ [Schema] Delete profile recursively - profileId: \(profileId), userId: \(userId)")
-
         let profileRef = CollectionPath.userProfiles(userId: userId)
             .document(profileId, in: db)
 
@@ -1277,20 +1228,11 @@ extension FirebaseDatabaseService {
             .whereField("profileId", isEqualTo: profileId)
             .getDocuments()
 
-        print("ℹ️ [Schema] Found nested data - profileId: \(profileId), habitsCount: \(habitsSnapshot.documents.count), messagesCount: \(messagesSnapshot.documents.count), galleryEventsCount: \(galleryEventsSnapshot.documents.count), totalItems: \(habitsSnapshot.documents.count + messagesSnapshot.documents.count + galleryEventsSnapshot.documents.count)")
-
-        let totalOps = habitsSnapshot.documents.count + messagesSnapshot.documents.count + 1
-        if totalOps > 500 {
-            print("⚠️ [Schema] Operations exceed batch limit - totalOps: \(totalOps), limit: 500, willUseMultipleBatches: true")
-        }
-
         // Delete all nested subcollections under profile (habits and messages)
         try await deleteDocumentRecursively(profileRef, subcollections: ["habits", "messages"])
 
         // Process gallery events linked to this profile
         // Strategy: Keep photos (memories), delete text-only events (sensitive data)
-        print("ℹ️ [Schema] Processing gallery events for profile - profileId: \(profileId), galleryEventsCount: \(galleryEventsSnapshot.documents.count)")
-
         var dereferencedPhotos = 0
         var deletedTextOnlyEvents = 0
 
@@ -1312,16 +1254,12 @@ extension FirebaseDatabaseService {
                     "profileId": FieldValue.delete()
                 ])
                 dereferencedPhotos += 1
-                print("🔵 [Schema] Dereferenced photo event (kept photo) - eventId: \(eventDoc.documentID), action: removed profileId, kept photoData")
             } else {
                 // Text-only event - safe to delete entirely (no memories lost)
                 try await eventDoc.reference.delete()
                 deletedTextOnlyEvents += 1
-                print("🔵 [Schema] Deleted text-only event - eventId: \(eventDoc.documentID), action: deleted entire event")
             }
         }
-
-        print("✅ [Schema] Gallery events processed - profileId: \(profileId), dereferencedPhotos: \(dereferencedPhotos), deletedTextOnlyEvents: \(deletedTextOnlyEvents)")
 
         // Verify deletion of habits and messages (gallery events intentionally kept if they have photos)
         let verifyHabits = try await profileRef.collection("habits").limit(to: 1).getDocuments()
@@ -1330,7 +1268,7 @@ extension FirebaseDatabaseService {
         if !verifyHabits.isEmpty || !verifyMessages.isEmpty {
             print("❌ [Schema] ORPHANED DATA DETECTED - profileId: \(profileId), remainingHabits: \(verifyHabits.documents.count), remainingMessages: \(verifyMessages.documents.count)")
         } else {
-            print("✅ [Schema] Profile data cleaned up successfully - profileId: \(profileId), note: Photo events dereferenced (kept), text-only events deleted")
+            print("✅ [Schema] Profile data cleaned up successfully - profileId: \(profileId)")
         }
 
         // Update user's profile count
