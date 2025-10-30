@@ -65,6 +65,16 @@ final class ImageCacheService: ObservableObject {
         return cache.object(forKey: url as NSString)
     }
 
+    /// Remove cached image for a specific URL
+    ///
+    /// - Parameter url: The photo URL string to remove from cache
+    func removeCachedImage(for url: String?) {
+        guard let url = url, !url.isEmpty else { return }
+        cache.removeObject(forKey: url as NSString)
+        loadedImages.remove(url)
+        print("🗑️ [ImageCache] Removed cached image for URL: \(url.prefix(50))...")
+    }
+
     /// Get cached image for a gallery event (by event ID)
     ///
     /// - Parameter eventId: The gallery event ID

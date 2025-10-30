@@ -234,6 +234,10 @@ final class AppState: ObservableObject {
 
             print("✅ [AppState] Loaded data: \(profiles.count) profiles, \(tasks.count) tasks, \(galleryEvents.count) gallery events")
 
+            // Refresh expired photo URLs with fresh download tokens BEFORE caching
+            print("🔄 [AppState] Refreshing profile photo URLs with fresh tokens...")
+            await refreshProfilePhotoURLs()
+
             // Pre-load all photos into memory cache to prevent AsyncImage flicker
             // Load both profile photos and gallery photos in parallel for faster startup
             async let profilePhotosTask: Void = imageCache.preloadProfileImages(profiles)
@@ -386,6 +390,79 @@ final class AppState: ObservableObject {
         tasks.removeAll { $0.id == taskId }
 
         print("✅ [AppState] Deleted task: \(taskId)")
+    }
+
+    // MARK: - Photo URL Refresh
+
+    /// Refresh expired profile photo URLs with fresh download tokens
+    ///
+    /// Firebase Storage URLs have time-limited access tokens that expire.
+    /// This method regenerates fresh URLs with new tokens for all profiles with photos.
+    ///
+    /// **Called from:**
+    /// - `loadUserData()` - Before pre-loading images into cache
+    ///
+    /// **Flow:**
+    /// 1. Iterate through all profiles with photoURLs
+    /// 2. Request fresh download URL from Firebase Storage
+    /// 3. Compare tokens to detect expired URLs
+    /// 4. Update profile in Firestore and local state
+    /// 5. Clear old cached image so fresh one will be downloaded
+    private func refreshProfilePhotoURLs() async {
+        print("🔄 [AppState] Checking \(profiles.count) profiles for expired photo URLs...")
+
+        var refreshCount = 0
+
+        for profile in profiles {
+            // Only refresh if profile has a photoURL (skip profiles without photos)
+            guard let oldPhotoURL = profile.photoURL, !oldPhotoURL.isEmpty else {
+                continue
+            }
+
+            do {
+                // Get fresh download URL from Firebase Storage
+                guard let freshPhotoURL = try await databaseService.getProfilePhotoURL(for: profile.id) else {
+                    print("⚠️ [AppState] No photo found in Storage for '\(profile.name)'")
+                    continue
+                }
+
+                // Extract tokens for comparison (last component after "token=")
+                let oldToken = oldPhotoURL.split(separator: "=").last ?? ""
+                let newToken = freshPhotoURL.split(separator: "=").last ?? ""
+
+                // Only update if token changed (indicates expired URL)
+                if oldToken != newToken {
+                    print("🔄 [AppState] Refreshing expired photoURL for '\(profile.name)'")
+                    print("   Old token: ...\(oldToken.suffix(12))")
+                    print("   New token: ...\(newToken.suffix(12))")
+
+                    // Remove old cached image BEFORE updating URL
+                    imageCache.removeCachedImage(for: oldPhotoURL)
+
+                    // Update profile with fresh URL
+                    var updatedProfile = profile
+                    updatedProfile.photoURL = freshPhotoURL
+
+                    // Save to Firestore
+                    try await databaseService.updateElderlyProfile(updatedProfile)
+
+                    // Update local state
+                    if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+                        profiles[index] = updatedProfile
+                    }
+
+                    refreshCount += 1
+                    print("✅ [AppState] Refreshed photoURL for '\(profile.name)'")
+                } else {
+                    print("✅ [AppState] Photo URL still valid for '\(profile.name)'")
+                }
+
+            } catch {
+                print("❌ [AppState] Failed to refresh photoURL for '\(profile.name)': \(error.localizedDescription)")
+            }
+        }
+
+        print("✅ [AppState] Photo URL refresh complete - \(refreshCount) URLs updated")
     }
 
     // MARK: - Handlers (Updates from DataSyncCoordinator - Other Devices)

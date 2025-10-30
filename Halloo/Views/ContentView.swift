@@ -445,6 +445,10 @@ struct ContentView: View {
                         print("🔵 [ContentView] Calling appState.loadUserData()...")
                         await appState.loadUserData()
 
+                        // Restore any missing photoURL references from Storage
+                        print("🔍 [ContentView] Checking for missing profile photos...")
+                        await self.profileViewModel?.restoreMissingProfilePhotos()
+
                         // CRITICAL: Re-populate the duplicate prevention Set AFTER data is loaded
                         // This prevents duplicate gallery events when SMS listener replays old confirmations
                         await MainActor.run {
@@ -476,6 +480,14 @@ struct ContentView: View {
                     // PHASE 1: Load data into AppState (single source of truth)
                     _Concurrency.Task { @MainActor in
                         await self.appState.loadUserData()
+
+                        // Restore any missing photoURL references from Storage
+                        print("🔍 [ContentView] Checking for missing profile photos...")
+                        await self.profileViewModel?.restoreMissingProfilePhotos()
+
+                        // Refresh expired photo URLs with fresh download tokens
+                        print("🔄 [ContentView] Refreshing profile photo URLs...")
+                        await self.profileViewModel?.refreshProfilePhotoURLs()
 
                         // CRITICAL: Re-populate the duplicate prevention Set AFTER data is loaded
                         // This prevents duplicate gallery events when SMS listener replays old confirmations

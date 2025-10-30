@@ -68,6 +68,10 @@ struct HabitsView: View {
     /// Force view refresh when tasks change
     @State private var refreshID = UUID()
 
+    /// Controls image picker for profile photo update
+    @State private var showingImagePicker = false
+    @State private var selectedImage: UIImage?
+
     // Days of the week for display
     private let weekDays = ["S", "M", "T", "W", "T", "F", "S"]
     private let weekDayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
@@ -129,9 +133,14 @@ struct HabitsView: View {
                             headerSection
                         }
 
+                        // 👤 PROFILE CARD: Selected profile info with edit capability
+                        if let profile = selectedProfile {
+                            profileCardSection(profile: profile)
+                                .padding(.top, showHeader ? 0 : 100) // Add top padding when header is hidden (static header height)
+                        }
+
                         // 📋 HABITS MANAGEMENT: All scheduled tasks with filtering and deletion
                         allScheduledTasksSection
-                            .padding(.top, showHeader ? 0 : 100) // Add top padding when header is hidden (static header height)
 
                         // 🗑️ DELETE PROFILE BUTTON: Remove profile and all associated habits
                         deleteProfileButton
@@ -206,8 +215,66 @@ struct HabitsView: View {
     private var headerSection: some View {
         SharedHeaderSection(selectedProfileIndex: $selectedProfileIndex)
     }
-    
-    
+
+    // MARK: - 👤 Profile Card Section
+    private func profileCardSection(profile: ElderlyProfile) -> some View {
+        HStack(spacing: 16) {
+            // Profile Image
+            if let profileSlot = appState.profiles.firstIndex(where: { $0.id == profile.id }) {
+                ProfileImageView.custom(
+                    profile: profile,
+                    profileSlot: profileSlot,
+                    isSelected: false,
+                    size: 60
+                )
+            }
+
+            // Profile Name
+            VStack(alignment: .leading, spacing: 4) {
+                Text(profile.name)
+                    .font(AppFonts.poppinsMedium(size: 18))
+                    .foregroundColor(.black)
+
+                Text(profile.relationship)
+                    .font(.custom("Inter", size: 14))
+                    .foregroundColor(Color(hex: "9f9f9f"))
+            }
+
+            Spacer()
+
+            // Edit Button (small circle with pen icon)
+            Button(action: {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                showingImagePicker = true
+            }) {
+                Circle()
+                    .fill(Color(hex: "f0f0f0"))
+                    .frame(width: 36, height: 36)
+                    .overlay(
+                        Image(systemName: "pencil")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.black)
+                    )
+            }
+        }
+        .padding(16)
+        .background(Color.white)
+        .cornerRadius(10)
+        .shadow(color: Color(hex: "6f6f6f").opacity(0.075), radius: 4, x: 0, y: 2)
+        .sheet(isPresented: $showingImagePicker) {
+            ImagePicker(image: $selectedImage, sourceType: .photoLibrary)
+        }
+        .onChange(of: selectedImage) { _, newImage in
+            if let image = newImage {
+                // Upload new profile image
+                _Concurrency.Task {
+                    await updateProfilePhoto(profile: profile, image: image)
+                }
+            }
+        }
+    }
+
+
     // MARK: - 📋 All Scheduled Tasks Section
     private var allScheduledTasksSection: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -360,7 +427,52 @@ struct HabitsView: View {
     private func loadData() {
         viewModel.loadDashboardData()
     }
-    
+
+    /// Upload new profile photo and update profile
+    private func updateProfilePhoto(profile: ElderlyProfile, image: UIImage) async {
+        print("🖼️ [HabitsView] Updating profile photo for '\(profile.name)'...")
+
+        // Convert UIImage to JPEG data
+        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+            print("❌ [HabitsView] Failed to convert image to JPEG data")
+            return
+        }
+
+        do {
+            // Upload photo to Firebase Storage
+            let databaseService = container.resolve(DatabaseServiceProtocol.self)
+            let photoURL = try await databaseService.uploadProfilePhoto(imageData, for: profile.id)
+
+            print("✅ [HabitsView] Photo uploaded successfully: \(photoURL)")
+
+            // Update profile with new photo URL
+            var updatedProfile = profile
+            updatedProfile.photoURL = photoURL
+
+            // Save to Firestore
+            try await databaseService.updateElderlyProfile(updatedProfile)
+
+            // Update AppState and clear old cached image
+            await MainActor.run {
+                appState.imageCache.removeCachedImage(for: profile.photoURL)
+                appState.updateProfile(updatedProfile)
+            }
+
+            // Pre-load new image into cache
+            await appState.imageCache.preloadProfileImages([updatedProfile])
+
+            print("✅ [HabitsView] Profile photo updated successfully")
+
+            // Reset selected image
+            await MainActor.run {
+                selectedImage = nil
+            }
+
+        } catch {
+            print("❌ [HabitsView] Failed to update profile photo: \(error.localizedDescription)")
+        }
+    }
+
     private func getProfileForHabit(_ habit: Task) -> ElderlyProfile? {
         // PHASE 3: Use AppState as single source of truth
         return appState.profiles.first { $0.id == habit.profileId }
@@ -696,6 +808,8 @@ struct HabitRowViewSimple: View {
                     isSelected: false,
                     size: 32
                 )
+            } else {
+                Text("❌")
             }
 
             // Task Details with mini week strip
