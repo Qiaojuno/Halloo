@@ -79,8 +79,7 @@ struct SharedHeaderSection: View {
              */
             Button(action: {
                 // Haptic feedback for navigation bar button
-                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                impactFeedback.impactOccurred()
+                HapticFeedback.medium()
 
                 showingAccountSettings = true
             }) {
@@ -125,7 +124,7 @@ struct SettingsView: View {
             // Back button header
             HStack {
                 Button(action: {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    HapticFeedback.light()
                     dismiss()
                 }) {
                     Image(systemName: "chevron.left")
@@ -280,7 +279,7 @@ struct SettingsView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            HapticFeedback.light()
             action()
         }) {
             HStack(spacing: 16) {

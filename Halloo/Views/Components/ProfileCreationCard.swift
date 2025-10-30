@@ -377,7 +377,7 @@ struct ProfileCreationCard: View {
         isCreating = true
 
         // Haptic feedback
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        HapticFeedback.medium()
 
         // Set form data on ViewModel
         profileViewModel.profileName = profileName.trimmingCharacters(in: .whitespacesAndNewlines)

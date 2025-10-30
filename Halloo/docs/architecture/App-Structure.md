@@ -1,6 +1,6 @@
 # Halloo iOS App - Project Structure & Status
-# Last Updated: 2025-10-28
-# Status: ✅ **BUILD SUCCESSFUL** - Performance Optimizations Complete
+# Last Updated: 2025-10-30
+# Status: ✅ **BUILD SUCCESSFUL** - HabitsView Redesign & Code Deduplication Complete
 
 ## 🚨 CURRENT BUILD STATUS
 **Build Status:** ✅ **BUILD SUCCEEDED** (Verified 2025-10-21)
@@ -11,17 +11,26 @@ xcodebuild -scheme Halloo \
   clean build
 ```
 
-**Recent Changes (2025-10-21):**
+**Recent Changes (2025-10-30):**
+- ✅ **HabitsView Redesign:** 3-letter week selector, depth effect design, 33% more compact rows
+- ✅ **Code Deduplication:** Created DateFormatters, Color+Extensions, HapticFeedback utilities
+- ✅ **Navigation Changes:** Disabled tab swiping on Habits tab, restricted to Dashboard ↔ Gallery
+- ✅ **Time Formatting:** Eliminated 6 duplicate formatTime functions, now using shared utility
+- ✅ **Haptic Feedback:** Replaced 42 duplicate haptic calls with centralized utility
+
+**Previous Changes (2025-10-21):**
 - ✅ **Image Caching:** NSCache-based system eliminates AsyncImage flicker
 - ✅ **Build Config:** StoreKit path fix, dead code stripping enabled
 - ✅ **iOS 18 Updates:** Font API modernization, onChange syntax updates
 - ✅ **Code Quality:** Fixed 20+ deprecation warnings and compiler warnings
 - ✅ **Archive Removal:** Deleted 150 lines of unused archive code
 
-**Files Modified Since Last Update (2025-10-21):**
-- 22 modified files (Core, Services, ViewModels, Views, Build Config)
-- 1 new file (ImageCacheService.swift)
-- Key updates: Image caching, iOS 18 compatibility, build optimizations
+**Files Modified Since Last Update (2025-10-30):**
+- 3 new files: DateFormatters.swift, Color+Extensions.swift, HapticFeedback.swift
+- HabitsView.swift: Complete UI redesign
+- DashboardView.swift: Navigation behavior updates
+- ContentView.swift: Tab swiping configuration
+- Multiple files: Replaced duplicate code with utility imports
 
 ---
 
@@ -38,11 +47,14 @@ xcodebuild -scheme Halloo \
 📁 Halloo/
 ├── 📄 Info.plist
 ├── 📄 GoogleService-Info.plist
-├── 📁 Core/ (7 files)
+├── 📁 Core/ (10 files - UPDATED 2025-10-30)
 │   ├── 📄 App.swift ✅ Main app entry point
 │   ├── 📄 AppState.swift ✅ Single source of truth for all app state (Phase 4)
 │   ├── 📄 AppFonts.swift ✅ Custom font system (Poppins/Inter)
+│   ├── 📄 Color+Extensions.swift ✅ NEW (2025-10-30) - Hex color utility
 │   ├── 📄 DataSyncCoordinator.swift ✅ Real-time multi-device sync (updated Phase 2)
+│   ├── 📄 DateFormatters.swift ✅ NEW (2025-10-30) - Shared time/date formatters (eliminates 6 duplicates)
+│   ├── 📄 HapticFeedback.swift ✅ NEW (2025-10-30) - Centralized haptic utility (replaces 42 duplicates)
 │   ├── 📄 IDGenerator.swift ✅ Unique ID generation utilities
 │   ├── 📄 String+Extensions.swift ✅ String utility methods (E.164 phone format)
 │   └── 📄 ViewModelExtensions.swift ✅ AppState CRUD protocol extensions - Eliminates 80+ lines of duplicate code
@@ -106,11 +118,11 @@ xcodebuild -scheme Halloo \
 │   - Updated Container factories (no coordinator parameters)
 │
 ├── 📁 Views/
-│   ├── 📄 ContentView.swift ✅ Root navigation + AppState initialization
-│   ├── 📄 DashboardView.swift ✅ Main dashboard with profile filtering
-│   ├── 📄 GalleryView.swift ✅ Photo timeline view
+│   ├── 📄 ContentView.swift ✅ Root navigation + AppState initialization + tab swiping config
+│   ├── 📄 DashboardView.swift ✅ Main dashboard with profile filtering (swiping enabled)
+│   ├── 📄 GalleryView.swift ✅ Photo timeline view (limited swiping)
 │   ├── 📄 GalleryDetailView.swift ✅ Full-screen photo viewer
-│   ├── 📄 HabitsView.swift ✅ All habits management page
+│   ├── 📄 HabitsView.swift ✅ REDESIGNED (2025-10-30) - Week selector, compact rows, no swiping
 │   ├── 📄 LoginView.swift ✅ Social authentication (Apple/Google)
 │   ├── 📄 OnboardingViews.swift ✅ Welcome/quiz onboarding screens
 │   ├── 📄 ProfileViews.swift ✅ Profile creation/edit screens
@@ -409,7 +421,86 @@ TabView (3 tabs)
 - Device testing for accessibility
 - Multi-device sync testing
 
-## RECENT CRITICAL CHANGES (2025-10-28)
+## RECENT CRITICAL CHANGES (2025-10-30)
+
+### ✅ HABITSVIEW UI REDESIGN - COMPLETE (2025-10-30)
+
+**Changes:**
+1. **Week selector redesign** - 3-letter day abbreviations (Sun, Mon, Tue)
+   - Changed from single letters (S, M, T) for better clarity
+   - Depth effect design: white (raised) vs grey (divot)
+   - Selected: White background, black text
+   - Unselected: Dark grey background (#E8E8E8), light grey text (#9f9f9f)
+
+2. **Habit row redesign** - 33% more compact
+   - Reduced row height: 90pt → 60pt
+   - Reduced emoji size: 32pt → 24pt
+   - Removed: Profile photo, name, mini week strip
+   - Added: Functional icons (📷 photo, 💬 text)
+   - Added: Smart frequency text ("Daily", "Weekdays", custom patterns)
+   - Font: Switched to system fonts (removed Inter)
+
+3. **Card structure split**
+   - Removed "All Scheduled Tasks" title
+   - Split into two separate cards:
+     - Week filter card (top)
+     - Habits list card (bottom)
+
+**Files Modified:**
+- Views/HabitsView.swift (complete redesign)
+
+### ✅ CODE DEDUPLICATION - UTILITIES CREATED (2025-10-30)
+
+**Changes:**
+1. **DateFormatters.swift created** (45 lines)
+   - Centralized time formatting with Locale.current and TimeZone.current
+   - Replaced 6 duplicate formatTime() functions across views
+   - Methods: formatTime(), formatTaskTime(), formatDate()
+
+2. **Color+Extensions.swift created** (30 lines)
+   - Moved hex color utility from DashboardView
+   - Now shared across all views
+   - Supports 6-digit hex codes with # prefix
+
+3. **HapticFeedback.swift created** (38 lines)
+   - Centralized haptic feedback utility
+   - Replaced 42 duplicate UIImpactFeedbackGenerator calls
+   - Methods: light(), medium(), heavy(), selection(), success(), warning(), error()
+
+**Impact:**
+- **Code Reduction:** ~150 lines of duplicate code eliminated
+- **Maintainability:** Single source of truth for common utilities
+- **Consistency:** All time formatting now uses device locale/timezone
+
+**Files Modified:**
+- Core/DateFormatters.swift (NEW)
+- Core/Color+Extensions.swift (NEW - moved from DashboardView)
+- Core/HapticFeedback.swift (NEW)
+- Multiple view files: Updated to import and use utilities
+
+### ✅ NAVIGATION BEHAVIOR UPDATES (2025-10-30)
+
+**Changes:**
+1. **Tab swiping restrictions**
+   - Dashboard ↔ Gallery: Swiping enabled (bidirectional)
+   - Gallery → Habits: Swiping disabled (no preview)
+   - Habits: Tab swiping completely disabled
+   - Reason: Prevents conflicts with swipe-to-delete gesture
+
+2. **Implementation**
+   - ContentView.swift: Added swipe restriction logic
+   - DashboardView.swift: Allowed swiping to gallery
+   - HabitsView.swift: Disabled all tab swiping
+   - Tab bar: Always functional on all tabs
+
+**Files Modified:**
+- Views/ContentView.swift (tab swiping configuration)
+- Views/DashboardView.swift (swipe behavior)
+- Views/HabitsView.swift (swipe disabled)
+
+---
+
+## PREVIOUS CRITICAL CHANGES (2025-10-28)
 
 ### ✅ VIEWMODEL EXTENSIONS - APPSTATE CRUD PROTOCOL (2025-10-28)
 

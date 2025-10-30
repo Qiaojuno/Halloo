@@ -375,8 +375,7 @@ struct Step1View: View {
                     ForEach(Array(options.enumerated()), id: \.element) { index, option in
                         Button(action: {
                             selectedOption = option
-                            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                            impactFeedback.impactOccurred()
+                            HapticFeedback.medium()
                         }) {
                             HStack(spacing: 12) {
                                 ZStack {
@@ -421,8 +420,7 @@ struct Step1View: View {
                 // Next button
                 Button(action: {
                     if let selected = selectedOption {
-                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                        impactFeedback.impactOccurred()
+                        HapticFeedback.medium()
 
                         viewModel.userAnswers["who_for"] = selected
                         viewModel.nextStep()
@@ -532,8 +530,7 @@ struct Step2View: View {
                     ForEach(Array(options.enumerated()), id: \.element) { index, option in
                         Button(action: {
                             selectedOption = option
-                            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                            impactFeedback.impactOccurred()
+                            HapticFeedback.medium()
                         }) {
                             HStack(spacing: 12) {
                                 ZStack {
@@ -578,8 +575,7 @@ struct Step2View: View {
                 // Next button
                 Button(action: {
                     if let selected = selectedOption {
-                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                        impactFeedback.impactOccurred()
+                        HapticFeedback.medium()
 
                         viewModel.userAnswers["connection_frequency"] = selected
                         viewModel.nextStep()
@@ -717,8 +713,7 @@ struct Step3View: View {
                         ForEach(Array(relationshipOptions.enumerated()), id: \.element) { index, option in
                             Button(action: {
                                 selectedRelationship = option
-                                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                                impactFeedback.impactOccurred()
+                                HapticFeedback.medium()
                             }) {
                                 HStack {
                                     Text(option)
@@ -748,8 +743,7 @@ struct Step3View: View {
 
                 // Next button
                 Button(action: {
-                    let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                    impactFeedback.impactOccurred()
+                    HapticFeedback.medium()
 
                     viewModel.userAnswers["loved_one_name"] = lovedOneName
                     viewModel.userAnswers["relationship"] = selectedRelationship ?? ""
@@ -834,9 +828,8 @@ struct ProfileSetupConfirmationView: View {
                 // Yes button - large and prominent
                 Button(action: {
                     // Add haptic feedback
-                    let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                    impactFeedback.impactOccurred()
-                    
+                    HapticFeedback.medium()
+
                     // Navigate to profile creation
                     onboardingViewModel.proceedToProfileSetup()
                 }) {
@@ -855,9 +848,8 @@ struct ProfileSetupConfirmationView: View {
                 // Skip button - smaller and less prominent
                 Button(action: {
                     // Add haptic feedback
-                    let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-                    impactFeedback.impactOccurred()
-                    
+                    HapticFeedback.light()
+
                     // Skip to main app
                     onboardingViewModel.skipProfileSetup()
                 }) {
@@ -956,8 +948,7 @@ struct Step4View: View {
                                     } else {
                                         selectedMoments.insert(moment.0)
                                     }
-                                    let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                                    impactFeedback.impactOccurred()
+                                    HapticFeedback.medium()
                                 }
                             )
                             .opacity(showOptions ? 1 : 0)
@@ -972,8 +963,7 @@ struct Step4View: View {
 
                 // Next button
                 Button(action: {
-                    let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                    impactFeedback.impactOccurred()
+                    HapticFeedback.medium()
 
                     // Store selected moments
                     viewModel.selectedMoments = selectedMoments
@@ -1111,8 +1101,7 @@ struct Step5View: View {
                             ForEach(Array(emotionalValues.enumerated()), id: \.element) { index, value in
                                 Button(action: {
                                     selectedValue = value
-                                    let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                                    impactFeedback.impactOccurred()
+                                    HapticFeedback.medium()
                                 }) {
                                     HStack(spacing: 12) {
                                         ZStack {
@@ -1156,8 +1145,7 @@ struct Step5View: View {
 
                 // Next button
                 Button(action: {
-                    let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                    impactFeedback.impactOccurred()
+                    HapticFeedback.medium()
 
                     // Store emotional value
                     if let value = selectedValue {

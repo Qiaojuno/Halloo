@@ -1,8 +1,8 @@
 
 # Hallo iOS App - UI Integration Plan
 # For Claude Code UI Development & Implementation
-# Last Updated: 2025-09-29
-# Status: Dashboard Card Stack + Navigation System Refined + Black Gradient Implementation
+# Last Updated: 2025-10-30
+# Status: Dashboard Card Stack + Navigation System Refined + HabitsView Redesign Complete
 
 ## PROJECT OVERVIEW
 App: Hallo (iOS/SwiftUI)
@@ -82,6 +82,24 @@ Status: DashboardView + GalleryView + Gallery History Timeline Complete, Firebas
   - Custom pill-shaped bottom navigation (140×48px, left-aligned)
   - **NEW**: + button (57×57px) only on Dashboard view
 
+### Views/HabitsView.swift ✅ COMPLETE - MAJOR REDESIGN 2025-10-30
+- **Week Selector Redesign**: Changed from single letters (S, M, T) to 3-letter abbreviations (Sun, Mon, Tue)
+- **Card Split Design**: Removed "All Scheduled Tasks" title, split into two separate cards:
+  - Week filter card (top)
+  - Habits list card (bottom)
+- **Depth Effect Design System**:
+  - Selected days: White background (#FFFFFF), black text, no border (raised appearance)
+  - Unselected days: Dark grey background (#E8E8E8), light grey text (#9f9f9f) (divot appearance)
+- **Habit Row Redesign** (33% more compact):
+  - Removed profile photo and name
+  - Removed mini week strip visualization
+  - Added functional icons: 📷 for photo habits, 💬 for text habits
+  - Reduced emoji size from 32pt to 24pt
+  - Added smart frequency text ("Daily", "Weekdays", "Mon, Wed, Fri", custom patterns)
+  - Reduced row height from 90pt to 60pt
+  - Switched to system fonts (removed custom Inter font)
+- **Navigation Behavior**: Tab swiping disabled on Habits tab to prevent swipe-to-delete conflicts
+
 ### Views/Gallery/ ✅ COMPLETE - GALLERY NAVIGATION SYSTEM 2025-09-10
 - **GalleryView.swift** ✅ FULLY IMPLEMENTED & UPGRADED
   - iOS Photos app style layout with square photos (112×112px)
@@ -143,6 +161,59 @@ Status: DashboardView + GalleryView + Gallery History Timeline Complete, Firebas
 - **TaskViews.swift** ✅ IMPLEMENTED  
   - TaskCreationView, TaskRow, TaskCard
 
+## HABITSVIEW DETAILED IMPLEMENTATION ✅ (UPDATED 2025-10-30)
+
+### Week Selector Specifications
+- **Day Labels**: 3-letter abbreviations (Sun, Mon, Tue, Wed, Thu, Fri, Sat)
+- **Selected State**:
+  - Background: White (#FFFFFF)
+  - Text: Black (#000000)
+  - Border: None
+  - Visual Effect: Raised appearance (depth illusion)
+- **Unselected State**:
+  - Background: Dark grey (#E8E8E8)
+  - Text: Light grey (#9f9f9f)
+  - Border: None
+  - Visual Effect: Divot appearance (recessed illusion)
+- **Layout**: 7 buttons in HStack, equal spacing, rounded corners
+
+### Habit Row Design System
+- **Row Height**: 60pt (reduced from 90pt - 33% more compact)
+- **Emoji Display**: 24pt size (reduced from 32pt)
+- **Title Typography**: System font, 17pt, semibold
+- **Frequency Display**: Smart text generation based on selected days:
+  - All 7 days: "Daily"
+  - Monday-Friday only: "Weekdays"
+  - Specific days: "Mon, Wed, Fri" format
+  - Custom patterns: Shows all selected days
+- **Functional Icons**:
+  - 📷 Camera icon: Displayed for photo-required habits
+  - 💬 Speech bubble icon: Displayed for text-required habits
+  - Size: System default
+  - Position: Trailing edge of row
+- **Removed Elements**:
+  - Profile photo (eliminated)
+  - Profile name text (eliminated)
+  - Mini week strip visualization (eliminated)
+  - Custom Inter font (switched to system)
+
+### Card Layout Structure
+- **Week Filter Card**:
+  - Contains week selector only
+  - White background with standard shadow
+  - 12pt horizontal padding
+  - Standard corner radius (10pt)
+- **Habits List Card**:
+  - Contains all habit rows
+  - White background with standard shadow
+  - Dividers between rows
+  - Empty state: "No habits scheduled for selected days"
+
+### Navigation Restrictions
+- **Swipe Gestures**: Completely disabled on HabitsView
+- **Reason**: Prevents conflicts with swipe-to-delete gesture
+- **Alternative Navigation**: Tab bar buttons always available
+
 ## DASHBOARD VIEW DETAILED IMPLEMENTATION ✅
 
 ### Profile Management System
@@ -160,10 +231,15 @@ Status: DashboardView + GalleryView + Gallery History Timeline Complete, Firebas
 - **Real-time Updates**: DashboardViewModel.selectProfile() method updates filtering
 - **Default Selection**: Automatically selects first profile (index 0) on app launch
 
-### Navigation & Layout
+### Navigation & Layout (UPDATED 2025-10-30)
 - **Custom Bottom Navigation**: Exact dimensions (94px × 43.19px) pill shape with border
 - **Positioning**: 10px from right edge, 20px from bottom edge
-- **Time Format**: Tasks display 12h format ("5PM", "8AM") using dateFormat: "ha"
+- **Time Format**: Tasks display 12h format ("5PM", "8AM") using shared DateFormatters utility
+- **Tab Swiping Behavior** (NEW):
+  - Dashboard ↔ Gallery: Swiping enabled (bidirectional)
+  - Gallery → Habits: Swiping disabled (no preview)
+  - Habits: Tab swiping completely disabled (prevents swipe-to-delete conflicts)
+  - Tab bar navigation: Always works on all tabs
 
 ### Asset Positioning
 - **Birds Placement**: Centered in Create Custom Habit card

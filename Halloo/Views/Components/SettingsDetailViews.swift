@@ -14,7 +14,7 @@ struct NotificationsSettingsView: View {
             // Back button header
             HStack {
                 Button(action: {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    HapticFeedback.light()
                     dismiss()
                 }) {
                     Image(systemName: "chevron.left")
@@ -124,7 +124,7 @@ struct ManageSubscriptionView: View {
             // Back button header
             HStack {
                 Button(action: {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    HapticFeedback.light()
                     dismiss()
                 }) {
                     Image(systemName: "chevron.left")
@@ -260,7 +260,7 @@ struct FAQsView: View {
             // Back button header
             HStack {
                 Button(action: {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    HapticFeedback.light()
                     dismiss()
                 }) {
                     Image(systemName: "chevron.left")
@@ -333,7 +333,7 @@ struct FeedbackView: View {
             // Back button header
             HStack {
                 Button(action: {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    HapticFeedback.light()
                     dismiss()
                 }) {
                     Image(systemName: "chevron.left")

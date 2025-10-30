@@ -999,4 +999,316 @@ case .taskResponse:
 
 ---
 
-*Last Updated: 2025-10-21*
+# HabitsView UI Redesign & Code Deduplication
+
+**Updated: 2025-10-30**
+
+## Overview
+Major HabitsView redesign with improved UX, 33% more compact layout, and significant code deduplication through new utility files.
+
+## HabitsView UI Changes
+
+### Week Selector Redesign
+**Changed:** Single letter day abbreviations → 3-letter abbreviations
+
+**Before:**
+- Day labels: S, M, T, W, T, F, S (confusing, hard to distinguish)
+- Selected: White background with border
+- Unselected: Grey background
+
+**After:**
+- Day labels: Sun, Mon, Tue, Wed, Thu, Fri, Sat (clear, unambiguous)
+- Selected: White background (#FFFFFF), black text, no border (raised appearance)
+- Unselected: Dark grey (#E8E8E8), light grey text (#9f9f9f) (divot appearance)
+- Depth effect: Visual hierarchy through background contrast
+
+### Habit Row Redesign (33% More Compact)
+**Changed:** Bulky rows with redundant info → Streamlined, information-dense rows
+
+**Removed Elements:**
+- Profile photo (redundant when viewing single profile's habits)
+- Profile name text (already known from context)
+- Mini week strip visualization (replaced with text)
+- Custom Inter font (switched to system fonts)
+
+**Added Elements:**
+- Functional icons: 📷 (photo required), 💬 (text required)
+- Smart frequency text: "Daily", "Weekdays", "Mon, Wed, Fri", etc.
+
+**Size Changes:**
+- Row height: 90pt → 60pt (33% reduction)
+- Emoji size: 32pt → 24pt (smaller, cleaner)
+- Typography: System font, 17pt, semibold
+
+### Card Structure Changes
+**Before:**
+- Single card with "All Scheduled Tasks" title
+- Week selector and habits in same card
+
+**After:**
+- Two separate cards for visual clarity:
+  1. Week filter card (top) - Contains week selector only
+  2. Habits list card (bottom) - Contains habit rows only
+- Removed redundant title text
+- Cleaner visual hierarchy
+
+## Navigation Behavior Updates
+
+### Tab Swiping Restrictions
+**File:** `/Halloo/Views/ContentView.swift`
+
+**Implementation:**
+```swift
+TabView(selection: $selectedTab) {
+    DashboardView()
+        .tag(0)
+        // ✅ Swiping enabled to Gallery
+
+    GalleryView()
+        .tag(1)
+        // ✅ Limited swiping (can swipe back to Dashboard)
+        // ❌ Cannot swipe forward to Habits
+
+    HabitsView()
+        .tag(2)
+        .gesture(DragGesture()) // ❌ Disables ALL swiping
+}
+```
+
+**Behavior:**
+- **Dashboard ↔ Gallery**: Bidirectional swiping enabled
+- **Gallery → Habits**: Swiping disabled (no preview effect)
+- **Habits**: All tab swiping disabled to prevent swipe-to-delete conflicts
+- **Tab bar buttons**: Always functional on all tabs
+
+**Rationale:**
+- Habits view uses swipe-to-delete gesture for habit management
+- Tab swiping interferes with swipe-to-delete UX
+- Tab bar navigation provides clear alternative
+
+## Code Deduplication - New Utility Files
+
+### 1. DateFormatters.swift
+**File:** `/Halloo/Core/DateFormatters.swift` (45 lines)
+
+**Problem Solved:**
+- 6 duplicate `formatTime()` functions across multiple view files
+- Inconsistent time formatting (some ignored device locale/timezone)
+- Maintenance burden: Updating time format required changing 6 files
+
+**Solution:**
+```swift
+import Foundation
+
+struct DateFormatters {
+    // Locale-aware time formatting (e.g., "5:00 PM" or "17:00" based on device)
+    static func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.timeZone = TimeZone.current
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    // Task-specific time formatting (e.g., "5PM", "5:00PM")
+    static func formatTaskTime(_ date: Date, includeMinutes: Bool = false) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = includeMinutes ? "h:mma" : "ha"
+        return formatter.string(from: date)
+    }
+
+    // Date formatting (e.g., "October 30, 2025")
+    static func formatDate(_ date: Date, style: DateFormatter.Style = .medium) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.timeZone = TimeZone.current
+        formatter.dateStyle = style
+        return formatter.string(from: date)
+    }
+}
+```
+
+**Usage:**
+```swift
+// Before (in each view file)
+func formatTime(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "ha"
+    return formatter.string(from: date)
+}
+
+// After (import once, use everywhere)
+import DateFormatters
+let timeString = DateFormatters.formatTime(task.scheduledTime)
+```
+
+**Files Updated:**
+- DashboardView.swift
+- HabitsView.swift
+- TaskViews.swift
+- GalleryView.swift
+- OnboardingViews.swift
+- ProfileViews.swift
+
+### 2. Color+Extensions.swift
+**File:** `/Halloo/Core/Color+Extensions.swift` (30 lines)
+
+**Problem Solved:**
+- Hex color utility previously defined in DashboardView only
+- Other views couldn't use hex colors without duplicating code
+- DRY violation: Color parsing logic not reusable
+
+**Solution:**
+```swift
+import SwiftUI
+
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let a, r, g, b: UInt64
+        switch hex.count {
+        case 3: // RGB (12-bit)
+            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6: // RGB (24-bit)
+            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8: // ARGB (32-bit)
+            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            (a, r, g, b) = (255, 0, 0, 0)
+        }
+        self.init(
+            .sRGB,
+            red: Double(r) / 255,
+            green: Double(g) / 255,
+            blue: Double(b) / 255,
+            opacity: Double(a) / 255
+        )
+    }
+}
+```
+
+**Usage:**
+```swift
+// Available everywhere after import
+Color(hex: "f9f9f9")  // Background color
+Color(hex: "B9E3FF")  // Button color
+Color(hex: "#7A7A7A") // Text color (# prefix optional)
+```
+
+**Files Using:**
+- DashboardView.swift (moved from here)
+- HabitsView.swift
+- GalleryView.swift
+- All view files using hex colors
+
+### 3. HapticFeedback.swift
+**File:** `/Halloo/Core/HapticFeedback.swift` (38 lines)
+
+**Problem Solved:**
+- 42 duplicate haptic feedback calls across view files
+- Inconsistent patterns: Some used light(), some used medium(), some used heavy()
+- Boilerplate code: `UIImpactFeedbackGenerator(style: .light).impactOccurred()` repeated
+
+**Solution:**
+```swift
+import UIKit
+
+struct HapticFeedback {
+    // Impact feedback
+    static func light() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    static func medium() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    static func heavy() {
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+    }
+
+    // Selection feedback (for picker/selector changes)
+    static func selection() {
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    // Notification feedback
+    static func success() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    static func warning() {
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+    }
+
+    static func error() {
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
+    }
+}
+```
+
+**Usage:**
+```swift
+// Before (in each view file)
+UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
+// After (clean, semantic)
+HapticFeedback.light()
+HapticFeedback.selection() // For week selector changes
+HapticFeedback.success()   // For habit completion
+```
+
+**Common Patterns:**
+- `HapticFeedback.light()`: Button taps, minor interactions
+- `HapticFeedback.selection()`: Picker/selector changes (week selector)
+- `HapticFeedback.success()`: Task completion, successful actions
+- `HapticFeedback.error()`: Validation failures, errors
+
+**Files Updated:**
+- HabitsView.swift (week selector taps)
+- DashboardView.swift (profile selection)
+- TaskViews.swift (habit creation)
+- ProfileViews.swift (profile creation)
+- CardStackView.swift (swipe actions)
+
+## Impact Summary
+
+### Code Reduction
+- **DateFormatters**: Eliminated 6 duplicate functions (~60 lines)
+- **Color+Extensions**: Moved from DashboardView, now shared (~30 lines reuse)
+- **HapticFeedback**: Replaced 42 duplicate calls (~84 lines → ~42 calls)
+- **Total**: ~150 lines of duplicate code eliminated
+
+### Consistency Improvements
+- **Time Formatting**: Now respects device locale and timezone settings
+- **Hex Colors**: Consistent parsing across all views
+- **Haptic Patterns**: Standardized feedback types for common actions
+
+### Maintainability
+- **Single Source of Truth**: Utilities in Core/ directory
+- **Easy Updates**: Change time format in one place, affects all views
+- **Reduced Bugs**: No more inconsistent time formatting edge cases
+
+## Related Files
+
+### New Files Created
+- `/Halloo/Core/DateFormatters.swift` (45 lines)
+- `/Halloo/Core/Color+Extensions.swift` (30 lines - moved from DashboardView)
+- `/Halloo/Core/HapticFeedback.swift` (38 lines)
+
+### Files Modified
+- `/Halloo/Views/HabitsView.swift` (complete redesign)
+- `/Halloo/Views/DashboardView.swift` (navigation + utility imports)
+- `/Halloo/Views/ContentView.swift` (tab swiping configuration)
+- `/Halloo/Views/TaskViews.swift` (utility imports)
+- `/Halloo/Views/ProfileViews.swift` (utility imports)
+- `/Halloo/Views/GalleryView.swift` (utility imports)
+- `/Halloo/Views/OnboardingViews.swift` (utility imports)
+
+---
+
+*Last Updated: 2025-10-30*

@@ -1,8 +1,131 @@
 # Hallo iOS App - Development Guidelines & Patterns
-# Last Updated: 2025-10-28
+# Last Updated: 2025-10-30
 # Critical patterns and fixes for future development
 
-## RECENT LESSONS LEARNED (2025-10-28)
+## RECENT LESSONS LEARNED (2025-10-30)
+
+### Code Deduplication with Utility Files
+
+**Critical Pattern:** Consolidate duplicate code into shared utility files in Core/ directory
+
+**Problem:** Duplicate functions across multiple view files
+```swift
+// ❌ BEFORE - 6 duplicate formatTime() functions
+// DashboardView.swift
+func formatTime(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "ha"
+    return formatter.string(from: date)
+}
+
+// HabitsView.swift (duplicate)
+func formatTime(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "ha"
+    return formatter.string(from: date)
+}
+
+// 4 more duplicates in other files...
+```
+
+**Solution:** Create shared utility in Core/
+```swift
+// ✅ AFTER - Single source of truth
+// Core/DateFormatters.swift
+struct DateFormatters {
+    static func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current      // Device locale
+        formatter.timeZone = TimeZone.current  // Device timezone
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+// All views import and use
+let timeString = DateFormatters.formatTime(task.scheduledTime)
+```
+
+**Benefits:**
+- **Code Reduction:** 6 functions → 1 utility (~60 lines eliminated)
+- **Consistency:** All views use same formatting logic
+- **Maintainability:** Update once, affects all views
+- **Locale Support:** Respects device locale/timezone settings
+
+### Time Formatting Pattern
+
+**Critical Pattern:** Always use Locale.current and TimeZone.current for time formatting
+
+```swift
+// ❌ WRONG - Ignores device locale/timezone
+let formatter = DateFormatter()
+formatter.dateFormat = "ha"  // Hardcoded US format
+return formatter.string(from: date)
+
+// ✅ CORRECT - Respects device settings
+let formatter = DateFormatter()
+formatter.locale = Locale.current      // User's locale
+formatter.timeZone = TimeZone.current  // User's timezone
+formatter.timeStyle = .short           // Semantic style
+return formatter.string(from: date)
+```
+
+**Why This Matters:**
+- US users see "5:00 PM"
+- European users see "17:00" (24-hour format)
+- Respects user's timezone when traveling
+- Accessibility: VoiceOver reads time correctly
+
+### Haptic Feedback Pattern
+
+**Critical Pattern:** Use centralized haptic utility for consistent feedback
+
+```swift
+// ❌ WRONG - Duplicate haptic calls (42 occurrences)
+UIImpactFeedbackGenerator(style: .light).impactOccurred()
+UISelectionFeedbackGenerator().selectionChanged()
+
+// ✅ CORRECT - Semantic haptic utility
+HapticFeedback.light()      // Button taps
+HapticFeedback.selection()  // Picker changes
+HapticFeedback.success()    // Task completion
+HapticFeedback.error()      // Validation errors
+```
+
+**Common Patterns:**
+- **Light impact**: Minor interactions, button taps
+- **Selection**: Week selector, picker changes
+- **Success**: Habit completion, successful save
+- **Error**: Form validation failures
+
+**File Reference:** `/Halloo/Core/HapticFeedback.swift`
+
+### Navigation Swiping Restrictions
+
+**Critical Pattern:** Disable tab swiping when view uses swipe gestures
+
+```swift
+// ❌ WRONG - Tab swiping conflicts with swipe-to-delete
+HabitsView()
+    .tag(2)
+// User tries to swipe-to-delete habit, accidentally switches tabs
+
+// ✅ CORRECT - Disable tab swiping on gesture-heavy views
+HabitsView()
+    .tag(2)
+    .gesture(DragGesture())  // Blocks TabView swipe
+```
+
+**When to Disable Swiping:**
+- Views with swipe-to-delete functionality
+- Views with horizontal scrolling content
+- Views with custom swipe gestures
+
+**Alternative Navigation:**
+- Always keep tab bar buttons functional
+- Disable only swipe gestures, not taps
+
+## PREVIOUS LESSONS LEARNED (2025-10-28)
 
 ### AppState CRUD Protocol Extensions Pattern
 
@@ -279,6 +402,44 @@ Image("mascot")    // ❌ WRONG - case mismatch
 ```
 
 ## KEY DESIGN PATTERNS
+
+### Core Utilities (NEW 2025-10-30)
+
+**Available Utilities:**
+
+1. **DateFormatters** - Time/date formatting
+```swift
+import DateFormatters
+
+// Format time (respects locale/timezone)
+DateFormatters.formatTime(date)          // "5:00 PM" or "17:00"
+DateFormatters.formatTaskTime(date)      // "5PM"
+DateFormatters.formatDate(date, style: .medium)  // "Oct 30, 2025"
+```
+
+2. **Color+Extensions** - Hex color support
+```swift
+// Use hex colors anywhere
+Color(hex: "f9f9f9")   // Background
+Color(hex: "B9E3FF")   // Buttons
+Color(hex: "#7A7A7A")  // Text (# prefix optional)
+```
+
+3. **HapticFeedback** - Centralized haptics
+```swift
+// Semantic haptic feedback
+HapticFeedback.light()      // Button taps
+HapticFeedback.selection()  // Picker/selector changes
+HapticFeedback.success()    // Successful actions
+HapticFeedback.error()      // Validation failures
+HapticFeedback.warning()    // Warning states
+```
+
+**Best Practices:**
+- Always use utilities instead of duplicating code
+- Import at file level, not inside functions
+- Prefer semantic methods over raw UIKit calls
+- Keep utilities lightweight and stateless
 
 ### AppState CRUD Protocol Extensions
 **File:** `/Halloo/Core/ViewModelExtensions.swift`

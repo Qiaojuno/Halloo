@@ -128,7 +128,7 @@ struct CreateActionOption: View {
         Button(action: {
             guard !isDisabled else { return }
             // Haptic feedback
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            HapticFeedback.light()
             action()
         }) {
             HStack(spacing: 16) {

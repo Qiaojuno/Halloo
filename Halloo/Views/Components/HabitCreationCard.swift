@@ -190,7 +190,7 @@ struct HabitCreationCard: View {
         let profileSlot = appState.profiles.firstIndex(where: { $0.id == profile.id }) ?? 0
 
         return Button(action: {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            HapticFeedback.light()
             selectedProfileId = profile.id
         }) {
             HStack(spacing: 14) {
@@ -237,7 +237,7 @@ struct HabitCreationCard: View {
                 HStack(spacing: 12) {
                     // Emoji on left (clickable)
                     Button(action: {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        HapticFeedback.light()
                         isTextFieldFocused = false
                         showingEmojiPicker = true
                     }) {
@@ -286,7 +286,7 @@ struct HabitCreationCard: View {
                 HStack(spacing: 10) {
                     ForEach(trendingHabits, id: \.0) { emoji, habitName in
                         Button(action: {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            HapticFeedback.light()
                             selectedEmoji = emoji
                             self.habitName = habitName
                         }) {
@@ -329,7 +329,7 @@ struct HabitCreationCard: View {
             VStack(spacing: 10) {
                 ForEach(0..<7) { index in
                     Button(action: {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        HapticFeedback.light()
                         if selectedDays.contains(index) {
                             selectedDays.remove(index)
                         } else {
@@ -373,7 +373,7 @@ struct HabitCreationCard: View {
                 // Display selected times as white rectangles
                 ForEach(Array(selectedTimes.enumerated()), id: \.offset) { index, time in
                     HStack {
-                        Text(formatTime(time))
+                        Text(DateFormatters.formatTime(time))
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(.black)
 
@@ -424,7 +424,7 @@ struct HabitCreationCard: View {
             HStack(spacing: 10) {
                 // Photo Option
                 Button(action: {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    HapticFeedback.light()
                     confirmationMethod = "photo"
                 }) {
                     HStack(spacing: 10) {
@@ -442,7 +442,7 @@ struct HabitCreationCard: View {
 
                 // Text Option
                 Button(action: {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    HapticFeedback.light()
                     confirmationMethod = "text"
                 }) {
                     HStack(spacing: 10) {
@@ -506,7 +506,7 @@ struct HabitCreationCard: View {
         isCreating = true
 
         // Haptic feedback
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        HapticFeedback.medium()
 
         // Transfer data to TaskViewModel
         taskViewModel.selectedProfile = profile
@@ -563,12 +563,6 @@ struct HabitCreationCard: View {
         isCreating = false
     }
 
-    private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
-        return formatter.string(from: date)
-    }
-
     private func convertDaysToWeekdays(_ days: Set<Int>) -> Set<Weekday> {
         Set(days.compactMap { dayIndex in
             switch dayIndex {
@@ -598,7 +592,7 @@ struct EmojiPickerSheet: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 60))], spacing: 16) {
                     ForEach(emojiOptions, id: \.self) { emoji in
                         Button(action: {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            HapticFeedback.light()
                             selectedEmoji = emoji
                             isPresented = false
                         }) {

@@ -186,8 +186,7 @@ extension GalleryView {
             Spacer()
 
             Button(action: {
-                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                impactFeedback.impactOccurred()
+                HapticFeedback.medium()
                 showingAccountSettings = true
             }) {
                 Image(systemName: "person")

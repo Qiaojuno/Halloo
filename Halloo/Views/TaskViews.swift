@@ -152,8 +152,8 @@ struct Step1_HabitForm: View {
                 HStack {
                     Button(action: {
                         // Haptic feedback for navigation bar button
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        
+                        HapticFeedback.light()
+
                         onDismiss()
                     }) {
                         HStack(spacing: 8) {
@@ -345,8 +345,8 @@ struct Step2_ConfirmationMethod: View {
                 HStack {
                     Button(action: {
                         // Haptic feedback for navigation bar button
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        
+                        HapticFeedback.light()
+
                         onBack()
                     }) {
                         HStack(spacing: 8) {
@@ -439,9 +439,8 @@ struct Step2_ConfirmationMethod: View {
                 Button(action: {
                     if !confirmationMethod.isEmpty {
                         // Haptic feedback for create button
-                        let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                        impactFeedback.impactOccurred()
-                        
+                        HapticFeedback.medium()
+
                         onCreate()
                     }
                 }) {
@@ -907,7 +906,7 @@ struct TaskRow: View {
                     .fontWeight(.medium)
                 
                 HStack {
-                    Text(formatTime(task.scheduledTime))
+                    Text(DateFormatters.formatTime(task.scheduledTime))
                         .font(.caption)
                         .foregroundColor(.secondary)
                     
@@ -930,12 +929,6 @@ struct TaskRow: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 12)
-    }
-    
-    private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
     }
 }
 
@@ -977,8 +970,8 @@ struct TaskCard: View {
                     .textCase(.uppercase)
                 
                 Spacer()
-                
-                Text(formatTime(task.scheduledTime))
+
+                Text(DateFormatters.formatTime(task.scheduledTime))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -1001,12 +994,6 @@ struct TaskCard: View {
         .onTapGesture {
             onTap?()
         }
-    }
-    
-    private func formatTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
     }
 }
 
@@ -1037,7 +1024,7 @@ struct ProfileSelectionStep: View {
                 Spacer()
                 HStack {
                     Button(action: {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        HapticFeedback.light()
                         onDismiss()
                     }) {
                         HStack(spacing: 8) {
@@ -1142,7 +1129,7 @@ struct ProfileSelectionCard: View {
 
     var body: some View {
         Button(action: {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            HapticFeedback.light()
             onTap()
         }) {
             HStack(spacing: 16) {

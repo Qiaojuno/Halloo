@@ -124,7 +124,7 @@ struct CreateTabItem: View {
     var body: some View {
         Button(action: {
             // Haptic feedback
-            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+            HapticFeedback.soft()
             action()
         }) {
             ZStack {

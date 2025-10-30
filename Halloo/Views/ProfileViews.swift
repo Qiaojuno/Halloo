@@ -81,7 +81,7 @@ struct SimplifiedProfileCreationView: View {
 
     private var backButton: some View {
         Button(action: {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            HapticFeedback.light()
             onDismiss()
         }) {
             HStack(spacing: 8) {
@@ -408,7 +408,7 @@ struct SimplifiedProfileCreationView: View {
         }
 
         print("✅ canProceed is TRUE - proceeding")
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        HapticFeedback.medium()
 
         print("🔨 Local form values:")
         print("🔨   profileName: '\(profileName)'")

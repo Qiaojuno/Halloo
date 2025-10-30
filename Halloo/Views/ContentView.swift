@@ -65,6 +65,23 @@ struct ContentView: View {
 
     @State private var authCancellables = Set<AnyCancellable>()
 
+    // MARK: - Computed Properties
+
+    /// Controls whether tab swiping is enabled
+    /// Disabled on HabitsView (tab 2) to prevent conflict with swipe-to-delete gestures
+    /// Also restricted to only Dashboard ↔ Gallery (tabs 0-1)
+    private var allowsTabSwiping: Bool {
+        selectedTab != 2  // Disable on Habits tab (index 2)
+    }
+
+    /// Controls which tab transitions are allowed
+    /// Only allows swiping between Dashboard (0) and Gallery (1)
+    private func isValidTabTransition(from currentTab: Int, to newTab: Int) -> Bool {
+        // Only allow transitions between tabs 0 and 1 (Dashboard ↔ Gallery)
+        let validTabs = Set([0, 1])
+        return validTabs.contains(currentTab) && validTabs.contains(newTab)
+    }
+
     // MARK: - Initialization
     init() {
         // ViewModels will be created in initializeViewModels to avoid crashes during init
@@ -179,7 +196,7 @@ struct ContentView: View {
                 .animation(.spring(response: 0.35, dampingFraction: 0.85), value: selectedTab)
                 .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.85), value: dragOffset)
                 .gesture(
-                    DragGesture(minimumDistance: 20)
+                    allowsTabSwiping ? DragGesture(minimumDistance: 20)
                         .updating($dragOffset) { value, state, _ in
                             // Prevent drag during animation
                             guard !isTransitioning else { return }
@@ -196,14 +213,18 @@ struct ContentView: View {
                             // Horizontal wins unless vertical is significantly more
                             guard verticalDistance < horizontalDistance * verticalThreshold else { return }
 
-                            // Prevent swiping beyond boundaries
+                            // Prevent swiping beyond boundaries and to disabled tabs
                             let swipeDirection = value.translation.width > 0 ? "right" : "left"
                             if selectedTab == 0 && swipeDirection == "right" {
                                 // Can't swipe right from Dashboard (leftmost)
                                 return
                             }
+                            if selectedTab == 1 && swipeDirection == "left" {
+                                // Can't swipe left from Gallery (Habits navigation disabled)
+                                return
+                            }
                             if selectedTab == 2 && swipeDirection == "left" {
-                                // Can't swipe left from Gallery (rightmost)
+                                // Can't swipe left from Habits (rightmost)
                                 return
                             }
 
@@ -245,11 +266,18 @@ struct ContentView: View {
                             // Swipe left = move forward (next tab)
                             if horizontalDistance < 0 && shouldChangeTab {
                                 if selectedTab < 2 {
-                                    previousTab = selectedTab
-                                    selectedTab += 1
+                                    let newTab = selectedTab + 1
+                                    // Only allow transition if valid (Dashboard ↔ Gallery only)
+                                    if isValidTabTransition(from: selectedTab, to: newTab) {
+                                        previousTab = selectedTab
+                                        selectedTab = newTab
 
-                                    // Delay re-enabling vertical scroll briefly (200ms)
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                                        // Delay re-enabling vertical scroll briefly (200ms)
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                                            isHorizontalDragging = false
+                                        }
+                                    } else {
+                                        // Invalid transition, re-enable immediately
                                         isHorizontalDragging = false
                                     }
                                 } else {
@@ -260,11 +288,18 @@ struct ContentView: View {
                             // Swipe right = move backward (previous tab)
                             else if horizontalDistance > 0 && shouldChangeTab {
                                 if selectedTab > 0 {
-                                    previousTab = selectedTab
-                                    selectedTab -= 1
+                                    let newTab = selectedTab - 1
+                                    // Only allow transition if valid (Dashboard ↔ Gallery only)
+                                    if isValidTabTransition(from: selectedTab, to: newTab) {
+                                        previousTab = selectedTab
+                                        selectedTab = newTab
 
-                                    // Delay re-enabling vertical scroll briefly (200ms)
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                                        // Delay re-enabling vertical scroll briefly (200ms)
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                                            isHorizontalDragging = false
+                                        }
+                                    } else {
+                                        // Invalid transition, re-enable immediately
                                         isHorizontalDragging = false
                                     }
                                 } else {
@@ -277,6 +312,7 @@ struct ContentView: View {
                                 isHorizontalDragging = false
                             }
                         }
+                    : nil  // No gesture on Habits tab - allows swipe-to-delete to work without conflict
                 )
 
                 // LAYER 100: Static chrome (header + nav, never animates)
@@ -367,8 +403,7 @@ struct ContentView: View {
     private var createHabitButton: some View {
         Button(action: {
             // Haptic feedback for create action
-            let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-            impactFeedback.impactOccurred()
+            HapticFeedback.medium()
 
             showingCreateActionSheet = true
         }) {
